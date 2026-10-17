@@ -1,0 +1,416 @@
+//! 用合成按键驱动应用状态机。
+
+mod common;
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use typewords_tui::app;
+
+fn press(app: &mut app::App, code: KeyCode) {
+    app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn type_str(app: &mut app::App, text: &str) {
+    for character in text.chars() {
+        press(app, KeyCode::Char(character));
+    }
+}
+
+#[test]
+fn start_practice_and_advance_by_typing() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert_eq!(app.screen, app::Screen::Home);
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    let session = app.session.as_ref().expect("session");
+    let word = session.current_word().word;
+    assert!(!word.is_empty());
+
+    type_str(&mut app, &word);
+    press(&mut app, KeyCode::Char(' '));
+
+    let advanced = app
+        .session
+        .as_ref()
+        .map(|session| session.data.index > 0 || session.complete)
+        .unwrap_or(false);
+    assert!(advanced, "正确输入后应推进到下一个单词");
+}
+
+#[test]
+fn tab_skips_word() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    let before = app.session.as_ref().unwrap().data.index;
+    press(&mut app, KeyCode::Tab);
+    let after = app.session.as_ref().unwrap().data.index;
+    assert!(after > before || app.session.as_ref().unwrap().complete);
+}
+
+#[test]
+fn practice_progress_persists_and_resumes() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    {
+        let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Tab);
+        app.save_practice_now();
+    }
+
+    let app = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(app.screen, app::Screen::Practice);
+    let session = app.session.as_ref().expect("session restored");
+    assert!(session.data.index >= 1);
+}
+
+#[test]
+fn settings_screen_toggles_persist() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    assert_eq!(app.screen, app::Screen::Settings);
+    // 第一行是练习模式，Enter 应切换
+    let before = app.boot.settings.word_practice_mode;
+    press(&mut app, KeyCode::Enter);
+    let after = app.boot.settings.word_practice_mode;
+    assert_ne!(before, after);
+    press(&mut app, KeyCode::Esc);
+
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(reloaded.boot.settings.word_practice_mode, after);
+}
+
+#[test]
+fn big_word_setting_toggles_and_persists() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    assert!(app.boot.settings.tui_big_word, "默认开启大字");
+    press(&mut app, KeyCode::Char('s'));
+    // 设置行顺序：练习模式、主题、音标、大字单词
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Down);
+    }
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.boot.settings.tui_big_word, "切换后应关闭大字");
+    press(&mut app, KeyCode::Esc);
+
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert!(!reloaded.boot.settings.tui_big_word, "设置应持久化");
+}
+
+#[test]
+fn word_to_wrong_book_on_typo() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    let word = app.session.as_ref().unwrap().current_word().word;
+    let wrong_char = if word.starts_with('x') { 'y' } else { 'x' };
+    press(&mut app, KeyCode::Char(wrong_char));
+    // 整词错误路径：补齐长度
+    let remaining = word.chars().count().saturating_sub(1);
+    for _ in 0..remaining {
+        press(&mut app, KeyCode::Char('z'));
+    }
+    let wrong_count = app.boot.base.wrong_count();
+    assert!(wrong_count > 0, "输入错误后应进入错词本");
+}
+
+#[test]
+fn quit_confirmation_sets_quit_flag() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.confirm.is_some());
+    press(&mut app, KeyCode::Enter);
+    assert!(app.quit);
+}
+#[test]
+fn free_practice_starts_free_flow_without_changing_setting() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let before = app.boot.settings.word_practice_mode;
+    press(&mut app, KeyCode::Char('f'));
+    assert_eq!(app.screen, app::Screen::Practice);
+    assert_eq!(
+        app.session.as_ref().unwrap().mode,
+        typewords_tui::domain::types::WordPracticeMode::Free
+    );
+    assert_eq!(app.boot.settings.word_practice_mode, before);
+}
+
+#[test]
+fn daily_target_keys_adjust_and_persist() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    app.boot.base.study_dict_mut().unwrap().per_day_study_number = 2;
+    press(&mut app, KeyCode::Char('+'));
+    assert_eq!(app.boot.base.study_dict().unwrap().per_day_study_number, 7);
+    press(&mut app, KeyCode::Char('-'));
+    assert_eq!(app.boot.base.study_dict().unwrap().per_day_study_number, 2);
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(
+        reloaded
+            .boot
+            .base
+            .study_dict()
+            .unwrap()
+            .per_day_study_number,
+        2
+    );
+    let _ = app;
+}
+
+#[test]
+fn number_shortcuts_navigate_shell_screens() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.screen, app::Screen::Stats);
+    press(&mut app, KeyCode::Char('2'));
+    assert_eq!(app.screen, app::Screen::DictPicker);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, app::Screen::Settings);
+    press(&mut app, KeyCode::Char('5'));
+    assert_eq!(app.screen, app::Screen::Help);
+    // Help 的“任意键返回”优先
+    press(&mut app, KeyCode::Char('1'));
+    assert_eq!(app.screen, app::Screen::Home);
+}
+
+#[test]
+fn mouse_click_starts_practice_from_home() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let area = Rect::new(0, 0, 100, 30);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::StartPractice)
+        .expect("主页应有开始学习按钮");
+    let column = target.rect.x + target.rect.width / 2;
+    let row = target.rect.y + target.rect.height / 2;
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.screen, app::Screen::Practice);
+}
+
+#[test]
+fn mouse_click_sidebar_navigates() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let area = Rect::new(0, 0, 100, 30);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::Navigate(app::Screen::DictPicker))
+        .expect("侧栏应有词库入口");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.screen, app::Screen::DictPicker);
+}
+
+#[test]
+fn mouse_wheel_moves_settings_cursor() {
+    use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    let area = Rect::new(0, 0, 100, 30);
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 50,
+            row: 15,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.settings_cursor, 1);
+}
+
+#[test]
+fn mouse_outside_confirm_cancels() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.confirm.is_some());
+    let area = Rect::new(0, 0, 100, 30);
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert!(app.confirm.is_none());
+    assert!(!app.quit);
+}
+
+#[test]
+fn custom_theme_cycles_and_renders() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+
+    let fixture = common::Fixture::new();
+    let themes = fixture.home().join("themes");
+    std::fs::create_dir_all(&themes).unwrap();
+    std::fs::write(
+        themes.join("ocean.json"),
+        r##"{
+            "name": "Ocean",
+            "base": "dark",
+            "colors": { "bg": "#0b1020", "accent": "#6fd3c7" }
+        }"##,
+    )
+    .unwrap();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert!(app.boot.themes.contains("ocean"), "应加载自定义主题");
+    press(&mut app, KeyCode::Char('s'));
+    press(&mut app, KeyCode::Down); // theme row
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Enter); // auto -> dark -> light -> high-contrast -> ocean
+    }
+    assert_eq!(app.boot.settings.theme, "ocean");
+    assert_eq!(app.theme().bg, Color::Rgb(0x0b, 0x10, 0x20));
+    app.screen = app::Screen::Home;
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    assert!(
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|cell| cell.bg == Color::Rgb(0x0b, 0x10, 0x20)),
+        "自定义主题背景应出现在渲染结果里"
+    );
+}
+#[test]
+fn mouse_click_inside_confirm_does_not_cancel() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('q'));
+    let layout = typewords_tui::ui::overlays::confirm_layout(Rect::new(0, 0, 100, 30));
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: layout.rect.x + 2,
+            row: layout.rect.y + 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, 100, 30),
+    );
+    assert!(app.confirm.is_some(), "点击确认框内部不应取消");
+}
+
+#[test]
+fn mouse_click_summary_home_button() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.summary = Some(app::SummaryData {
+        spend_ms: 30_000,
+        accuracy: 100,
+        new_words: 3,
+        review: 0,
+        wrong: 0,
+        last_learn_index: 3,
+        length: 12,
+        complete: false,
+    });
+    let area = Rect::new(0, 0, 100, 30);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::SummaryHome)
+        .expect("结算应有返回主页按钮");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert!(app.summary.is_none());
+    assert_eq!(app.screen, app::Screen::Home);
+}
+#[test]
+fn cli_theme_override_is_applied() {
+    use ratatui::style::Color;
+
+    let fixture = common::Fixture::new();
+    let mut cli = fixture.cli();
+    cli.theme = Some("light".to_string());
+    let app = app::build_for_test(fixture.paths(), cli).unwrap();
+    assert_eq!(app.boot.settings.theme, "light");
+    assert_eq!(app.theme().bg, Color::Rgb(0xf7, 0xf7, 0xf9));
+}
+
+#[test]
+fn mouse_click_daily_plus_adjusts_target() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot.base.study_dict_mut().unwrap().per_day_study_number = 2;
+    let area = Rect::new(0, 0, 100, 30);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::AdjustDaily(5))
+        .expect("主页应有每日词数 + 按钮");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.boot.base.study_dict().unwrap().per_day_study_number, 7);
+}

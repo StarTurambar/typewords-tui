@@ -1,0 +1,42 @@
+//! Type Words TUI：终端版单词练习客户端。
+//!
+//! 分层（由内到外）：
+//! - `domain`：与终端无关的领域逻辑（类型、词库、调度、流程、键入、会话）
+//! - `store`：本地存档读写
+//! - `app`：消息驱动的应用状态机
+//! - `ui`：ratatui 渲染
+//! - `cli` / `paths`：进程入口与路径解析
+
+pub mod app;
+pub mod bootstrap;
+pub mod cli;
+pub mod domain;
+pub mod paths;
+pub mod store;
+pub mod theme;
+pub mod ui;
+
+use anyhow::Result;
+
+use crate::cli::{Cli, Command};
+use crate::paths::Paths;
+
+pub fn run(cli: Cli) -> Result<()> {
+    let paths = Paths::resolve(cli.assets.clone(), cli.home.clone())?;
+
+    match cli.command {
+        Some(Command::Doctor) => cli::doctor(&paths),
+        Some(Command::Task) => cli::task_preview(&paths, &cli),
+        Some(Command::ImportDict { file }) => cli::import_dict(&paths, &file),
+        None => app::run(paths, cli),
+    }
+}
+
+/// 打印版本与解析到的路径（供 `tw --version` 之外的排障使用）。
+pub fn version_line() -> String {
+    format!(
+        "typewords-tui {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_NAME")
+    )
+}

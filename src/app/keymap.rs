@@ -1,0 +1,107 @@
+//! 键位映射：非练习页与弹层只产出 Action，不直接改状态。
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
+use super::{Action, App, Screen};
+
+pub fn overlay_action(app: &App, key: KeyEvent) -> Option<Action> {
+    if app.edit.is_some() {
+        return edit_action(key);
+    }
+    if app.confirm.is_some() {
+        return confirm_action(key);
+    }
+    if app.summary.is_some() {
+        return summary_action(key);
+    }
+    None
+}
+
+fn edit_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc => Some(Action::EditCancel),
+        KeyCode::Enter => Some(Action::EditSave),
+        KeyCode::Backspace => Some(Action::EditBackspace),
+        KeyCode::Char(character) if character.is_ascii_digit() => Some(Action::EditChar(character)),
+        _ => None,
+    }
+}
+
+fn confirm_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(Action::ConfirmAccept),
+        _ => Some(Action::ConfirmCancel),
+    }
+}
+
+fn summary_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SummaryContinue),
+        KeyCode::Char('r') => Some(Action::SummaryRelearn),
+        KeyCode::Char('q') | KeyCode::Esc => Some(Action::SummaryHome),
+        _ => None,
+    }
+}
+
+pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
+    if app.screen == Screen::Help {
+        return Some(Action::HelpBack);
+    }
+    if app.session.is_none()
+        && key.modifiers.is_empty()
+        && let KeyCode::Char(character @ '1'..='5') = key.code
+    {
+        let screen = match character {
+            '1' => Screen::Home,
+            '2' => Screen::DictPicker,
+            '3' => Screen::Stats,
+            '4' => Screen::Settings,
+            _ => Screen::Help,
+        };
+        return Some(Action::Navigate(screen));
+    }
+
+    match app.screen {
+        Screen::Home => match key.code {
+            KeyCode::Enter => Some(Action::StartPractice),
+            KeyCode::Char('f') => Some(Action::StartFreePractice),
+            KeyCode::Char('d') => Some(Action::Navigate(Screen::DictPicker)),
+            KeyCode::Char('s') => Some(Action::Navigate(Screen::Settings)),
+            KeyCode::Char('t') => Some(Action::Navigate(Screen::Stats)),
+            KeyCode::Char('m') => Some(Action::CycleMode),
+            KeyCode::Char('?') => Some(Action::Navigate(Screen::Help)),
+            KeyCode::Char('q') => Some(Action::QuitRequest),
+            KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
+            KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
+            _ => None,
+        },
+        Screen::DictPicker => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::DictMove(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::DictMove(1)),
+            KeyCode::Enter => Some(Action::ActivateDict(app.dict_cursor)),
+            KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
+            KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
+            _ => None,
+        },
+        Screen::Stats => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => Some(Action::Back),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::StatsScroll(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::StatsScroll(1)),
+            KeyCode::PageUp => Some(Action::StatsScroll(-5)),
+            KeyCode::PageDown => Some(Action::StatsScroll(5)),
+            _ => None,
+        },
+        Screen::Settings => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SettingsMove(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SettingsMove(1)),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                Some(Action::ActivateSetting(app.settings_cursor))
+            }
+            _ => None,
+        },
+        Screen::Help => Some(Action::HelpBack),
+        Screen::Practice => None,
+    }
+}
