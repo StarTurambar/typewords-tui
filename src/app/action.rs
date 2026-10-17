@@ -36,6 +36,7 @@ pub enum Action {
     EditChar(char),
     EditBackspace,
     // 帮助
+    HelpScroll(i32),
     HelpBack,
 }
 
@@ -94,6 +95,7 @@ impl App {
                     edit.buffer.pop();
                 }
             }
+            Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
         }
     }
@@ -120,7 +122,10 @@ impl App {
                 self.screen = Screen::Settings;
                 self.settings_cursor = 0;
             }
-            Screen::Help => self.screen = Screen::Help,
+            Screen::Help => {
+                self.help_scroll = 0;
+                self.screen = Screen::Help;
+            }
             Screen::Practice => {}
         }
     }
@@ -245,6 +250,11 @@ impl App {
         }
         let next = (self.settings_cursor as i32 + delta).clamp(0, count as i32 - 1);
         self.settings_cursor = next as usize;
+    }
+
+    fn scroll_help(&mut self, delta: i32) {
+        let next = (self.help_scroll as i32 + delta).max(0);
+        self.help_scroll = next.min(80) as u16;
     }
 
     fn scroll_stats(&mut self, delta: i32) {

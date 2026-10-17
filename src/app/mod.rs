@@ -160,6 +160,7 @@ pub struct App {
     pub summary: Option<SummaryData>,
     pub identify_select: Option<usize>,
     pub stats_scroll: u16,
+    pub help_scroll: u16,
     pub show_toolbar: bool,
     pub show_panel: bool,
     pub show_meta: bool,
@@ -241,6 +242,7 @@ impl App {
             summary: None,
             identify_select: None,
             stats_scroll: 0,
+            help_scroll: 0,
             show_toolbar: true,
             show_panel: false,
             show_meta: true,
@@ -818,7 +820,10 @@ impl App {
                     session.toggle_collect(&mut self.boot.base);
                 }
             }
-            KeyCode::Char('?') => self.screen = Screen::Help,
+            KeyCode::Char('?') => {
+                self.help_scroll = 0;
+                self.screen = Screen::Help;
+            }
             KeyCode::Char('\u{60}') => {
                 if let Some(session) = self.session.as_mut() {
                     session.toggle_word_simple_for_current(&mut self.boot.base);

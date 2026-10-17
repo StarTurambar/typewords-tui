@@ -45,7 +45,13 @@ fn summary_action(key: KeyEvent) -> Option<Action> {
 
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
     if app.screen == Screen::Help {
-        return Some(Action::HelpBack);
+        return match key.code {
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::HelpScroll(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::HelpScroll(1)),
+            KeyCode::PageUp => Some(Action::HelpScroll(-5)),
+            KeyCode::PageDown => Some(Action::HelpScroll(5)),
+            _ => Some(Action::HelpBack),
+        };
     }
     if app.session.is_none()
         && key.modifiers.is_empty()

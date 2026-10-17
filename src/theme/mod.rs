@@ -246,11 +246,12 @@ impl ThemeRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&ThemeSpec> {
-        self.specs.get(id)
+        self.specs.get(&id.trim().to_ascii_lowercase())
     }
 
     pub fn contains(&self, id: &str) -> bool {
-        id == "auto" || self.specs.contains_key(id)
+        let normalized = id.trim().to_ascii_lowercase();
+        normalized == "auto" || self.specs.contains_key(&normalized)
     }
 
     /// 设置页循环使用的顺序：auto + 内置 + 自定义。
@@ -261,10 +262,11 @@ impl ThemeRegistry {
     }
 
     pub fn label(&self, id: &str) -> String {
-        if id == "auto" {
+        let normalized = id.trim().to_ascii_lowercase();
+        if normalized == "auto" {
             return "自动（深色）".to_string();
         }
-        match self.specs.get(id) {
+        match self.specs.get(&normalized) {
             Some(spec) => spec.label().to_string(),
             None => format!("{id}（缺失，回退深色）"),
         }
@@ -327,5 +329,20 @@ mod tests {
         let (spec, fallback) = registry.resolve("nope");
         assert!(fallback);
         assert_eq!(spec.id, "dark");
+    }
+    #[test]
+    fn custom_theme_lookups_are_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Ocean.json"),
+            r##"{ "name": "OceanBlue", "colors": { "bg": "#010203" } }"##,
+        )
+        .unwrap();
+        let registry = ThemeRegistry::load(dir.path());
+        assert!(registry.contains("Ocean"));
+        assert_eq!(registry.label("Ocean"), "OceanBlue");
+        let (spec, fallback) = registry.resolve("Ocean");
+        assert!(!fallback);
+        assert_eq!(spec.id, "ocean");
     }
 }

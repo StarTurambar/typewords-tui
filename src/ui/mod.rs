@@ -21,7 +21,7 @@ pub mod widgets;
 pub use theme::Theme;
 
 use ratatui::Frame;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
 use crate::app::{App, Screen};
@@ -45,6 +45,14 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),
         Screen::Help => help::render(app, frame, area, &theme),
+    }
+
+    let modal_open = app.summary.is_some() || app.edit.is_some() || app.confirm.is_some();
+    if modal_open {
+        // 无 alpha 的终端里用 DIM 模拟遮罩；弹层自身会在 Clear 后恢复高亮。
+        for cell in frame.buffer_mut().content.iter_mut() {
+            cell.modifier.insert(Modifier::DIM);
+        }
     }
 
     if let Some(summary) = &app.summary {

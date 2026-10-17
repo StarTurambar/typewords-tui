@@ -414,3 +414,16 @@ fn mouse_click_daily_plus_adjusts_target() {
     );
     assert_eq!(app.boot.base.study_dict().unwrap().per_day_study_number, 7);
 }
+#[test]
+fn help_screen_scrolls_without_losing_any_key() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, app::Screen::Help);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.help_scroll, 1);
+    press(&mut app, KeyCode::PageDown);
+    assert_eq!(app.help_scroll, 6);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, app::Screen::Home);
+}

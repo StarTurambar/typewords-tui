@@ -440,7 +440,14 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
                 crate::domain::flow::navigator::NoticeLevel::Info => theme.accent_alt,
             }),
         )),
-        None => Line::from(footer_hints(hints_for(app.screen), hint_width, theme)),
+        None => {
+            let hints = if app.screen == Screen::Home && hint_width < 52 {
+                HOME_COMPACT_HINTS
+            } else {
+                hints_for(app.screen)
+            };
+            Line::from(footer_hints(hints, hint_width, theme))
+        }
     };
     frame.render_widget(Paragraph::new(left), footer);
     if footer.width as usize > version_width + 2 {
@@ -451,6 +458,15 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
         );
     }
 }
+
+/// 60 列左右时优先保留开始 / 自由 / 词库 / 帮助 / 退出。
+const HOME_COMPACT_HINTS: &[(&str, &str)] = &[
+    ("enter", "开始"),
+    ("f", "自由"),
+    ("d", "词库"),
+    ("?", "帮助"),
+    ("q", "退出"),
+];
 
 pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
     match screen {
@@ -466,7 +482,7 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::DictPicker => &[("enter", "选择"), ("+/-", "每日词数"), ("esc", "返回")],
         Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
-        Screen::Help => &[("任意键", "返回")],
+        Screen::Help => &[("↑↓", "滚动"), ("其它键", "返回")],
         Screen::Practice => &[],
     }
 }

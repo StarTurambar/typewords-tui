@@ -279,7 +279,10 @@ fn render_row(
     if show_id && !id.is_empty() {
         used += 1 + display_width(&id);
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(id, Style::default().fg(theme.dim)));
+        spans.push(Span::styled(
+            id,
+            Style::default().fg(if selected { theme.fg } else { theme.muted }),
+        ));
     }
 
     let gap = inner_width.saturating_sub(used + tail_width);

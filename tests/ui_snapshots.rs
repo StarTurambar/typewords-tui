@@ -249,3 +249,16 @@ fn mouse_target_rects_match_rendered_text() {
     let row = lines.get(dicts.rect.y as usize).copied().unwrap_or("");
     assert!(row.contains("词库"), "词库入口命中行应有文案: {row:?}");
 }
+#[test]
+fn help_scrolls_at_min_size() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    let first = render_text(&app, 80, 24);
+    assert!(first.contains("练习"));
+    app.help_scroll = 20;
+    let scrolled = render_text(&app, 80, 24);
+    assert!(scrolled.contains("Shift+拖拽") || scrolled.contains("Shift"));
+    assert!(scrolled.contains("导航/查看"));
+    assert!(scrolled.contains("↓") || scrolled.contains("↑"));
+}

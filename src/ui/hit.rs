@@ -53,6 +53,7 @@ pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32)
         Screen::DictPicker => Some(Action::DictMove(delta)),
         Screen::Settings => Some(Action::SettingsMove(delta)),
         Screen::Stats => Some(Action::StatsScroll(delta)),
+        Screen::Help => Some(Action::HelpScroll(delta)),
         _ => None,
     }
 }

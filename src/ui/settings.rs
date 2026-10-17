@@ -197,8 +197,8 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, index: usize, theme: &Th
     }
 
     let inner_x = rect.x.saturating_add(2);
-    // 右侧留一列给 ↑/↓ 滚动指示，避免压住数值。
-    let inner_width = rect.width.saturating_sub(4) as usize;
+    // 右侧留出空白与 ↑/↓ 指示列，避免指示符号被读成数值的一部分。
+    let inner_width = rect.width.saturating_sub(5) as usize;
     if inner_width == 0 {
         return;
     }

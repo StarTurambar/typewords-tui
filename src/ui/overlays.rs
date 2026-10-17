@@ -82,9 +82,25 @@ pub fn confirm_layout(area: Rect) -> ConfirmLayout {
     }
 }
 
+fn clear_modal_backdrop(frame: &mut Frame, area: Rect, rect: Rect, theme: &Theme) {
+    let margin = 2u16;
+    let left = rect.x.saturating_sub(margin).max(area.x);
+    let top = rect.y.saturating_sub(margin).max(area.y);
+    let right = rect.right().saturating_add(margin).min(area.right());
+    let bottom = rect.bottom().saturating_add(margin).min(area.bottom());
+    let backdrop = Rect::new(
+        left,
+        top,
+        right.saturating_sub(left),
+        bottom.saturating_sub(top),
+    );
+    frame.render_widget(Clear, backdrop);
+    widgets::paint_rect(frame, backdrop, theme.bg);
+}
+
 pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &SummaryData) {
     let layout = summary_layout(area);
-    frame.render_widget(Clear, layout.rect);
+    clear_modal_backdrop(frame, area, layout.rect, theme);
     widgets::paint_rect(frame, layout.rect, theme.panel);
     let percent = if summary.length == 0 {
         0
@@ -178,7 +194,7 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
 
 pub fn render_edit(frame: &mut Frame, area: Rect, theme: &Theme, edit: &EditState) {
     let rect = edit_layout(area);
-    frame.render_widget(Clear, rect);
+    clear_modal_backdrop(frame, area, rect, theme);
     widgets::paint_rect(frame, rect, theme.panel);
     let label = format!("修改 {}（Enter 保存 · Esc 取消）", edit_label(edit));
     let lines = vec![
@@ -201,7 +217,7 @@ pub fn render_edit(frame: &mut Frame, area: Rect, theme: &Theme, edit: &EditStat
 
 pub fn render_confirm(frame: &mut Frame, area: Rect, theme: &Theme, confirm: &ConfirmState) {
     let layout = confirm_layout(area);
-    frame.render_widget(Clear, layout.rect);
+    clear_modal_backdrop(frame, area, layout.rect, theme);
     widgets::paint_rect(frame, layout.rect, theme.panel);
     let message = fit_text(&confirm.message, layout.inner.width as usize);
     let lines = vec![

@@ -1,6 +1,6 @@
 //! 帮助页：快捷键总览。
 //!
-//! 宽屏分两栏（练习 / 导航），窄屏单栏；条目按重要度排序，
+//! 宽屏分两栏（练习 / 导航），窄屏单栏并支持 ↑↓ 滚动；
 //! 高度不足时优先显示前面的常用按键。
 
 use ratatui::Frame;
@@ -71,19 +71,19 @@ const NAVIGATION: &[HelpEntry] = &[
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Help, |frame, content| {
-        if content.width >= TWO_COLUMN_MIN_WIDTH {
-            render_columns(frame, content, theme);
+        if content.width >= TWO_COLUMN_MIN_WIDTH && content.height >= 20 {
+            render_columns(frame, content, theme, app.help_scroll);
         } else {
-            render_single(frame, content, theme);
+            render_single(frame, content, theme, app.help_scroll);
         }
     });
 }
 
-fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme) {
+fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
     // 两栏之间：1 列分隔线 + 1 列留白。
     let left_width = content.width.saturating_sub(2) / 2;
     if left_width < 26 || content.height == 0 {
-        render_single(frame, content, theme);
+        render_single(frame, content, theme, scroll);
         return;
     }
     let left = Rect::new(content.x, content.y, left_width, content.height);
@@ -95,10 +95,10 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme) {
         content.height,
     );
 
-    render_entries(frame, left, PRACTICE, theme);
+    render_entries(frame, left, PRACTICE, theme, 0);
     let mut right_entries: Vec<HelpEntry> = NAVIGATION.to_vec();
     push_mouse_notes(&mut right_entries);
-    render_entries(frame, right, &right_entries, theme);
+    render_entries(frame, right, &right_entries, theme, 0);
 
     for y in content.y..content.bottom() {
         frame.render_widget(
@@ -108,12 +108,38 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme) {
     }
 }
 
-fn render_single(frame: &mut Frame, content: Rect, theme: &Theme) {
+fn render_single(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
     let mut entries: Vec<HelpEntry> = Vec::new();
     entries.extend_from_slice(PRACTICE);
     entries.extend_from_slice(NAVIGATION);
     push_mouse_notes(&mut entries);
-    render_entries(frame, content, &entries, theme);
+    let list = Rect::new(
+        content.x,
+        content.y,
+        content.width.saturating_sub(2).max(1),
+        content.height,
+    );
+    let visible = list.height as usize;
+    let max_offset = entries.len().saturating_sub(visible);
+    let offset = (scroll as usize).min(max_offset);
+    render_entries(frame, list, &entries, theme, offset);
+    if offset > 0 && content.width > 0 {
+        frame.render_widget(
+            Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
+            Rect::new(content.right().saturating_sub(1), content.y, 1, 1),
+        );
+    }
+    if offset < max_offset && content.width > 0 {
+        frame.render_widget(
+            Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
+            Rect::new(
+                content.right().saturating_sub(1),
+                content.bottom().saturating_sub(1),
+                1,
+                1,
+            ),
+        );
+    }
 }
 
 fn push_mouse_notes(entries: &mut Vec<HelpEntry>) {
@@ -123,13 +149,19 @@ fn push_mouse_notes(entries: &mut Vec<HelpEntry>) {
     }
 }
 
-fn render_entries(frame: &mut Frame, area: Rect, entries: &[HelpEntry], theme: &Theme) {
+fn render_entries(
+    frame: &mut Frame,
+    area: Rect,
+    entries: &[HelpEntry],
+    theme: &Theme,
+    offset: usize,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let width = area.width as usize;
     let mut y = area.y;
-    for entry in entries {
+    for entry in entries.get(offset..).unwrap_or(&[]) {
         if y >= area.bottom() {
             break;
         }

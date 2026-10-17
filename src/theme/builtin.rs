@@ -48,8 +48,8 @@ pub fn builtin_specs() -> Vec<ThemeSpec> {
                 element: rgb(0xececf2),
                 border: rgb(0xd9dae3),
                 fg: rgb(0x21222b),
-                muted: rgb(0x5d6070),
-                dim: rgb(0x8b8e9e),
+                muted: rgb(0x4f5262),
+                dim: rgb(0x656a7a),
                 accent: rgb(0x93418a),
                 accent_alt: rgb(0x176f75),
                 warn: rgb(0x8a6100),
@@ -65,18 +65,19 @@ pub fn builtin_specs() -> Vec<ThemeSpec> {
             colors: ThemeColors {
                 bg: ansi(AnsiColor::Black),
                 panel: ansi(AnsiColor::Black),
-                element: ansi(AnsiColor::DarkGray),
+                // 高对比用纯黑块面，保证亮色文字在块面上仍有足够对比度；
+                // 选中态靠左侧强调条 + 粗体标识。
+                element: ansi(AnsiColor::Black),
                 border: ansi(AnsiColor::White),
                 fg: ansi(AnsiColor::White),
                 muted: ansi(AnsiColor::Gray),
-                // 高对比下 element 也是 DarkGray；dim 必须更亮，否则提示文字会消失。
                 dim: ansi(AnsiColor::Gray),
                 accent: ansi(AnsiColor::LightMagenta),
                 accent_alt: ansi(AnsiColor::LightCyan),
                 warn: ansi(AnsiColor::LightYellow),
                 good: ansi(AnsiColor::LightGreen),
                 bad: ansi(AnsiColor::LightRed),
-                selection: ansi(AnsiColor::DarkGray),
+                selection: ansi(AnsiColor::Black),
             },
         },
     ]
