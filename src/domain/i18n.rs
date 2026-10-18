@@ -111,6 +111,7 @@ pub fn tr(key: &str) -> String {
         "ignore_simple_word" => "忽略简单词",
         "auto_next_word" => "自动下一词",
         "repeat_count" => "重复次数",
+        "repeat_custom_count" => "重复次数(自定义)",
         "wait_time" => "切词等待(ms)",
         "space_cooldown" => "空格冷却(ms)",
         "input_wrong_clear" => "错误即清空",

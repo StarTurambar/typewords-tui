@@ -56,6 +56,11 @@ pub enum LoadStatus {
         found: u32,
         expected: u32,
     },
+    /// 存档版本不是本程序支持的版本（过低或不兼容），已忽略且不移动文件。
+    UnsupportedVersion {
+        found: u32,
+        expected: u32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -77,6 +82,9 @@ impl<T> Loaded<T> {
             }
             LoadStatus::VersionTooNew { found, expected } => Some(format!(
                 "存档版本过高（{found} > {expected}），本次不会覆盖，请升级后使用"
+            )),
+            LoadStatus::UnsupportedVersion { found, expected } => Some(format!(
+                "存档版本不受支持（{found} != {expected}），已忽略；下次保存会覆盖"
             )),
             _ => None,
         }
@@ -221,9 +229,10 @@ impl FileStore {
                 if version != PRACTICE_CACHE_VERSION {
                     Loaded {
                         value: None,
-                        status: LoadStatus::Corrupt(format!(
-                            "练习缓存版本不支持（{version} != {PRACTICE_CACHE_VERSION}）"
-                        )),
+                        status: LoadStatus::UnsupportedVersion {
+                            found: version,
+                            expected: PRACTICE_CACHE_VERSION,
+                        },
                         updated_at,
                     }
                 } else {

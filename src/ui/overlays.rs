@@ -243,6 +243,7 @@ fn edit_label(edit: &EditState) -> String {
         crate::app::EditTarget::PerDay => tr("daily_words"),
         crate::app::EditTarget::Ratio => tr("word_review_ratio"),
         crate::app::EditTarget::Repeat => tr("repeat_count"),
+        crate::app::EditTarget::RepeatCustom => tr("repeat_custom_count"),
         crate::app::EditTarget::WaitMs => tr("wait_time"),
         crate::app::EditTarget::SpaceCooldown => tr("space_cooldown"),
         crate::app::EditTarget::EasyLimit => tr("fsrs_easy_limit"),

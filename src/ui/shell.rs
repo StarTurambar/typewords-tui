@@ -499,10 +499,11 @@ pub fn toast_line(app: &App, theme: &Theme) -> Line<'static> {
                 crate::domain::flow::navigator::NoticeLevel::Info => theme.accent_alt,
             }),
         )),
-        None => Line::from(Span::styled(
+        None if app.settings().show_usage_tips => Line::from(Span::styled(
             "提示：Ctrl+C 退出练习并保存；? 查看快捷键",
             Style::default().fg(theme.dim),
         )),
+        None => Line::from(""),
     }
 }
 

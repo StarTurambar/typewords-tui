@@ -274,9 +274,13 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     if let Some(object) = value.as_object_mut() {
         object.remove("extra");
     }
-    let existing = user_catalog
-        .iter()
-        .position(|item| item.get("id").map(|id| id.to_string()) == Some(resource.id_string()));
+    // 判重必须按解析后的 id 语义比较：serde_json::Value::to_string() 会给字符串 id
+    // 带上引号（"foo" != foo），旧实现因此永远匹配不上，重复导入会追加重复目录项。
+    let existing = user_catalog.iter().position(|item| {
+        serde_json::from_value::<DictResource>(item.clone())
+            .map(|entry| entry.id_string() == resource.id_string())
+            .unwrap_or(false)
+    });
     match existing {
         Some(index) => user_catalog[index] = value,
         None => user_catalog.push(value),

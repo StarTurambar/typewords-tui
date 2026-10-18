@@ -34,10 +34,6 @@ impl Paths {
         Ok(())
     }
 
-    pub fn log_file(&self) -> PathBuf {
-        self.home.join("logs").join("tui.log")
-    }
-
     /// 用户自定义主题目录：`<home>/themes/*.json`。
     pub fn themes_dir(&self) -> PathBuf {
         self.home.join("themes")

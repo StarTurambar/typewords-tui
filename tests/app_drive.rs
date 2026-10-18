@@ -427,3 +427,76 @@ fn help_screen_scrolls_without_losing_any_key() {
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.screen, app::Screen::Home);
 }
+#[test]
+fn newer_setting_version_is_not_overwritten() {
+    let fixture = common::Fixture::new();
+    let raw = r#"{"version":99,"val":{"wordReviewRatio":5}}"#;
+    std::fs::write(fixture.home().join("setting.json"), raw).unwrap();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert_eq!(
+        app.boot.settings.word_review_ratio, 3,
+        "版本过高时回退默认值"
+    );
+
+    app.boot.settings.word_review_ratio = 7;
+    app.save_settings_now();
+    app.boot.settings.theme = "light".to_string();
+    press(&mut app, KeyCode::Char('q'));
+    press(&mut app, KeyCode::Char('y'));
+
+    let after = std::fs::read_to_string(fixture.home().join("setting.json")).unwrap();
+    assert_eq!(after, raw, "版本过高的 setting.json 不应被覆盖");
+}
+
+#[test]
+fn repeat_custom_count_can_be_edited_and_persists() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    let index = app::SETTING_ROWS
+        .iter()
+        .position(|(key, _)| *key == "repeat_custom_count")
+        .expect("设置页应有 repeat_custom_count 行");
+    app.apply_action(app::Action::ActivateSetting(index));
+    assert!(app.edit.is_some(), "数字项应打开输入弹层");
+    app.apply_action(app::Action::EditBackspace);
+    app.apply_action(app::Action::EditChar('5'));
+    app.apply_action(app::Action::EditSave);
+    assert_eq!(app.boot.settings.repeat_custom_count, Some(5));
+
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(reloaded.boot.settings.repeat_custom_count, Some(5));
+    assert_eq!(reloaded.boot.settings.effective_repeat_count(), 1);
+
+    let mut settings = reloaded.boot.settings.clone();
+    settings.repeat_count = 100;
+    assert_eq!(settings.effective_repeat_count(), 5, "100 是自定义次数标记");
+}
+
+#[test]
+fn cross_day_statistics_count_once_in_today_stats() {
+    use typewords_tui::domain::types::Statistics;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let today_ms = chrono::Local::now().timestamp_millis();
+    let make = |spend: i64, role: &str| Statistics {
+        start_date: today_ms,
+        spend,
+        total: 10,
+        new_words: 6,
+        review: 4,
+        wrong: 2,
+        session_role: Some(role.to_string()),
+        ..Statistics::default()
+    };
+    let dict = app.boot.base.study_dict_mut().unwrap();
+    dict.statistics.push(make(60_000, "start"));
+    dict.statistics.push(make(30_000, "end"));
+
+    app.refresh_stats();
+    assert_eq!(app.today_spend, 90_000, "两天的时长都要计入");
+    assert_eq!(app.today_new, 6, "新词计数只应算一次");
+    assert_eq!(app.today_review, 4, "复习计数只应算一次");
+    assert_eq!(app.today_wrong, 2, "错词计数只应算一次");
+}

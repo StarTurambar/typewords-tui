@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::TimeZone;
 use ratatui::Frame;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -54,6 +53,7 @@ pub enum EditTarget {
     PerDay,
     Ratio,
     Repeat,
+    RepeatCustom,
     WaitMs,
     SpaceCooldown,
     EasyLimit,
@@ -88,6 +88,10 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ("ignore_simple_word", SettingKind::Bool),
     ("auto_next_word", SettingKind::Bool),
     ("repeat_count", SettingKind::Number(EditTarget::Repeat)),
+    (
+        "repeat_custom_count",
+        SettingKind::Number(EditTarget::RepeatCustom),
+    ),
     ("wait_time", SettingKind::Number(EditTarget::WaitMs)),
     (
         "space_cooldown",
@@ -320,6 +324,9 @@ impl App {
     }
 
     pub fn save_settings_now(&mut self) {
+        if self.boot.readonly_settings {
+            return;
+        }
         if let Err(err) = self.store.save_settings(&self.boot.settings) {
             self.toast(NoticeLevel::Error, format!("保存设置失败: {err}"));
         }
@@ -359,32 +366,18 @@ impl App {
 
     pub fn refresh_stats(&mut self) {
         let today = chrono::Local::now().date_naive();
-        let mut spend = 0i64;
-        let mut new_words = 0usize;
-        let mut review = 0usize;
-        let mut wrong = 0usize;
-        for dict in &self.boot.base.word.book_list {
-            for item in &dict.statistics {
-                let day = chrono::Local
-                    .timestamp_millis_opt(item.start_date)
-                    .single()
-                    .map(|dt| dt.date_naive())
-                    .unwrap_or(today);
-                if day == today {
-                    spend += item.spend;
-                    new_words += item.new_words;
-                    review += item.review;
-                    wrong += item.wrong;
-                }
-            }
-        }
+        // 复用按日聚合：跨天会话的计数只归开始日，避免重复累计。
+        let totals = crate::domain::statistics::daily_totals(&self.boot.base)
+            .get(&today)
+            .copied()
+            .unwrap_or_default();
+        self.today_spend = totals.spend;
+        self.today_new = totals.new_words;
+        self.today_review = totals.review;
+        self.today_wrong = totals.wrong;
         if self.session.is_some() && self.summary.is_none() {
-            spend += self.stat.spend;
+            self.today_spend += self.stat.spend;
         }
-        self.today_spend = spend;
-        self.today_new = new_words;
-        self.today_review = review;
-        self.today_wrong = wrong;
     }
 
     pub fn refresh_task_preview(&mut self) {
@@ -500,6 +493,7 @@ impl App {
             &self.boot.settings,
             &mut self.stat,
             now,
+            &mut self.rng,
         );
         let total = self.stat.total;
         let wrong = self.stat.wrong;
@@ -921,6 +915,7 @@ impl App {
                 .unwrap_or(20),
             EditTarget::Ratio => settings.word_review_ratio,
             EditTarget::Repeat => settings.repeat_count,
+            EditTarget::RepeatCustom => settings.repeat_custom_count.unwrap_or(1),
             EditTarget::WaitMs => settings.wait_time_for_change_word,
             EditTarget::SpaceCooldown => settings.space_cooldown_time,
             EditTarget::EasyLimit => settings.fsrs_easy_limit,
@@ -946,6 +941,9 @@ impl App {
                 match target {
                     EditTarget::Ratio => settings.word_review_ratio = value.clamp(0, 10),
                     EditTarget::Repeat => settings.repeat_count = value.clamp(1, 100),
+                    EditTarget::RepeatCustom => {
+                        settings.repeat_custom_count = Some(value.clamp(1, 100))
+                    }
                     EditTarget::WaitMs => {
                         settings.wait_time_for_change_word = value.clamp(0, 10_000)
                     }
@@ -977,8 +975,11 @@ impl App {
         if self.screen == Screen::Practice && self.session.is_some() {
             if now - self.last_timer_tick >= 1000 {
                 self.last_timer_tick = now;
+                let spend_before = self.stat.spend;
                 timer::tick(&mut self.stat, self.last_activity, now);
-                if self.stat.spend % 30_000 == 0 && self.stat.spend > 0 {
+                // 只在本次 tick 真的累计了时长且恰好跨过 30 秒整数倍时调度，
+                // 避免暂停在整数倍处时每个 tick 重复请求防抖保存。
+                if should_schedule_periodic_save(spend_before, self.stat.spend) {
                     self.schedule_practice_save();
                 }
             }
@@ -1118,4 +1119,25 @@ pub fn aggregate_stats(base: &BaseState) -> Vec<(String, i64, usize, usize, usiz
             )
         })
         .collect()
+}
+
+/// 练习计时是否在本次 tick 跨过了 30 秒整数倍（用于周期保存）。
+fn should_schedule_periodic_save(previous_spend: i64, spend: i64) -> bool {
+    spend != previous_spend && spend > 0 && spend % 30_000 == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_schedule_periodic_save;
+
+    #[test]
+    fn periodic_save_triggers_only_when_spend_advances() {
+        assert!(should_schedule_periodic_save(29_000, 30_000));
+        assert!(should_schedule_periodic_save(59_000, 60_000));
+        // 暂停/空闲时 spend 不变，不应反复调度。
+        assert!(!should_schedule_periodic_save(30_000, 30_000));
+        // 非整数倍不触发。
+        assert!(!should_schedule_periodic_save(30_000, 31_000));
+        assert!(!should_schedule_periodic_save(0, 0));
+    }
 }

@@ -30,10 +30,15 @@ pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
             };
             let entry = map.entry(day).or_default();
             entry.spend += item.spend;
-            entry.total += item.total;
-            entry.new_words += item.new_words;
-            entry.review += item.review;
-            entry.wrong += item.wrong;
+            // 跨天会话的每条记录都重复携带整场会话的计数（与 Web 存档一致）。
+            // 计数只归到开始日（single / start / 无角色的旧记录），中间日与结束日只计时长，
+            // 否则累计统计会把同一场会话的新词/复习/错词重复累加多次。
+            if !matches!(item.session_role.as_deref(), Some("middle") | Some("end")) {
+                entry.total += item.total;
+                entry.new_words += item.new_words;
+                entry.review += item.review;
+                entry.wrong += item.wrong;
+            }
         }
     }
     map
@@ -132,5 +137,94 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
             session_role: Some("single".to_string()),
             title: None,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::types::Dict;
+    use chrono::TimeZone;
+
+    fn local_noon(year: i32, month: u32, day: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(year, month, day, 12, 0, 0)
+            .single()
+            .expect("valid local date")
+            .timestamp_millis()
+    }
+
+    fn record(start_date: i64, spend: i64, role: Option<&str>) -> Statistics {
+        Statistics {
+            start_date,
+            spend,
+            total: 10,
+            new_words: 6,
+            review: 4,
+            wrong: 2,
+            session_role: role.map(str::to_string),
+            ..Statistics::default()
+        }
+    }
+
+    fn base_with(records: Vec<Statistics>) -> BaseState {
+        let dict = Dict {
+            statistics: records,
+            ..Dict::default()
+        };
+        let mut base = BaseState::default();
+        base.word.book_list.push(dict);
+        base
+    }
+
+    #[test]
+    fn cross_day_session_counts_are_not_duplicated() {
+        let day1 = local_noon(2026, 1, 10);
+        let day2 = local_noon(2026, 1, 11);
+        let base = base_with(vec![
+            record(day1, 60_000, Some("start")),
+            record(day2, 30_000, Some("end")),
+        ]);
+
+        let totals = daily_totals(&base);
+        let first = totals
+            .get(&NaiveDate::from_ymd_opt(2026, 1, 10).unwrap())
+            .copied()
+            .expect("start 日有记录");
+        let second = totals
+            .get(&NaiveDate::from_ymd_opt(2026, 1, 11).unwrap())
+            .copied()
+            .expect("end 日有时长");
+        assert_eq!(first.spend, 60_000);
+        assert_eq!(second.spend, 30_000);
+        assert_eq!(first.new_words, 6);
+        assert_eq!(second.new_words, 0, "结束日不重复累计新词");
+
+        let sum = totals.values().fold(DayTotals::default(), |mut acc, day| {
+            acc.spend += day.spend;
+            acc.total += day.total;
+            acc.new_words += day.new_words;
+            acc.review += day.review;
+            acc.wrong += day.wrong;
+            acc
+        });
+        assert_eq!(sum.spend, 90_000);
+        assert_eq!(sum.total, 10);
+        assert_eq!(sum.new_words, 6);
+        assert_eq!(sum.review, 4);
+        assert_eq!(sum.wrong, 2);
+    }
+
+    #[test]
+    fn single_and_legacy_records_still_count() {
+        let day1 = local_noon(2026, 2, 1);
+        let day2 = local_noon(2026, 2, 2);
+        let base = base_with(vec![
+            record(day1, 10_000, Some("single")),
+            record(day2, 20_000, None),
+        ]);
+        let totals = daily_totals(&base);
+        assert_eq!(totals.values().map(|day| day.total).sum::<usize>(), 20);
+        assert_eq!(totals.values().map(|day| day.new_words).sum::<usize>(), 12);
     }
 }

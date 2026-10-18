@@ -122,6 +122,19 @@ fn tiny_terminal_shows_hint() {
 }
 
 #[test]
+fn usage_tips_can_be_hidden() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.start_practice();
+    let with_tips = render_text(&app, 100, 30);
+    assert!(with_tips.contains("提示："), "默认应显示使用提示");
+
+    app.boot.settings.show_usage_tips = false;
+    let without_tips = render_text(&app, 100, 30);
+    assert!(!without_tips.contains("提示："), "关闭后不应显示使用提示");
+}
+
+#[test]
 fn cjk_text_wraps_within_width() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();

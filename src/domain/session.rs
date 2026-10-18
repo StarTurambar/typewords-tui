@@ -636,6 +636,7 @@ impl PracticeSession {
         settings: &SettingState,
         stat: &mut PracticeState,
         now: i64,
+        rng: &mut Rng,
     ) {
         stat.wrong = self.data.all_wrong_words.len();
         if self.mode != WordPracticeMode::Shuffle {
@@ -665,7 +666,7 @@ impl PracticeSession {
                 .copied()
                 .unwrap_or_else(|| scheduler.grade_by_wrong_times(Some(wrong_times)));
             let previous = base.fsrs_data.get(&word).cloned();
-            let card = scheduler.next_card(previous.as_ref(), rating, chrono::Utc::now());
+            let card = scheduler.next_card(previous.as_ref(), rating, chrono::Utc::now(), rng);
             base.fsrs_data.insert(word, card);
         }
     }

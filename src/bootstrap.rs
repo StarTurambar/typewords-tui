@@ -17,6 +17,8 @@ pub struct Bootstrapped {
     pub notices: Vec<String>,
     /// 词典存档版本过高时为 true：本次运行不覆盖 dict.json。
     pub readonly_dict: bool,
+    /// 设置存档版本过高时为 true：本次运行不覆盖 setting.json。
+    pub readonly_settings: bool,
 }
 
 impl Bootstrapped {
@@ -106,6 +108,7 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
 
     let catalog = Catalog::load(paths)?;
     let readonly_dict = matches!(dict_loaded.status, LoadStatus::VersionTooNew { .. });
+    let readonly_settings = matches!(setting_loaded.status, LoadStatus::VersionTooNew { .. });
     let themes = ThemeRegistry::load(&paths.themes_dir());
     notices.extend(themes.warnings().iter().cloned());
 
@@ -117,6 +120,7 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
         themes,
         notices,
         readonly_dict,
+        readonly_settings,
     };
 
     if let Some(id) = dict_id {

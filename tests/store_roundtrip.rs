@@ -96,3 +96,27 @@ fn practice_cache_remove_and_exists() {
     store.remove_practice().unwrap();
     assert!(!store.practice_exists());
 }
+
+#[test]
+fn practice_cache_unsupported_version_is_ignored_without_moving_file() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    std::fs::write(
+        store.file_path("practice-word.json"),
+        r#"{"version":1,"val":null}"#,
+    )
+    .unwrap();
+
+    let loaded = store.load_practice();
+    assert!(matches!(
+        loaded.status,
+        LoadStatus::UnsupportedVersion {
+            found: 1,
+            expected: 2
+        }
+    ));
+    assert!(loaded.value.is_none());
+    let notice = loaded.notice().expect("应有提示");
+    assert!(notice.contains("不受支持"));
+    assert!(store.practice_exists(), "不受支持的缓存不应被移动或删除");
+}

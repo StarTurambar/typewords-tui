@@ -278,6 +278,7 @@ fn number_text(target: EditTarget, value: i64) -> String {
     match target {
         EditTarget::Ratio => value.to_string(),
         EditTarget::Repeat => format!("{value} 次"),
+        EditTarget::RepeatCustom => format!("{value} 次"),
         EditTarget::WaitMs | EditTarget::SpaceCooldown => format!("{value} ms"),
         EditTarget::EasyLimit | EditTarget::GoodLimit | EditTarget::HardLimit => value.to_string(),
         EditTarget::Retention => format!("{value}%"),
