@@ -5,6 +5,10 @@ edition = "2024"
 rust-version = "1.90"
 description = "Type Words TUI - terminal word practice client"
 license = "GPL-3.0"
+readme = "README.md"
+repository = "https://github.com/StarTurambar/typewords-tui"
+keywords = ["tui", "terminal", "vocabulary", "fsrs", "english"]
+categories = ["command-line-utilities", "education"]
 publish = false
 
 [lib]

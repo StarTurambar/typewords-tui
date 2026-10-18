@@ -1,0 +1,11 @@
+# Rust build output
+/target/
+/dist/
+
+# Logs
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
