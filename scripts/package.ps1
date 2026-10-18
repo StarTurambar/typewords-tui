@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  构建并打包 Windows release：tw.exe + assets/ + README.md + LICENSE。
+  构建并打包 Windows release：tw.exe + assets/ + docs/ + README.md + LICENSE。
 .EXAMPLE
   pwsh -File scripts/package.ps1
 #>
@@ -26,6 +26,7 @@ try {
 
   Copy-Item (Join-Path $root 'target/release/tw.exe') $stage
   Copy-Item (Join-Path $root 'assets') $stage -Recurse
+  Copy-Item (Join-Path $root 'docs') $stage -Recurse
   Copy-Item (Join-Path $root 'README.md'), (Join-Path $root 'LICENSE') $stage
 
   $zip = Join-Path $dist "$name.zip"

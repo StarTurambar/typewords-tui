@@ -24,6 +24,7 @@ jobs:
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           Copy-Item target/release/tw.exe $stage
           Copy-Item -Recurse assets $stage/assets
+          Copy-Item -Recurse docs $stage/docs
           Copy-Item README.md, LICENSE $stage
           Compress-Archive -Path $stage -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
