@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a TypeWords TUI snapshot (JSON from tui/examples/shot.rs) to a PNG.
+"""Render a TypeWords TUI snapshot (JSON from examples/shot.rs) to a PNG.
 
 The JSON contract (produced by ``cargo run --example shot``)::
 
@@ -32,11 +32,11 @@ When a glyph is missing from the primary font the CJK font is tried.
 Common usage::
 
     # bundled Python (Pillow) from the DSH runtime, defaults: scale 2, dark theme
-    python tui/tools/render-snapshot.py %TEMP%\\home.json
-    # -> tui/target/screenshots/home-120x40-dark.png
+    python tools/render-snapshot.py %TEMP%\\home.json
+    # -> target/screenshots/home-120x40-dark.png
 
-    python tui/tools/render-snapshot.py %TEMP%\\home.json out\\home.png --scale 3
-    python tui/tools/render-snapshot.py - --out snap.png < snap.json
+    python tools/render-snapshot.py %TEMP%\\home.json out\\home.png --scale 3
+    python tools/render-snapshot.py - --out snap.png < snap.json
 
 Only Pillow is required (Pillow >= 9, tested with 12.3).
 """
@@ -725,7 +725,7 @@ def build_arg_parser():
         description="Render a TypeWords TUI shot JSON snapshot to a PNG.",
         epilog=(
             "example: render-snapshot.py %TEMP%\\home.json  "
-            "-> tui/target/screenshots/home-120x40-dark.png"
+            "-> target/screenshots/home-120x40-dark.png"
         ),
     )
     parser.add_argument("input", help="snapshot JSON path, or '-' for stdin")

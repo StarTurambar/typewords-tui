@@ -5,8 +5,6 @@
 //!   typed : 预先键入的字符（用于检查已输入/错误状态）
 //!   big   : big=2 倍大字（默认），plain=强制 1 倍
 
-use std::path::PathBuf;
-
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -29,8 +27,12 @@ fn main() {
         .unwrap_or(40);
     let big = args.get(5).map(|value| value != "plain").unwrap_or(true);
 
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let assets = manifest.parent().unwrap().join("public");
+    let Some(assets) = typewords_tui::paths::locate_assets(None) else {
+        eprintln!(
+            "找不到词库资源目录：请在仓库根运行（需要 assets/list/word.json），或设置 TYPEWORDS_ASSETS 指向资源目录"
+        );
+        std::process::exit(1);
+    };
     let home = std::env::temp_dir().join(format!("tw-dump-home-{mode}"));
     let _ = std::fs::remove_dir_all(&home);
     let paths = Paths {

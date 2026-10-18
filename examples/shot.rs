@@ -26,8 +26,6 @@
 //! 页面/弹层都通过公开 API（build_for_test + on_key + render + pub 字段 screen）
 //! 进入，不构造内部弹层结构体，尽量不受 UI 重设计影响。
 
-use std::path::PathBuf;
-
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use ratatui::Terminal;
@@ -39,7 +37,7 @@ use unicode_width::UnicodeWidthStr;
 
 use typewords_tui::app::{self, App, SETTING_ROWS, Screen};
 use typewords_tui::cli::Cli;
-use typewords_tui::paths::Paths;
+use typewords_tui::paths::{Paths, locate_assets};
 
 const SUPPORTED_SCREENS: &[&str] = &[
     "home", "practice", "dict", "stats", "settings", "help", "summary", "edit", "confirm",
@@ -86,14 +84,8 @@ fn run() -> Result<()> {
         .cloned()
         .unwrap_or_else(|| "dark".to_string());
 
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let assets = manifest
-        .parent()
-        .context("tui/ has no parent directory")?
-        .join("public");
-    if !assets.is_dir() {
-        bail!("assets dir not found: {}", assets.display());
-    }
+    let assets = locate_assets(None)
+        .context("assets dir not found：请在仓库根运行（需要 assets/list/word.json），或设置 TYPEWORDS_ASSETS")?;
     let home = std::env::temp_dir().join(format!("tw-shot-home-{screen}"));
     let _ = std::fs::remove_dir_all(&home);
     let paths = Paths {

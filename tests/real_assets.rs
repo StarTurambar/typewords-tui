@@ -1,26 +1,14 @@
 //! 使用仓库内置 CET-4 词库做一次真实数据校验（资源不存在时跳过）。
 
-use std::path::PathBuf;
-
 use typewords_tui::bootstrap;
 use typewords_tui::domain::rng;
 use typewords_tui::domain::rng::shuffle;
 use typewords_tui::domain::study_task::create_study_task;
-use typewords_tui::paths::Paths;
-
-fn repo_public() -> Option<PathBuf> {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let public = manifest.parent()?.join("public");
-    if public.join("list").join("word.json").is_file() {
-        Some(public)
-    } else {
-        None
-    }
-}
+use typewords_tui::paths::{Paths, locate_assets};
 
 #[test]
 fn loads_real_cet4_dict_and_builds_task() {
-    let Some(assets) = repo_public() else {
+    let Some(assets) = locate_assets(None) else {
         return;
     };
     let home = tempfile::tempdir().unwrap();
@@ -60,7 +48,7 @@ fn loads_real_cet4_dict_and_builds_task() {
 
 #[test]
 fn real_dict_session_saves_and_reloads() {
-    let Some(assets) = repo_public() else {
+    let Some(assets) = locate_assets(None) else {
         return;
     };
     let home = tempfile::tempdir().unwrap();
