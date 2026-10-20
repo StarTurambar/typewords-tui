@@ -204,6 +204,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
     match app.screen {
         Screen::Home => match key.code {
             KeyCode::Enter => Some(Action::StartPractice),
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::OpenFlows)
+            }
             KeyCode::Char('f') => Some(Action::StartFreePractice),
             KeyCode::Char('d') => Some(Action::Navigate(Screen::DictPicker)),
             KeyCode::Char('s') => Some(Action::Navigate(Screen::Settings)),
@@ -248,6 +251,27 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Enter | KeyCode::Char(' ') => {
                 Some(Action::ActivateSetting(app.settings_cursor))
             }
+            _ => None,
+        },
+        Screen::Flows => match key.code {
+            KeyCode::Esc => {
+                if app.flow_editing {
+                    Some(Action::FlowEdit)
+                } else {
+                    Some(Action::Back)
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::FlowMove(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::FlowMove(1)),
+            KeyCode::Tab => Some(Action::FlowNextNode),
+            KeyCode::Enter => Some(Action::FlowActivate),
+            KeyCode::Char('n') => Some(Action::FlowDuplicate),
+            KeyCode::Char('e') => Some(Action::FlowEdit),
+            KeyCode::Delete => Some(Action::FlowDelete),
+            KeyCode::Char('a') if app.flow_editing => Some(Action::FlowAddStep),
+            KeyCode::Char('d') if app.flow_editing => Some(Action::FlowRemoveStep),
+            KeyCode::Char('s') if app.flow_editing => Some(Action::FlowToggleShuffle),
+            KeyCode::Char('g') if app.flow_editing => Some(Action::FlowToggleWordLoop),
             _ => None,
         },
         Screen::Articles => match key.code {

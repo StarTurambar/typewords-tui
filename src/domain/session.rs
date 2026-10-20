@@ -89,8 +89,16 @@ fn shuffle_words(rng: &mut Rng, words: &mut [Word]) {
 
 impl PracticeSession {
     pub fn new(mode: WordPracticeMode) -> Self {
+        Self::with_flow(mode, flow_for_mode(mode))
+    }
+
+    /// 用指定的流程定义创建会话（自定义流程走这里）。
+    pub fn with_flow(
+        mode: WordPracticeMode,
+        flow: crate::domain::flow::PracticeFlowConfig,
+    ) -> Self {
         Self {
-            nav: Navigator::new(flow_for_mode(mode)),
+            nav: Navigator::new(flow),
             data: PracticeData::default(),
             task_words: TaskWords::default(),
             all_words: Vec::new(),
@@ -269,7 +277,8 @@ impl PracticeSession {
         stat: &mut PracticeState,
         now: i64,
     ) -> FlowStartResult {
-        self.nav = Navigator::new(flow_for_mode(self.mode));
+        // 保留会话自带的流程（可能是用户自建流程），只重置游标
+        self.nav.reset();
         self.complete = false;
         self.reset_word = false;
         let mut task_words = task;

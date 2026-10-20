@@ -32,6 +32,18 @@ pub enum Action {
     CollectMove(i32),
     CollectSelect,
     CollectCancel,
+    // 练习流程
+    OpenFlows,
+    FlowMove(i32),
+    FlowActivate,
+    FlowDuplicate,
+    FlowEdit,
+    FlowDelete,
+    FlowNextNode,
+    FlowAddStep,
+    FlowRemoveStep,
+    FlowToggleShuffle,
+    FlowToggleWordLoop,
     // 文章
     OpenArticles,
     ArticleSpeak,
@@ -141,6 +153,17 @@ impl App {
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
             Action::CollectCancel => self.collect_picker = None,
+            Action::OpenFlows => self.open_flows(),
+            Action::FlowMove(delta) => self.move_flow_edit_cursor(delta),
+            Action::FlowActivate => self.activate_flow(),
+            Action::FlowDuplicate => self.duplicate_flow(),
+            Action::FlowEdit => self.toggle_flow_edit(),
+            Action::FlowDelete => self.delete_flow(),
+            Action::FlowNextNode => self.flow_next_node(),
+            Action::FlowAddStep => self.flow_add_step(),
+            Action::FlowRemoveStep => self.flow_remove_step(),
+            Action::FlowToggleShuffle => self.flow_toggle_shuffle(),
+            Action::FlowToggleWordLoop => self.flow_toggle_word_loop(),
             Action::OpenArticles => self.open_articles(),
             Action::ArticleBookMove(delta) => self.move_article_book(delta),
             Action::ArticleMove(delta) => self.move_article(delta),
@@ -264,6 +287,11 @@ impl App {
                 self.article_book_cursor = 0;
                 self.article_cursor = 0;
             }
+            Screen::Flows => {
+                self.screen = Screen::Flows;
+                self.flow_cursor = 0;
+                self.flow_editing = false;
+            }
             Screen::ArticlePractice => {
                 self.screen = Screen::ArticlePractice;
             }
@@ -302,6 +330,7 @@ impl App {
             Screen::WordTest => self.leave_word_test(),
             Screen::Words => self.navigate_to(Screen::DictPicker),
             Screen::Articles => self.navigate_to(Screen::Home),
+            Screen::Flows => self.navigate_to(Screen::Home),
             Screen::ArticlePractice => {
                 self.article_practice = None;
                 self.navigate_to(Screen::Articles);

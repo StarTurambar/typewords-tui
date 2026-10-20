@@ -14,6 +14,7 @@ use crate::bootstrap::{self, Bootstrapped};
 use crate::cli::{self, Cli};
 use chrono::Datelike;
 
+use crate::domain::flow::PracticeStepTemplateId;
 use crate::domain::flow::get_flow_config;
 use crate::domain::flow::navigator::{Notice, NoticeLevel};
 use crate::domain::rng::{self, Rng, shuffle};
@@ -44,6 +45,7 @@ pub enum Screen {
     Words,
     Articles,
     ArticlePractice,
+    Flows,
     DictPicker,
     Stats,
     Settings,
@@ -87,6 +89,18 @@ pub struct ArticlePracticeState {
     pub wrong_sentences: usize,
     /// 本轮用时（毫秒）
     pub spend: i64,
+}
+
+/// 流程列表项：内置流程 + 自建流程。
+#[derive(Clone, Debug)]
+pub struct FlowEntry {
+    pub id: String,
+    pub name: String,
+    pub config: crate::domain::flow::PracticeFlowConfig,
+    /// 是否是自建流程
+    pub custom: bool,
+    /// 是否正在使用
+    pub active: bool,
 }
 
 /// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
@@ -344,6 +358,16 @@ pub struct App {
     pub article_cursor: usize,
     /// 进行中的文章练习
     pub article_practice: Option<ArticlePracticeState>,
+    /// 自定义练习流程存档
+    pub flow_store: crate::domain::flow::store::FlowStore,
+    /// 流程列表的光标
+    pub flow_cursor: usize,
+    /// 是否在编辑流程结构
+    pub flow_editing: bool,
+    /// 编辑时所在节点
+    pub flow_node_cursor: usize,
+    /// 编辑时所在步骤
+    pub flow_step_cursor: usize,
     /// 跳组弹层
     pub group_picker: Option<GroupPickerState>,
     /// 「收藏到指定词典」弹层
@@ -458,6 +482,11 @@ impl App {
             article_book_cursor: 0,
             article_cursor: 0,
             article_practice: None,
+            flow_store: Default::default(),
+            flow_cursor: 0,
+            flow_editing: false,
+            flow_node_cursor: 0,
+            flow_step_cursor: 0,
             group_picker: None,
             collect_picker: None,
             task_preview: None,
@@ -472,6 +501,9 @@ impl App {
         };
 
         app.refresh_shortcuts();
+        if let Some(home) = app.paths.as_ref().map(|paths| paths.home.clone()) {
+            app.flow_store = crate::domain::flow::store::FlowStore::load(&home);
+        }
         for notice in notices {
             app.toast(NoticeLevel::Warning, notice);
         }
@@ -512,9 +544,13 @@ impl App {
         let Some(cache) = cache_from_compact(&compact, &dict.words) else {
             return;
         };
-        let mode = get_flow_config(&cache.session_snapshot.flow_id).mode;
+        let flow = match self.flow_store.flows.get(&cache.session_snapshot.flow_id) {
+            Some(stored) => stored.config.clone(),
+            None => get_flow_config(&cache.session_snapshot.flow_id),
+        };
+        let mode = flow.mode;
         let mut all_words = dict.words.clone();
-        let mut session = PracticeSession::new(mode);
+        let mut session = PracticeSession::with_flow(mode, flow);
         shuffle(&mut self.rng, &mut all_words);
         session.all_words = all_words;
         if session.apply_cache(&cache, &mut self.rng, &mut self.stat, timer::now_ms()) {
@@ -688,7 +724,7 @@ impl App {
         };
         let mut all_words = dict.words.clone();
         shuffle(&mut self.rng, &mut all_words);
-        let mut session = PracticeSession::new(mode);
+        let mut session = PracticeSession::with_flow(mode, self.active_flow(mode));
         session.all_words = all_words;
 
         self.stat = PracticeState::default();
@@ -1397,6 +1433,301 @@ impl App {
         self.refresh_task_preview();
     }
 
+    // ── 自定义练习流程 ─────────────────────────────────────────────────────
+
+    /// 流程列表：先列内置流程，再列自建流程。
+    pub fn flow_entries(&self) -> Vec<FlowEntry> {
+        let mut entries: Vec<FlowEntry> = Vec::new();
+        for mode in crate::domain::constants::PRACTICE_MODES {
+            let config = crate::domain::flow::flow_for_mode(mode);
+            entries.push(FlowEntry {
+                id: config.id.clone(),
+                name: crate::domain::constants::practice_mode_name(mode).to_string(),
+                active: self.flow_store.active_id.is_empty()
+                    && self.flow_store.active().is_none()
+                    && config.id == crate::domain::flow::get_flow_id_for_mode(mode),
+                config,
+                custom: false,
+            });
+        }
+        for (id, flow) in &self.flow_store.flows {
+            entries.push(FlowEntry {
+                id: id.clone(),
+                name: flow.name.clone(),
+                config: flow.config.clone(),
+                custom: true,
+                active: self.flow_store.active_id == *id,
+            });
+        }
+        entries
+    }
+
+    /// 打开流程页。
+    pub fn open_flows(&mut self) {
+        self.screen = Screen::Flows;
+        self.flow_cursor = 0;
+        self.flow_editing = false;
+        self.flow_node_cursor = 0;
+        self.flow_step_cursor = 0;
+    }
+
+    /// 移动流程列表的光标。
+    fn move_flow_cursor(&mut self, delta: i32) {
+        let total = self.flow_entries().len() as i32;
+        if total == 0 {
+            return;
+        }
+        let next = (self.flow_cursor as i32 + delta).clamp(0, total - 1);
+        self.flow_cursor = next as usize;
+    }
+
+    /// 启用选中的流程。
+    fn activate_flow(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if entry.custom {
+            self.flow_store.activate(&entry.id);
+            self.save_flow_store();
+            self.toast(NoticeLevel::Success, format!("已启用「{}」", entry.name));
+        } else {
+            self.flow_store.activate("");
+            self.save_flow_store();
+            self.toast(
+                NoticeLevel::Success,
+                format!("已切回内置流程「{}」", entry.name),
+            );
+        }
+    }
+
+    /// 以选中的流程为模板新建一份自建副本。
+    fn duplicate_flow(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        let id = format!("custom-{}", self.flow_store.flows.len() + 1);
+        let now = timer::now_ms();
+        let mut config = entry.config.clone();
+        config.id = id.clone();
+        config.mode = crate::domain::types::WordPracticeMode::Custom;
+        self.flow_store.upsert(
+            &id,
+            crate::domain::flow::store::StoredFlow {
+                name: format!("{} 副本", entry.name),
+                config,
+                created_at: now,
+                updated_at: now,
+            },
+        );
+        self.flow_store.activate(&id);
+        self.save_flow_store();
+        self.flow_cursor = self.flow_entries().len().saturating_sub(1);
+        self.toast(NoticeLevel::Success, "已新建流程副本");
+    }
+
+    /// 删除选中的自建流程。
+    fn delete_flow(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            self.toast(NoticeLevel::Warning, "内置流程不能删除");
+            return;
+        }
+        self.flow_store.remove(&entry.id);
+        self.save_flow_store();
+        self.flow_cursor = self.flow_cursor.saturating_sub(1);
+        self.toast(NoticeLevel::Success, "已删除流程");
+    }
+
+    /// 进入 / 退出结构编辑。
+    fn toggle_flow_edit(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            self.toast(NoticeLevel::Warning, "内置流程不能编辑，请先新建副本");
+            return;
+        }
+        self.flow_editing = !self.flow_editing;
+        self.flow_node_cursor = 0;
+        self.flow_step_cursor = 0;
+    }
+
+    /// 编辑模式下移动光标。
+    fn move_flow_edit_cursor(&mut self, delta: i32) {
+        if !self.flow_editing {
+            self.move_flow_cursor(delta);
+            return;
+        }
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        let node_count = entry.config.nodes.len() as i32;
+        if node_count == 0 {
+            return;
+        }
+        let node = (self.flow_node_cursor as i32 + delta).clamp(0, node_count - 1) as usize;
+        self.flow_node_cursor = node;
+        let step_count = entry.config.nodes[node].steps.len() as i32;
+        self.flow_step_cursor = self.flow_step_cursor.min(step_count.max(1) as usize - 1);
+    }
+
+    /// 编辑模式下切换节点。
+    fn flow_next_node(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if entry.config.nodes.is_empty() {
+            return;
+        }
+        self.flow_node_cursor = (self.flow_node_cursor + 1) % entry.config.nodes.len();
+        self.flow_step_cursor = 0;
+    }
+
+    /// 编辑模式下追加一个步骤。
+    fn flow_add_step(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            return;
+        }
+        let node = self
+            .flow_node_cursor
+            .min(entry.config.nodes.len().saturating_sub(1));
+        let Some(flow) = self.flow_store.flows.get_mut(&entry.id) else {
+            return;
+        };
+        let Some(node) = flow.config.nodes.get_mut(node) else {
+            return;
+        };
+        // 在当前步骤之后插入，模板按 跟写 → 拼写 → 自测 → 听写 → 默写 循环
+        let template = node
+            .steps
+            .get(self.flow_step_cursor)
+            .map(|step| step.template_id)
+            .unwrap_or(PracticeStepTemplateId::FollowWrite);
+        let next = match template {
+            PracticeStepTemplateId::FollowWrite => PracticeStepTemplateId::Spell,
+            PracticeStepTemplateId::Spell => PracticeStepTemplateId::Identify,
+            PracticeStepTemplateId::Identify => PracticeStepTemplateId::Listen,
+            PracticeStepTemplateId::Listen => PracticeStepTemplateId::Dictation,
+            PracticeStepTemplateId::Dictation => PracticeStepTemplateId::FollowWrite,
+        };
+        let step = crate::domain::flow::PracticeFlowStep {
+            template_id: next,
+            word_advance: crate::domain::flow::WordAdvance::Increment,
+            on_end: Vec::new(),
+            shuffle_on_enter: false,
+        };
+        let index = (self.flow_step_cursor + 1).min(node.steps.len());
+        node.steps.insert(index, step);
+        self.flow_step_cursor = index;
+        self.touch_flow(&entry.id);
+    }
+
+    /// 编辑模式下删除当前步骤。
+    fn flow_remove_step(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            return;
+        }
+        let node = self
+            .flow_node_cursor
+            .min(entry.config.nodes.len().saturating_sub(1));
+        let Some(flow) = self.flow_store.flows.get_mut(&entry.id) else {
+            return;
+        };
+        let Some(node) = flow.config.nodes.get_mut(node) else {
+            return;
+        };
+        if node.steps.len() <= 1 {
+            self.toast(NoticeLevel::Warning, "每个节点至少保留一个步骤");
+            return;
+        }
+        if self.flow_step_cursor < node.steps.len() {
+            node.steps.remove(self.flow_step_cursor);
+        }
+        self.flow_step_cursor = self.flow_step_cursor.saturating_sub(1);
+        self.touch_flow(&entry.id);
+    }
+
+    /// 编辑模式下切换当前步骤的「进入时乱序」。
+    fn flow_toggle_shuffle(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            return;
+        }
+        let node = self
+            .flow_node_cursor
+            .min(entry.config.nodes.len().saturating_sub(1));
+        let Some(flow) = self.flow_store.flows.get_mut(&entry.id) else {
+            return;
+        };
+        let Some(node) = flow.config.nodes.get_mut(node) else {
+            return;
+        };
+        if let Some(step) = node.steps.get_mut(self.flow_step_cursor) {
+            step.shuffle_on_enter = !step.shuffle_on_enter;
+        }
+        self.touch_flow(&entry.id);
+    }
+
+    /// 编辑模式下切换当前步骤是否「组内巩固」。
+    fn flow_toggle_word_loop(&mut self) {
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        if !entry.custom {
+            return;
+        }
+        let node = self
+            .flow_node_cursor
+            .min(entry.config.nodes.len().saturating_sub(1));
+        let Some(flow) = self.flow_store.flows.get_mut(&entry.id) else {
+            return;
+        };
+        let Some(node) = flow.config.nodes.get_mut(node) else {
+            return;
+        };
+        if let Some(step) = node.steps.get_mut(self.flow_step_cursor) {
+            step.word_advance = match &step.word_advance {
+                crate::domain::flow::WordAdvance::WordLoop { .. } => {
+                    crate::domain::flow::WordAdvance::Increment
+                }
+                _ => crate::domain::flow::WordAdvance::WordLoop {
+                    group_size: crate::domain::constants::GROUP_SIZE,
+                    sub_steps: vec![PracticeStepTemplateId::Spell],
+                },
+            };
+        }
+        self.touch_flow(&entry.id);
+    }
+
+    /// 标记流程已修改并落盘。
+    fn touch_flow(&mut self, id: &str) {
+        let now = timer::now_ms();
+        if let Some(flow) = self.flow_store.flows.get_mut(id) {
+            flow.updated_at = now;
+        }
+        self.save_flow_store();
+    }
+
+    /// 写回流程存档。
+    fn save_flow_store(&mut self) {
+        let Some(home) = self.paths.as_ref().map(|paths| paths.home.clone()) else {
+            return;
+        };
+        if let Err(err) = self.flow_store.save(&home) {
+            self.toast(NoticeLevel::Error, format!("保存流程失败: {err}"));
+        }
+    }
+
     // ── 文章背诵 ─────────────────────────────────────────────────────────
 
     /// 打开文章书本列表。
@@ -1954,6 +2285,14 @@ impl App {
     }
 
     // ── 练习模式选择 ─────────────────────────────────────────────────────
+
+    /// 当前练习要使用的流程：优先用已启用的自建流程。
+    fn active_flow(&self, mode: WordPracticeMode) -> crate::domain::flow::PracticeFlowConfig {
+        match self.flow_store.active() {
+            Some(flow) => flow.config.clone(),
+            None => crate::domain::flow::flow_for_mode(mode),
+        }
+    }
 
     /// 打开练习模式选择弹层，光标停在当前模式。
     pub fn open_mode_picker(&mut self) {

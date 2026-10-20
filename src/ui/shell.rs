@@ -31,7 +31,7 @@ impl Nav {
         match screen {
             Screen::Home | Screen::Practice | Screen::WordTest => Nav::Home,
             Screen::Words => Nav::Dicts,
-            Screen::Articles | Screen::ArticlePractice => Nav::Home,
+            Screen::Articles | Screen::ArticlePractice | Screen::Flows => Nav::Home,
             Screen::DictPicker => Nav::Dicts,
             Screen::Stats => Nav::Stats,
             Screen::Settings | Screen::Shortcuts => Nav::Settings,
@@ -492,6 +492,12 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("esc", "返回"),
         ],
         Screen::ArticlePractice => &[("输入", "跟打"), ("ctrl+p", "朗读"), ("esc", "返回")],
+        Screen::Flows => &[
+            ("↑↓", "选择"),
+            ("enter", "启用"),
+            ("e", "编辑"),
+            ("esc", "返回"),
+        ],
         Screen::Words => &[
             ("↑↓", "选择"),
             ("输入", "搜索"),

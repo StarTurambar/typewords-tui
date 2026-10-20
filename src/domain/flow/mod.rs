@@ -1,6 +1,7 @@
 //! 练习流程编排：内置 flow、游标、相位解析、阶段展示。
 
 pub mod navigator;
+pub mod store;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,8 +43,10 @@ impl PracticeFlowCursor {
 
 // ── 流程配置（内置，无需序列化）────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PracticeStepTemplateId {
+    #[default]
     FollowWrite,
     Spell,
     Listen,
@@ -73,16 +76,20 @@ impl PracticeStepTemplateId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PracticeWordsSource {
+    #[default]
     TaskNew,
     TaskReview,
     Current,
     WrongWords,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum WordAdvance {
+    #[default]
     Increment,
     WordLoop {
         group_size: usize,
@@ -106,13 +113,15 @@ impl WordAdvance {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum CollectTarget {
     Favorite,
     WrongBook,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum PracticeEndAction {
     WrongWordClear {
         template_id: PracticeStepTemplateId,
@@ -121,12 +130,14 @@ pub enum PracticeEndAction {
     CollectWrongWords {
         target: CollectTarget,
     },
+    #[default]
     GenerateReport,
     NavigateNextStep,
     NavigateComplete,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PracticeFlowStep {
     pub template_id: PracticeStepTemplateId,
     pub word_advance: WordAdvance,
@@ -134,20 +145,22 @@ pub struct PracticeFlowStep {
     pub shuffle_on_enter: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PracticeFlowNode {
-    pub id: &'static str,
-    pub label: &'static str,
+    pub id: String,
+    pub label: String,
     pub source: PracticeWordsSource,
     pub steps: Vec<PracticeFlowStep>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PracticeFlowConfig {
-    pub id: &'static str,
+    pub id: String,
     pub version: u32,
     pub mode: WordPracticeMode,
-    pub label: &'static str,
+    pub label: String,
     pub nodes: Vec<PracticeFlowNode>,
 }
 
@@ -200,14 +213,14 @@ fn default_on_end() -> Vec<PracticeEndAction> {
 pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
     let config = match id {
         "system" => PracticeFlowConfig {
-            id: "system",
+            id: "system".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::System,
-            label: "smart_learning",
+            label: "smart_learning".to_string(),
             nodes: vec![
                 PracticeFlowNode {
-                    id: "new",
-                    label: "new_words",
+                    id: "new".to_string(),
+                    label: "new_words".to_string(),
                     source: PracticeWordsSource::TaskNew,
                     steps: vec![
                         step(
@@ -231,8 +244,8 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
                     ],
                 },
                 PracticeFlowNode {
-                    id: "review",
-                    label: "review",
+                    id: "review".to_string(),
+                    label: "review".to_string(),
                     source: PracticeWordsSource::TaskReview,
                     steps: vec![
                         step(
@@ -258,13 +271,13 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             ],
         },
         "free" => PracticeFlowConfig {
-            id: "free",
+            id: "free".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::Free,
-            label: "free_practice",
+            label: "free_practice".to_string(),
             nodes: vec![PracticeFlowNode {
-                id: "practice",
-                label: "free_practice",
+                id: "practice".to_string(),
+                label: "free_practice".to_string(),
                 source: PracticeWordsSource::Current,
                 steps: vec![step(
                     PracticeStepTemplateId::FollowWrite,
@@ -275,13 +288,13 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             }],
         },
         "review" => PracticeFlowConfig {
-            id: "review",
+            id: "review".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::Review,
-            label: "review",
+            label: "review".to_string(),
             nodes: vec![PracticeFlowNode {
-                id: "review",
-                label: "review",
+                id: "review".to_string(),
+                label: "review".to_string(),
                 source: PracticeWordsSource::TaskReview,
                 steps: vec![
                     step(
@@ -306,14 +319,14 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             }],
         },
         "identifyOnly" => PracticeFlowConfig {
-            id: "identifyOnly",
+            id: "identifyOnly".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::IdentifyOnly,
-            label: "identify",
+            label: "identify".to_string(),
             nodes: vec![
                 PracticeFlowNode {
-                    id: "new",
-                    label: "new_words",
+                    id: "new".to_string(),
+                    label: "new_words".to_string(),
                     source: PracticeWordsSource::TaskNew,
                     steps: vec![step(
                         PracticeStepTemplateId::Identify,
@@ -323,8 +336,8 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
                     )],
                 },
                 PracticeFlowNode {
-                    id: "review",
-                    label: "review",
+                    id: "review".to_string(),
+                    label: "review".to_string(),
                     source: PracticeWordsSource::TaskReview,
                     steps: vec![step(
                         PracticeStepTemplateId::Identify,
@@ -336,14 +349,14 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             ],
         },
         "dictationOnly" => PracticeFlowConfig {
-            id: "dictationOnly",
+            id: "dictationOnly".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::DictationOnly,
-            label: "dictation",
+            label: "dictation".to_string(),
             nodes: vec![
                 PracticeFlowNode {
-                    id: "new",
-                    label: "new_words",
+                    id: "new".to_string(),
+                    label: "new_words".to_string(),
                     source: PracticeWordsSource::TaskNew,
                     steps: vec![step(
                         PracticeStepTemplateId::Dictation,
@@ -353,8 +366,8 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
                     )],
                 },
                 PracticeFlowNode {
-                    id: "review",
-                    label: "review",
+                    id: "review".to_string(),
+                    label: "review".to_string(),
                     source: PracticeWordsSource::TaskReview,
                     steps: vec![step(
                         PracticeStepTemplateId::Dictation,
@@ -366,14 +379,14 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             ],
         },
         "listenOnly" => PracticeFlowConfig {
-            id: "listenOnly",
+            id: "listenOnly".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::ListenOnly,
-            label: "listen",
+            label: "listen".to_string(),
             nodes: vec![
                 PracticeFlowNode {
-                    id: "new",
-                    label: "new_words",
+                    id: "new".to_string(),
+                    label: "new_words".to_string(),
                     source: PracticeWordsSource::TaskNew,
                     steps: vec![step(
                         PracticeStepTemplateId::Listen,
@@ -383,8 +396,8 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
                     )],
                 },
                 PracticeFlowNode {
-                    id: "review",
-                    label: "review",
+                    id: "review".to_string(),
+                    label: "review".to_string(),
                     source: PracticeWordsSource::TaskReview,
                     steps: vec![step(
                         PracticeStepTemplateId::Listen,
@@ -396,13 +409,13 @@ pub fn builtin_flow(id: &str) -> Option<PracticeFlowConfig> {
             ],
         },
         "shuffle" => PracticeFlowConfig {
-            id: "shuffle",
+            id: "shuffle".to_string(),
             version: CURRENT_FLOW_VERSION,
             mode: WordPracticeMode::Shuffle,
-            label: "random_review",
+            label: "random_review".to_string(),
             nodes: vec![PracticeFlowNode {
-                id: "practice",
-                label: "random_review",
+                id: "practice".to_string(),
+                label: "random_review".to_string(),
                 source: PracticeWordsSource::TaskReview,
                 steps: vec![step(
                     PracticeStepTemplateId::Dictation,
@@ -714,7 +727,7 @@ pub fn display_state(
         0
     };
 
-    let mut status = tr(config.label);
+    let mut status = tr(&config.label);
     if cursor.loop_range.is_some() {
         status = tr("step_group");
     } else if cursor.in_wrong_word_clear {
@@ -728,9 +741,9 @@ pub fn display_state(
             .map(|step| tr(step.template_id.label()))
             .unwrap_or_default();
         status = if step_label.is_empty() {
-            tr(node.label)
+            tr(&node.label)
         } else {
-            format!("{} · {}", tr(node.label), step_label)
+            format!("{} · {}", tr(&node.label), step_label)
         };
     }
 
@@ -785,7 +798,7 @@ pub fn display_state(
                 Vec::new()
             };
             FlowProgressStage {
-                name: tr(node.label),
+                name: tr(&node.label),
                 ratio: if is_single_node {
                     100
                 } else if is_current {

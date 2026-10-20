@@ -117,7 +117,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 15 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
+仓库 `docs/screenshots/` 的 16 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
@@ -134,6 +134,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `words-120x40-dark.png` | `words 120 40 dark` |
 | `articles-120x40-dark.png` | `articles 120 40 dark` |
 | `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
+| `flows-120x40-dark.png` | `flows 120 40 dark` |
 | `articles-120x40-dark.png` | `articles 120 40 dark` |
 | `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
 | `help-120x40-dark.png` | `help 120 40 dark` |

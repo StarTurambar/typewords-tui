@@ -6,6 +6,7 @@
 pub mod articles;
 pub mod bigtext;
 pub mod dict_picker;
+pub mod flows;
 pub mod help;
 pub mod hit;
 pub mod home;
@@ -47,6 +48,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Practice => practice::render_practice(app, frame, area, &theme),
         Screen::WordTest => word_test::render(app, frame, area, &theme),
         Screen::Words => words::render(app, frame, area, &theme),
+        Screen::Flows => flows::render(app, frame, area, &theme),
         Screen::Articles => articles::render_articles(app, frame, area, &theme),
         Screen::ArticlePractice => articles::render_article_practice(app, frame, area, &theme),
         Screen::DictPicker => dict_picker::render(app, frame, area, &theme),

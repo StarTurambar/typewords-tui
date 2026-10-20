@@ -22,6 +22,13 @@ macro_rules! int_enum {
         #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
         pub enum $name { $($variant),+ }
 
+        impl Default for $name {
+            /// 约定：数值 0 的变体就是该枚举的默认值。
+            fn default() -> Self {
+                Self::from_i32(0).expect("整数枚举总有值为 0 的变体")
+            }
+        }
+
         impl $name {
             pub fn as_i32(self) -> i32 {
                 match self { $(Self::$variant => $value),+ }

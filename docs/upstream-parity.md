@@ -95,7 +95,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 词库 | 批量标记 | `components/word/WordMarkPickList.vue` | 词条管理页勾选后 `1`/`2`/`3` | 已对齐 | 认识 / 已掌握 / 不认识 |
 | 练习 | 7 个内置流程 | `practice-flow-config.ts` 的 `BUILTIN_FLOWS`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐 | 节点、步骤、7 词小组、错词清空与上游一致，`tests/flow_parity.rs` 覆盖 |
 | 练习 | 练习模式切换入口 | `words.vue` 的模式下拉（学习/复习/随机/单词测试/随机单词测试） | `m` 键或主页「模式」提示打开选择弹层，九种模式 | 已对齐 | TUI 独有下拉菜单；`--mode` 仍可覆盖 |
-| 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（用户流程存 localStorage） | 无 | 缺失 | 枚举值 `Custom` 仅为存档兼容存在 |
+| 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（用户流程存 localStorage） | 流程页：新建副本 / 编辑步骤 / 启用 | 部分 | 结构与上游同构（存 `flows.json`）；不支持节点的增删与步骤参数编辑 |
 | 练习 | 单词测试模式 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | 独立答题页（`src/ui/word_test.rs`） | 已对齐 | 4 选 1、答错入错词本、结算 |
 | 练习 | 随机复习范围/数量设置 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同 | TUI 无「已学 10 词」门槛；学习进度为 0 时取整本词库 |
 | 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐 | 含错词 Top10 与本周记录（当前词典口径）；无分享入口 |

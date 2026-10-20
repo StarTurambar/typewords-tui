@@ -46,6 +46,7 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "wordtest",
     "words",
     "articles",
+    "flows",
     "articlepractice",
     "dict",
     "stats",
@@ -173,6 +174,7 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
         "wordtest" => start_word_test(app)?,
         "words" => start_words(app)?,
         "articles" => start_articles(app)?,
+        "flows" => start_flows(app)?,
         "articlepractice" => start_article_practice(app)?,
         "dict" => app.screen = Screen::DictPicker,
         "stats" => app.screen = Screen::Stats,
@@ -234,6 +236,16 @@ fn start_words(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+fn start_flows(app: &mut App) -> Result<()> {
+    app.screen = Screen::Home;
+    press_ctrl(app, KeyCode::Char('f'));
+    if app.screen != Screen::Flows {
+        bail!("could not open flows (screen={:?})", app.screen);
+    }
+    press(app, KeyCode::Char('n'));
+    Ok(())
+}
+
 fn start_articles(app: &mut App) -> Result<()> {
     app.screen = Screen::Home;
     press(app, KeyCode::Char('a'));
@@ -287,6 +299,10 @@ fn reach_summary(app: &mut App) -> Result<()> {
 
 fn press(app: &mut App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn press_ctrl(app: &mut App, code: KeyCode) {
+    app.on_key(KeyEvent::new(code, KeyModifiers::CONTROL));
 }
 
 fn serialize_rows(buffer: &ratatui::buffer::Buffer, width: u16, height: u16) -> Vec<Value> {

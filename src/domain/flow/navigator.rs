@@ -92,12 +92,18 @@ impl Navigator {
         }
     }
 
+    /// 重置游标与节点词表，**保留当前流程**。
+    pub fn reset(&mut self) {
+        self.cursor = get_initial_cursor();
+        self.node_working_words.clear();
+    }
+
     pub fn load_flow(&mut self, flow_id: &str) {
         self.flow = get_flow_config(flow_id);
     }
 
-    pub fn active_flow_id(&self) -> &'static str {
-        self.flow.id
+    pub fn active_flow_id(&self) -> &str {
+        &self.flow.id
     }
 
     pub fn current_phase(&self) -> PracticePhase {
@@ -514,7 +520,7 @@ impl Navigator {
 
     pub fn build_snapshot(&self) -> PracticeSessionSnapshot {
         PracticeSessionSnapshot {
-            flow_id: self.flow.id.to_string(),
+            flow_id: self.flow.id.clone(),
             cursor: self.cursor.clone(),
             node_working_word_keys: Some(
                 self.node_working_words
