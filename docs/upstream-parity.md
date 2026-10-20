@@ -131,7 +131,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑，存 `noteData` | 已对齐 | 词库页的笔记字段仍只有练习页这一处入口 |
 | 多语言 | 界面语言切换 | `i18n/locales/*.json`（14 种） | 中文硬编码（`src/domain/i18n.rs`） | 缺失 | 键名对齐上游但无语言包 |
 | 云同步 | Supabase 同步 | `utils/supabase.ts`、`useDataSyncPersistence.ts` | 无 | 缺失 | 上游设置页已把该功能标为「过时功能」 |
-| 备份 | 备份导入导出 | `hooks/export.ts`（ZIP：`data.json` + mp3；JSON） | 无 UI | 缺失 | 只能手工复制数据目录 |
+| 备份 | 备份导入导出 | `hooks/export.ts`（ZIP：`data.json` + mp3；JSON） | `tw import-web` / `tw export-web`（JSON） | 部分 | 走同一套 `BackupData` v5 格式；不支持 ZIP 与 mp3 打包 |
 | 帮助 | 帮助 / 关于 / 文档 / 反馈 | `help.vue`、`about.vue`、`doc.vue`、`feedback.vue` | `src/ui/help.rs` | 部分 | TUI 帮助页是快捷键 + 鼠标说明，无 FAQ / 关于 / 资源页 |
 
 ## 4. 行为差异深入
@@ -265,7 +265,9 @@ Web 备份 data.json                       TUI 数据目录
 } }                                      themes/*.json（仅 TUI）
 ```
 
-手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入三个文件（保留各自信封）→ `tw doctor` 核对 → 启动检查设置与断点。反向迁移则是按 Web 备份格式补齐 `dict` / `setting` / `PracticeSaveWord` 三个 key（`PracticeSaveArticle` 给空值），再在 Web 设置页导入。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
+手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入三个文件（保留各自信封）→ `tw doctor` 核对 → 启动检查设置与断点。
+
+现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本、原样落盘），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
 
 ### 5.3 字段语义差异与风险
 

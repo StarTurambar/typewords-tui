@@ -200,6 +200,11 @@ impl FileStore {
         write_atomic(&self.file_path(name), &text)
     }
 
+    /// 原样写入一份存档（用于网页版备份导入，保留未建模的字段）。
+    pub fn write_envelope_raw(&self, name: &str, text: &str) -> Result<()> {
+        write_atomic(&self.file_path(name), text)
+    }
+
     pub fn load_dict(&self) -> Loaded<BaseState> {
         self.load_typed("dict.json", DICT_STATE_VERSION)
     }

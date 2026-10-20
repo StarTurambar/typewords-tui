@@ -10,6 +10,7 @@
 
 pub mod app;
 pub mod audio;
+pub mod backup;
 pub mod bootstrap;
 pub mod cli;
 pub mod domain;
@@ -30,6 +31,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Command::Doctor) => cli::doctor(&paths),
         Some(Command::Task) => cli::task_preview(&paths, &cli),
         Some(Command::ImportDict { file }) => cli::import_dict(&paths, &file),
+        Some(Command::ImportWeb { file }) => cli::import_web(&paths, &file),
+        Some(Command::ExportWeb { out }) => cli::export_web(&paths, out.as_deref()),
         None => app::run(paths, cli),
     }
 }

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 
 use crate::bootstrap;
@@ -53,6 +53,14 @@ pub enum Command {
     Task,
     /// 导入词库 JSON 到数据目录
     ImportDict { file: PathBuf },
+    /// 导入网页版导出的备份 JSON（BackupData v5）
+    ImportWeb { file: PathBuf },
+    /// 导出成网页版能导入的备份 JSON
+    ExportWeb {
+        /// 输出路径，缺省写到标准输出
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
 }
 
 pub fn parse_mode(value: &str) -> Result<WordPracticeMode> {
@@ -154,6 +162,52 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
     }
     for word in result.task_words.review.iter().take(5) {
         println!("  review: {}  {}", word.word, word.trans_joined());
+    }
+    Ok(())
+}
+
+/// 导入网页版导出的备份。
+pub fn import_web(paths: &Paths, file: &Path) -> Result<()> {
+    let store = crate::store::FileStore::new(paths.home.clone())?;
+    let report = crate::backup::import_web(&store, file)?;
+    if report.written.is_empty() {
+        println!("没有可导入的存档。");
+    }
+    for key in &report.written {
+        println!("已导入: {key}");
+    }
+    for key in &report.skipped {
+        println!("已跳过: {key}（版本高于本程序支持）");
+    }
+    for key in &report.discarded {
+        println!("已丢弃: {key}");
+    }
+    if !report.written.is_empty() {
+        println!(
+            "
+请重启程序让新存档生效。"
+        );
+    }
+    Ok(())
+}
+
+/// 导出成网页版能导入的备份。
+pub fn export_web(paths: &Paths, out: Option<&Path>) -> Result<()> {
+    let store = crate::store::FileStore::new(paths.home.clone())?;
+    let text = crate::backup::export_web(&store)?;
+    match out {
+        Some(path) => {
+            std::fs::write(
+                path,
+                format!(
+                    "{text}
+"
+                ),
+            )
+            .with_context(|| format!("写入 {} 失败", path.display()))?;
+            println!("已导出: {}", path.display());
+        }
+        None => println!("{text}"),
     }
     Ok(())
 }
