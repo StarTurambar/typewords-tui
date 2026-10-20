@@ -29,6 +29,8 @@
 | `src/domain/timer.rs` | 计时片段、空闲暂停、跨天拆分 | `tick`、`pause`、`resume`、`normalize_practice_timer`、`format_duration` |
 | `src/domain/typing.rs` | 键入状态机 | `TypingEngine`、`TypingSettings`、`TypingEvent`、`KeyInput` |
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
+| `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态 | `Article`、`parse_sentence`、`gen_sections`、`SentenceTyping` |
+| `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`sort_words` |
 | `src/domain/flow/mod.rs` | 流程配置、游标、相位、展示模型 | `PracticeFlowConfig`、`PracticeFlowCursor`、`builtin_flow`、`resolve_phase_by_cursor`、`display_state` |
 | `src/domain/flow/navigator.rs` | 会话内的位置推进 | `Navigator`、`NavState`、`Notice` |
 | `src/domain/session.rs` | 会话控制器（初始化/恢复/结算） | `PracticeSession`、`PracticeViewState`、`cache_to_compact`、`cache_from_compact` |

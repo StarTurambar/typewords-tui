@@ -3,6 +3,7 @@
 //! 分层：`theme`（颜色映射）/ `shell` 与各页面（纯布局 + 渲染）/
 //! `hit`（把布局命中转换成 Action）。渲染只读 App，不修改状态。
 
+pub mod articles;
 pub mod bigtext;
 pub mod dict_picker;
 pub mod help;
@@ -46,6 +47,8 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Practice => practice::render_practice(app, frame, area, &theme),
         Screen::WordTest => word_test::render(app, frame, area, &theme),
         Screen::Words => words::render(app, frame, area, &theme),
+        Screen::Articles => articles::render_articles(app, frame, area, &theme),
+        Screen::ArticlePractice => articles::render_article_practice(app, frame, area, &theme),
         Screen::DictPicker => dict_picker::render(app, frame, area, &theme),
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),

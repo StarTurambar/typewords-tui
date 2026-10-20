@@ -209,6 +209,7 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('s') => Some(Action::Navigate(Screen::Settings)),
             KeyCode::Char('t') => Some(Action::Navigate(Screen::Stats)),
             KeyCode::Char('m') => Some(Action::OpenModePicker),
+            KeyCode::Char('a') => Some(Action::OpenArticles),
             KeyCode::Char('?') => Some(Action::Navigate(Screen::Help)),
             KeyCode::Char('q') => Some(Action::QuitRequest),
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
@@ -223,6 +224,7 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
             KeyCode::Char('w') => Some(Action::OpenSelectedWords),
+            KeyCode::Char('a') => Some(Action::OpenArticles),
             KeyCode::Char('n') => Some(Action::WordsNewDict),
             _ => None,
         },
@@ -245,6 +247,22 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Down | KeyCode::Char('j') => Some(Action::SettingsMove(1)),
             KeyCode::Enter | KeyCode::Char(' ') => {
                 Some(Action::ActivateSetting(app.settings_cursor))
+            }
+            _ => None,
+        },
+        Screen::Articles => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Action::ArticleMove(1)),
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Action::ArticleMove(-1)),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::ArticleBookMove(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::ArticleBookMove(1)),
+            KeyCode::Enter => Some(Action::ArticleSelect),
+            _ => None,
+        },
+        Screen::ArticlePractice => match key.code {
+            KeyCode::Esc => Some(Action::Back),
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::ArticleSpeak)
             }
             _ => None,
         },

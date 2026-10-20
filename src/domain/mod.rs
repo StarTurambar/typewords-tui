@@ -1,5 +1,6 @@
 //! 与终端无关的领域逻辑。
 
+pub mod article;
 pub mod catalog;
 pub mod constants;
 pub mod flow;

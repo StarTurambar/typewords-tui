@@ -125,7 +125,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 断点 | 本地练习缓存 | `PracticeSaveWord` v2 | `practice-word.json` v2 | 已对齐 | 同构 compact 结构（含 `sessionSnapshot`） |
 | 断点 | v1 缓存升级 | `checkAndUpgradePracticeWordCache` | 仅接受 v2 | 部分 | v1 缓存直接忽略，文件在下一次保存时覆盖 |
 | 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失 | 无网络与远端比较 |
-| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`components/article/*` | 无 | 缺失 | TUI 不加载 `dicts/en/article` |
+| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 句子跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
 | 音频 | 发音与键盘音效 | `hooks/sound.ts`、`base/Audio.vue`、`components/article/ArticleAudio.vue` | 无 | 缺失 | 不引入音频依赖；听写阶段改看音标与释义 |
 | 查词 | 练习中查词与在线翻译 | `WordLookupPopover.vue`、`libs/translate/*`、`public.word/query` | 无 | 缺失 | 离线设计目标 |
 | 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑，存 `noteData` | 已对齐 | 词库页的笔记字段仍只有练习页这一处入口 |

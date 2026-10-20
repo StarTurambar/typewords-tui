@@ -45,6 +45,8 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "practice",
     "wordtest",
     "words",
+    "articles",
+    "articlepractice",
     "dict",
     "stats",
     "settings",
@@ -170,6 +172,8 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
         "practice" => start_practice(app)?,
         "wordtest" => start_word_test(app)?,
         "words" => start_words(app)?,
+        "articles" => start_articles(app)?,
+        "articlepractice" => start_article_practice(app)?,
         "dict" => app.screen = Screen::DictPicker,
         "stats" => app.screen = Screen::Stats,
         "settings" => app.screen = Screen::Settings,
@@ -226,6 +230,25 @@ fn start_words(app: &mut App) -> Result<()> {
     press(app, KeyCode::Char('w'));
     if app.screen != Screen::Words {
         bail!("could not open word manager (screen={:?})", app.screen);
+    }
+    Ok(())
+}
+
+fn start_articles(app: &mut App) -> Result<()> {
+    app.screen = Screen::Home;
+    press(app, KeyCode::Char('a'));
+    if app.screen != Screen::Articles {
+        bail!("could not open articles (screen={:?})", app.screen);
+    }
+    press(app, KeyCode::Down);
+    Ok(())
+}
+
+fn start_article_practice(app: &mut App) -> Result<()> {
+    start_articles(app)?;
+    press(app, KeyCode::Enter);
+    if app.screen != Screen::ArticlePractice {
+        bail!("could not start article practice (screen={:?})", app.screen);
     }
     Ok(())
 }

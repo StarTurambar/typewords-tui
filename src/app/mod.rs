@@ -23,7 +23,8 @@ use crate::domain::statistics::DayTotals;
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
-    BaseState, Dict, PracticeState, SettingState, TaskWords, WordPracticeMode, WordPracticeType,
+    BaseState, Dict, PracticeState, SettingState, Statistics, TaskWords, WordPracticeMode,
+    WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
 use crate::paths::Paths;
@@ -41,6 +42,8 @@ pub enum Screen {
     Practice,
     WordTest,
     Words,
+    Articles,
+    ArticlePractice,
     DictPicker,
     Stats,
     Settings,
@@ -65,6 +68,25 @@ pub struct GroupPickerState {
 #[derive(Clone, Debug)]
 pub struct ModePickerState {
     pub cursor: usize,
+}
+
+/// 进行中的文章练习。
+#[derive(Clone, Debug)]
+pub struct ArticlePracticeState {
+    pub article_id: i64,
+    pub title: String,
+    /// 全部句子（段落展开后按顺序）
+    pub sentences: Vec<crate::domain::article::Sentence>,
+    /// 当前句下标
+    pub index: usize,
+    /// 跟打状态
+    pub typing: crate::domain::article::SentenceTyping,
+    /// 已完成的句子数
+    pub finished: usize,
+    /// 出现错误的句子数
+    pub wrong_sentences: usize,
+    /// 本轮用时（毫秒）
+    pub spend: i64,
 }
 
 /// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
@@ -312,6 +334,16 @@ pub struct App {
     pub words_sort: crate::domain::wordbook::SortOrder,
     /// 词条编辑弹层
     pub word_edit: Option<WordEditState>,
+    /// 文章书本列表（`Assets` → 目录项）
+    pub article_books: Vec<crate::domain::article::ArticleBook>,
+    /// 当前书本里的文章
+    pub article_list: Vec<crate::domain::article::Article>,
+    /// 文章书本列表的光标
+    pub article_book_cursor: usize,
+    /// 文章列表的光标
+    pub article_cursor: usize,
+    /// 进行中的文章练习
+    pub article_practice: Option<ArticlePracticeState>,
     /// 跳组弹层
     pub group_picker: Option<GroupPickerState>,
     /// 「收藏到指定词典」弹层
@@ -421,6 +453,11 @@ impl App {
             words_marked: Vec::new(),
             words_sort: crate::domain::wordbook::SortOrder::Normal,
             word_edit: None,
+            article_books: Vec::new(),
+            article_list: Vec::new(),
+            article_book_cursor: 0,
+            article_cursor: 0,
+            article_practice: None,
             group_picker: None,
             collect_picker: None,
             task_preview: None,
@@ -1360,6 +1397,210 @@ impl App {
         self.refresh_task_preview();
     }
 
+    // ── 文章背诵 ─────────────────────────────────────────────────────────
+
+    /// 打开文章书本列表。
+    pub fn open_articles(&mut self) {
+        let Some(paths) = self.paths.clone() else {
+            return;
+        };
+        match crate::domain::article::load_books(&paths) {
+            Ok(books) => {
+                self.article_books = books;
+                self.article_book_cursor = 0;
+                self.article_cursor = 0;
+                self.article_list.clear();
+                self.screen = Screen::Articles;
+            }
+            Err(err) => self.toast(NoticeLevel::Error, format!("读取文章目录失败: {err}")),
+        }
+    }
+
+    /// 移动书本列表的光标。
+    fn move_article_book(&mut self, delta: i32) {
+        let total = self.article_books.len() as i32;
+        if total == 0 {
+            return;
+        }
+        let next = (self.article_book_cursor as i32 + delta).clamp(0, total - 1);
+        self.article_book_cursor = next as usize;
+        self.article_cursor = 0;
+        self.load_selected_book();
+    }
+
+    /// 移动文章列表的光标。
+    fn move_article(&mut self, delta: i32) {
+        let total = self.article_list.len() as i32;
+        if total == 0 {
+            return;
+        }
+        let next = (self.article_cursor as i32 + delta).clamp(0, total - 1);
+        self.article_cursor = next as usize;
+    }
+
+    /// 选中一篇文章开始练习。
+    fn select_article(&mut self) {
+        let index = self.article_cursor;
+        self.start_article_practice(index);
+    }
+
+    /// 加载选中书本里的文章。
+    fn load_selected_book(&mut self) {
+        let Some(paths) = self.paths.clone() else {
+            return;
+        };
+        let Some(book) = self.article_books.get(self.article_book_cursor).cloned() else {
+            self.article_list.clear();
+            return;
+        };
+        match crate::domain::article::load_articles(&paths, &book) {
+            Ok(articles) => self.article_list = articles,
+            Err(err) => {
+                self.article_list.clear();
+                self.toast(NoticeLevel::Error, format!("读取文章失败: {err}"));
+            }
+        }
+    }
+
+    /// 开始一篇文章的跟打练习。
+    pub fn start_article_practice(&mut self, index: usize) {
+        let Some(article) = self.article_list.get(index).cloned() else {
+            return;
+        };
+        let mut sentences: Vec<crate::domain::article::Sentence> = Vec::new();
+        for section in &article.sections {
+            sentences.extend(section.iter().cloned());
+        }
+        if sentences.is_empty() {
+            self.toast(NoticeLevel::Warning, "这篇文章没有可练习的句子");
+            return;
+        }
+        self.article_practice = Some(ArticlePracticeState {
+            article_id: article.id,
+            title: article.title.clone(),
+            sentences,
+            index: 0,
+            typing: Default::default(),
+            finished: 0,
+            wrong_sentences: 0,
+            spend: 0,
+        });
+        self.screen = Screen::ArticlePractice;
+        self.stat = PracticeState::default();
+        self.speak_current_sentence();
+    }
+
+    /// 朗读当前句子。
+    fn speak_current_sentence(&mut self) {
+        let Some(practice) = self.article_practice.as_ref() else {
+            return;
+        };
+        let Some(sentence) = practice.sentences.get(practice.index) else {
+            return;
+        };
+        let text = sentence.text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        crate::audio::speak_sentence(&self.boot.settings, &text);
+    }
+
+    /// 处理文章跟打的一个按键。
+    fn article_typing_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        let Some(practice) = self.article_practice.as_mut() else {
+            return;
+        };
+        let Some(sentence) = practice.sentences.get(practice.index) else {
+            return;
+        };
+        let expected = sentence.text.clone();
+        match key.code {
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                let ignore_case = self.boot.settings.ignore_case;
+                practice.typing.input(&expected, character, ignore_case);
+            }
+            KeyCode::Backspace => {
+                practice.typing.typed = practice.typing.typed.saturating_sub(1);
+            }
+            _ => {}
+        }
+        // 整句输完 → 下一句
+        let done = practice
+            .sentences
+            .get(practice.index)
+            .map(|sentence| practice.typing.is_done(&sentence.text))
+            .unwrap_or(false);
+        if done {
+            self.finish_article_sentence();
+        }
+    }
+
+    /// 完成一句，进入下一句。
+    fn finish_article_sentence(&mut self) {
+        let Some(practice) = self.article_practice.as_mut() else {
+            return;
+        };
+        if practice.typing.wrong {
+            practice.wrong_sentences += 1;
+        }
+        practice.finished += 1;
+        practice.index += 1;
+        practice.typing = Default::default();
+        if practice.index >= practice.sentences.len() {
+            self.finish_article_practice();
+            return;
+        }
+        self.speak_current_sentence();
+    }
+
+    /// 文章练习结束，写统计并给结算。
+    fn finish_article_practice(&mut self) {
+        let Some(practice) = self.article_practice.take() else {
+            return;
+        };
+        let total = practice.finished;
+        let wrong = practice.wrong_sentences;
+        let accuracy = if total == 0 {
+            100
+        } else {
+            (((total - wrong) as f64 / total as f64) * 100.0).round() as u32
+        };
+        // 文章练习的统计写进当前词典的 statistics（带文章标题）
+        if let Some(dict) = self.boot.base.study_dict_mut() {
+            let now = timer::now_ms();
+            let stat = Statistics {
+                start_date: now,
+                spend: practice.spend,
+                total,
+                new_words: 0,
+                review: total,
+                wrong,
+                title: Some(practice.title.clone()),
+                segments: None,
+                session_role: Some("single".to_string()),
+            };
+            dict.statistics.push(stat);
+        }
+        self.save_dict_now();
+        self.summary = Some(SummaryData {
+            spend_ms: practice.spend,
+            accuracy,
+            new_words: 0,
+            review: total,
+            wrong,
+            last_learn_index: 0,
+            length: total,
+            complete: true,
+            wrong_top: Vec::new(),
+            week_days: [None; 7],
+        });
+        self.screen = Screen::Practice;
+    }
+
     // ── 词条管理 ─────────────────────────────────────────────────────────
 
     /// 打开词库页当前选中词典的词条管理页。
@@ -1911,6 +2152,19 @@ impl App {
 
         if self.screen == Screen::Practice {
             self.on_practice_key(key);
+            return;
+        }
+
+        if self.screen == Screen::ArticlePractice {
+            if key.code == KeyCode::Esc {
+                self.back();
+                return;
+            }
+            if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                self.speak_current_sentence();
+                return;
+            }
+            self.article_typing_key(key);
             return;
         }
 

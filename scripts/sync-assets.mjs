@@ -9,7 +9,9 @@
  *
  * 产物（已提交进仓库，运行时不需要 Node）：
  *   assets/list/word.json
+ *   assets/list/article.json
  *   assets/dicts/en/word/*.json
+ *   assets/dicts/en/article/*.json
  */
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -42,5 +44,7 @@ const copy = (relative) => {
 }
 
 copy('list/word.json')
+copy('list/article.json')
 copy('dicts/en/word')
+copy('dicts/en/article')
 console.log('[sync-assets] 完成:', target)

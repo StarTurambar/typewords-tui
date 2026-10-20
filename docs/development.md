@@ -117,7 +117,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 13 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
+仓库 `docs/screenshots/` 的 15 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
@@ -132,6 +132,10 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `shortcuts-120x40-dark.png` | `shortcuts 120 40 dark` |
 | `wordtest-120x40-dark.png` | `wordtest 120 40 dark` |
 | `words-120x40-dark.png` | `words 120 40 dark` |
+| `articles-120x40-dark.png` | `articles 120 40 dark` |
+| `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
+| `articles-120x40-dark.png` | `articles 120 40 dark` |
+| `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
 | `help-120x40-dark.png` | `help 120 40 dark` |
 | `summary-120x40-dark.png` | `summary 120 40 dark` |
 
@@ -143,7 +147,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 
 ## 7. 词库资源维护
 
-- 运行期只读资源目录：`assets/list/word.json`（词库目录）+ `assets/dicts/en/word/*.json`（词条）。仓库当前内置 CET-4（2607 词，约 4.5 MB）。
+- 运行期只读资源目录：`assets/list/word.json`（词库目录）+ `assets/dicts/en/word/*.json`（词条）+ `assets/list/article.json`（文章书目）+ `assets/dicts/en/article/*.json`（文章）。仓库当前内置 CET-4（2607 词，约 4.5 MB）与《新概念英语1》（5 篇）。
 - 同步上游词库（需要 Node）：
 
   ```bash

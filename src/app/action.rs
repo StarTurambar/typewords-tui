@@ -32,6 +32,12 @@ pub enum Action {
     CollectMove(i32),
     CollectSelect,
     CollectCancel,
+    // 文章
+    OpenArticles,
+    ArticleSpeak,
+    ArticleBookMove(i32),
+    ArticleMove(i32),
+    ArticleSelect,
     // 词条管理
     OpenWords,
     OpenSelectedWords,
@@ -135,6 +141,13 @@ impl App {
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
             Action::CollectCancel => self.collect_picker = None,
+            Action::OpenArticles => self.open_articles(),
+            Action::ArticleBookMove(delta) => self.move_article_book(delta),
+            Action::ArticleMove(delta) => self.move_article(delta),
+            Action::ArticleSelect => self.select_article(),
+            Action::ArticleSpeak => {
+                self.speak_current_sentence();
+            }
             Action::OpenWords => self.open_words(),
             Action::OpenSelectedWords => self.open_selected_words(),
             Action::WordsMove(delta) => self.move_words_cursor(delta),
@@ -246,6 +259,14 @@ impl App {
                 self.words_search_focus = false;
                 self.words_marked.clear();
             }
+            Screen::Articles => {
+                self.screen = Screen::Articles;
+                self.article_book_cursor = 0;
+                self.article_cursor = 0;
+            }
+            Screen::ArticlePractice => {
+                self.screen = Screen::ArticlePractice;
+            }
             Screen::Help => {
                 self.help_scroll = 0;
                 self.screen = Screen::Help;
@@ -254,7 +275,7 @@ impl App {
         }
     }
 
-    fn back(&mut self) {
+    pub(crate) fn back(&mut self) {
         if self.confirm.is_some() {
             self.confirm = None;
             return;
@@ -280,6 +301,11 @@ impl App {
             }
             Screen::WordTest => self.leave_word_test(),
             Screen::Words => self.navigate_to(Screen::DictPicker),
+            Screen::Articles => self.navigate_to(Screen::Home),
+            Screen::ArticlePractice => {
+                self.article_practice = None;
+                self.navigate_to(Screen::Articles);
+            }
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
         }
     }
