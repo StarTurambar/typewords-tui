@@ -117,11 +117,17 @@ impl App {
             Action::EditSave => self.edit_save(),
             Action::EditCancel => self.edit = None,
             Action::EditChar(character) => {
-                if let Some(edit) = self.edit.as_mut()
-                    && character.is_ascii_digit()
-                    && edit.buffer.len() < 6
-                {
-                    edit.buffer.push(character);
+                if let Some(edit) = self.edit.as_mut() {
+                    // 笔记是自由文本，其余设置项只接受数字
+                    let accepted = match edit.target {
+                        crate::app::EditTarget::Note => {
+                            !character.is_control() && edit.buffer.chars().count() < 200
+                        }
+                        _ => character.is_ascii_digit() && edit.buffer.len() < 6,
+                    };
+                    if accepted {
+                        edit.buffer.push(character);
+                    }
                 }
             }
             Action::EditBackspace => {
@@ -244,8 +250,31 @@ impl App {
         let Some(edit) = self.edit.take() else {
             return;
         };
+        if edit.target == crate::app::EditTarget::Note {
+            self.save_word_note(edit.buffer);
+            return;
+        }
         let value = edit.buffer.parse::<i64>().unwrap_or_default();
         self.apply_number_value(edit.target, value);
+    }
+
+    /// 保存（或清空）当前单词的笔记。
+    fn save_word_note(&mut self, note: String) {
+        let Some(word) = self
+            .session
+            .as_ref()
+            .map(|session| session.current_word().word)
+            .filter(|word| !word.is_empty())
+        else {
+            return;
+        };
+        let note = note.trim().to_string();
+        if note.is_empty() {
+            self.boot.base.note_data.remove(&word);
+        } else {
+            self.boot.base.note_data.insert(word, note);
+        }
+        self.save_dict_now();
     }
 
     /// 供主页/词库页共用。

@@ -454,6 +454,7 @@ fn edit_label(edit: &EditState) -> String {
         crate::app::EditTarget::GoodLimit => tr("fsrs_good_limit"),
         crate::app::EditTarget::HardLimit => tr("fsrs_hard_limit"),
         crate::app::EditTarget::Retention => tr("request_retention"),
+        crate::app::EditTarget::Note => "单词笔记".to_string(),
     }
 }
 

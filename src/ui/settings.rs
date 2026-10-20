@@ -284,5 +284,6 @@ fn number_text(target: EditTarget, value: i64) -> String {
         EditTarget::EasyLimit | EditTarget::GoodLimit | EditTarget::HardLimit => value.to_string(),
         EditTarget::Retention => format!("{value}%"),
         EditTarget::PerDay => format!("{value} 词"),
+        EditTarget::Note => String::new(),
     }
 }

@@ -16,7 +16,7 @@ use crate::domain::flow::{FlowDisplayState, FlowProgressStage, display_state};
 use crate::domain::i18n::tr;
 use crate::domain::session::PracticeSession;
 use crate::domain::timer::format_duration;
-use crate::domain::types::WordPracticeType;
+use crate::domain::types::{Word, WordPracticeType};
 use crate::ui::bigtext::{self, BigLetter, GLYPH_WIDTH};
 use crate::ui::shell::toast_line;
 use crate::ui::target::Target;
@@ -109,7 +109,7 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
         0
     };
     let big = word_lines(app, session, inner_width, max_big_height, theme);
-    let cards = card_specs(app, session, inner_width, theme);
+    let cards = card_specs(app, session, theme);
     let cards_height: u16 = cards
         .iter()
         .map(|(_, lines, max_lines)| card_height(inner_width, lines, *max_lines))
@@ -438,6 +438,21 @@ fn word_area(
             format!("/ {phonetic} /"),
             Style::default().fg(theme.dim),
         )));
+    }
+    // 本词的错误次数
+    let wrong_times = session
+        .data
+        .wrong_times_map
+        .get(&word.word)
+        .copied()
+        .unwrap_or(0);
+    if wrong_times > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("错 {wrong_times} 次"),
+            Style::default().fg(theme.bad),
+        )));
+    }
+    if !phonetic.is_empty() || wrong_times > 0 {
         lines.push(Line::from(""));
     }
     lines.extend(big.iter().cloned());
@@ -481,12 +496,82 @@ fn word_area(
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
 }
 
-fn card_specs(
-    app: &App,
-    session: &PracticeSession,
-    inner_width: usize,
+/// 词频对应的颜色：上游用透明度区分（生僻 0.6 / 次用 0.8 / 常用 1.0），
+/// 终端没有透明度，改用主题色的深浅表达。
+fn frequency_color(frequency: Option<i64>, theme: &Theme) -> Color {
+    match frequency {
+        Some(0) => theme.dim,
+        Some(1) => theme.muted,
+        _ => theme.fg,
+    }
+}
+
+/// 释义：按词性分组，组内按词频倒序，组间按总词频倒序。
+///
+/// 对齐上游 `TranslationList.vue`：跳过「【名】」「（人名）」的条目，没有词性的
+/// 释义单独成行。
+fn translation_lines(word: &Word, theme: &Theme) -> Vec<(String, Color)> {
+    let mut groups: Vec<(String, Vec<&crate::domain::types::Trans>)> = Vec::new();
+    let mut no_pos: Vec<&crate::domain::types::Trans> = Vec::new();
+    for item in &word.trans {
+        if item.cn.contains("【名】") || item.cn.contains("（人名）") {
+            continue;
+        }
+        if item.pos.is_empty() {
+            no_pos.push(item);
+            continue;
+        }
+        match groups.iter_mut().find(|(pos, _)| *pos == item.pos) {
+            Some((_, items)) => items.push(item),
+            None => groups.push((item.pos.clone(), vec![item])),
+        }
+    }
+    for (_, items) in groups.iter_mut() {
+        items.sort_by_key(|item| std::cmp::Reverse(item.frequency));
+    }
+    let total = |items: &Vec<&crate::domain::types::Trans>| {
+        items.iter().filter_map(|item| item.frequency).sum::<i64>()
+    };
+    groups.sort_by_key(|(_, items)| std::cmp::Reverse(total(items)));
+
+    let mut lines: Vec<(String, Color)> = Vec::new();
+    if !no_pos.is_empty() {
+        let text = no_pos
+            .iter()
+            .map(|item| item.cn.clone())
+            .collect::<Vec<_>>()
+            .join("  ");
+        let color = frequency_color(no_pos.iter().filter_map(|item| item.frequency).max(), theme);
+        lines.push((text, color));
+    }
+    for (pos, items) in groups {
+        let text = items
+            .iter()
+            .map(|item| item.cn.clone())
+            .collect::<Vec<_>>()
+            .join("  ");
+        let color = frequency_color(items.iter().filter_map(|item| item.frequency).max(), theme);
+        lines.push((format!("{pos}  {text}"), color));
+    }
+    lines
+}
+
+/// 例句 / 短语：英文一行、中文一行。
+fn sub_content_lines(
+    items: &[crate::domain::types::WordSubContent],
     theme: &Theme,
-) -> Vec<CardSpec> {
+) -> Vec<(String, Color)> {
+    let mut content: Vec<(String, Color)> = Vec::new();
+    for item in items.iter().take(2) {
+        content.push((item.c.clone(), theme.fg));
+        if !item.cn.is_empty() {
+            content.push((item.cn.clone(), theme.dim));
+        }
+    }
+    content
+}
+
+fn card_specs(app: &App, session: &PracticeSession, theme: &Theme) -> Vec<CardSpec> {
     if session.practice_type() == WordPracticeType::Identify && !session.display.show_word_result {
         return identify_specs(app, session, theme);
     }
@@ -496,28 +581,30 @@ fn card_specs(
     let mut cards: Vec<CardSpec> = Vec::new();
 
     if view.is_show_translate && !word.trans.is_empty() {
-        let text = word
-            .trans
-            .iter()
-            .map(|item| format!("{}{}", item.pos, item.cn))
-            .collect::<Vec<_>>()
-            .join("；");
-        let content = wrap_text(&text, inner_width)
-            .into_iter()
-            .map(|line| (line, theme.fg))
-            .collect();
+        let content = translation_lines(&word, theme);
         cards.push((" 释义 ".to_string(), content, 4));
     }
 
     if app.show_meta && !word.sentences.is_empty() {
-        let mut content: Vec<(String, Color)> = Vec::new();
-        for sentence in word.sentences.iter().take(2) {
-            content.push((sentence.c.clone(), theme.fg));
-            if !sentence.cn.is_empty() {
-                content.push((sentence.cn.clone(), theme.dim));
-            }
-        }
+        let content = sub_content_lines(&word.sentences, theme);
         cards.push((" 例句 ".to_string(), content, 4));
+    }
+
+    if app.show_meta && !word.phrases.is_empty() {
+        let content = sub_content_lines(&word.phrases, theme);
+        cards.push((" 短语 ".to_string(), content, 3));
+    }
+
+    if app.show_meta && !word.synos.is_empty() {
+        let mut content: Vec<(String, Color)> = Vec::new();
+        for syno in word.synos.iter().take(2) {
+            let mut text = format!("{} {}", syno.pos, syno.cn);
+            if !syno.ws.is_empty() {
+                text.push_str(&format!("（{}）", syno.ws.join("、")));
+            }
+            content.push((text, theme.fg));
+        }
+        cards.push((" 近义词 ".to_string(), content, 3));
     }
 
     if app.show_meta && app.boot.settings.show_etymology_and_rel_words {
@@ -528,9 +615,26 @@ fn card_specs(
         if !word.rel_words.root.is_empty() {
             content.push((format!("词根：{}", word.rel_words.root), theme.dim));
         }
+        for group in word.rel_words.rels.iter().take(1) {
+            let words: Vec<String> = group
+                .words
+                .iter()
+                .take(3)
+                .map(|item| item.c.clone())
+                .collect();
+            if !words.is_empty() {
+                content.push((format!("{} {}", group.pos, words.join("、")), theme.dim));
+            }
+        }
         if !content.is_empty() {
             cards.push((" 词源 ".to_string(), content, 3));
         }
+    }
+
+    // 单词笔记：练习页可显示与编辑
+    if let Some(note) = app.boot.base.note_data.get(&word.word) {
+        let text = note.replace('\n', " ");
+        cards.push((" 笔记 ".to_string(), vec![(text, theme.accent_alt)], 2));
     }
 
     cards

@@ -837,3 +837,57 @@ fn manual_pause_is_not_resumed_by_typing() {
     app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
     assert!(app.stat.timer_paused, "手动暂停不应被输入自动恢复");
 }
+
+#[test]
+fn word_note_can_be_edited_and_persists() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    let word = app.session.as_ref().expect("session").current_word().word;
+
+    // Ctrl+O 打开笔记编辑
+    app.on_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    assert!(app.edit.is_some(), "应打开输入弹层");
+    for character in "记住这个词".chars() {
+        app.apply_action(app::Action::EditChar(character));
+    }
+    app.apply_action(app::Action::EditSave);
+    assert!(app.edit.is_none(), "保存后弹层应关闭");
+
+    assert_eq!(
+        app.boot.base.note_data.get(&word).map(String::as_str),
+        Some("记住这个词"),
+        "笔记应写入词典状态"
+    );
+
+    // 重启后仍在
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(
+        reloaded.boot.base.note_data.get(&word).map(String::as_str),
+        Some("记住这个词"),
+        "笔记应持久化"
+    );
+}
+
+#[test]
+fn clearing_a_note_removes_it() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    let word = app.session.as_ref().expect("session").current_word().word;
+    app.boot
+        .base
+        .note_data
+        .insert(word.clone(), "旧笔记".to_string());
+
+    app.on_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    for _ in 0..3 {
+        app.apply_action(app::Action::EditBackspace);
+    }
+    app.apply_action(app::Action::EditSave);
+    assert!(
+        !app.boot.base.note_data.contains_key(&word),
+        "清空后应删除笔记"
+    );
+}

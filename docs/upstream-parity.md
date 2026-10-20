@@ -128,7 +128,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`components/article/*` | 无 | 缺失 | TUI 不加载 `dicts/en/article` |
 | 音频 | 发音与键盘音效 | `hooks/sound.ts`、`base/Audio.vue`、`components/article/ArticleAudio.vue` | 无 | 缺失 | 不引入音频依赖；听写阶段改看音标与释义 |
 | 查词 | 练习中查词与在线翻译 | `WordLookupPopover.vue`、`libs/translate/*`、`public.word/query` | 无 | 缺失 | 离线设计目标 |
-| 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 仅 `BaseState.note_data` 透传 | 缺失 | 数据保留但不能显示或编辑 |
+| 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑，存 `noteData` | 已对齐 | 词库页的笔记字段仍只有练习页这一处入口 |
 | 多语言 | 界面语言切换 | `i18n/locales/*.json`（14 种） | 中文硬编码（`src/domain/i18n.rs`） | 缺失 | 键名对齐上游但无语言包 |
 | 云同步 | Supabase 同步 | `utils/supabase.ts`、`useDataSyncPersistence.ts` | 无 | 缺失 | 上游设置页已把该功能标为「过时功能」 |
 | 备份 | 备份导入导出 | `hooks/export.ts`（ZIP：`data.json` + mp3；JSON） | 无 UI | 缺失 | 只能手工复制数据目录 |

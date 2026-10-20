@@ -75,6 +75,8 @@ pub enum EditTarget {
     GoodLimit,
     HardLimit,
     Retention,
+    /// 单词笔记（自由文本，不是数字）
+    Note,
 }
 
 #[derive(Clone, Debug)]
@@ -1417,6 +1419,20 @@ impl App {
                 self.show_meta = !self.show_meta;
                 true
             }
+            // 编辑当前词的笔记：上游在练习页内联编辑，TUI 用输入弹层
+            KeyCode::Char('o') if ctrl => {
+                let note = self
+                    .session
+                    .as_ref()
+                    .map(|session| session.current_word().word)
+                    .and_then(|word| self.boot.base.note_data.get(&word).cloned())
+                    .unwrap_or_default();
+                self.edit = Some(EditState {
+                    target: EditTarget::Note,
+                    buffer: note,
+                });
+                true
+            }
             KeyCode::Char('c') if ctrl => {
                 self.save_practice_now();
                 self.save_dict_now();
@@ -1469,6 +1485,7 @@ impl App {
             EditTarget::Retention => {
                 (settings.fsrs_parameters.request_retention * 100.0).round() as i64
             }
+            EditTarget::Note => 0,
         }
     }
 
@@ -1503,6 +1520,7 @@ impl App {
                             (value.clamp(50, 99) as f64) / 100.0
                     }
                     EditTarget::PerDay => {}
+                    EditTarget::Note => {}
                 }
                 self.save_settings_now();
             }
