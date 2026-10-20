@@ -4,10 +4,12 @@ mod common;
 
 use typewords_tui::domain::flow::navigator::NavState;
 use typewords_tui::domain::flow::navigator::Navigator;
-use typewords_tui::domain::flow::{flow_for_mode, resolve_flow_start};
+use typewords_tui::domain::flow::{
+    PracticeFlowCursor, flow_for_mode, resolve_flow_start, stage_for_cursor,
+};
 use typewords_tui::domain::rng::{Rng, seeded, shuffle};
 use typewords_tui::domain::types::{
-    PracticeData, PracticeState, TaskWords, WordPracticeMode, WordPracticeType,
+    PracticeData, PracticeState, TaskWords, WordPracticeMode, WordPracticeStage, WordPracticeType,
 };
 
 fn drive(
@@ -110,4 +112,65 @@ fn flow_phase_tracks_practice_type() {
         phase.word_advance,
         typewords_tui::domain::flow::WordAdvance::WordLoop { group_size: 7, .. }
     ));
+}
+
+/// 上游 `WordPracticeModeStageMap`（`app/core/config/env.ts`）。
+///
+/// 只列完成前的阶段；`Complete` 由结算流程追加。
+fn upstream_stage_map(mode: WordPracticeMode) -> Vec<WordPracticeStage> {
+    use WordPracticeStage::*;
+    match mode {
+        WordPracticeMode::Free => vec![FollowWriteNewWord],
+        WordPracticeMode::IdentifyOnly => vec![IdentifyNewWord, IdentifyReview],
+        WordPracticeMode::DictationOnly => vec![DictationNewWord, DictationReview],
+        WordPracticeMode::ListenOnly => vec![ListenNewWord, ListenReview],
+        WordPracticeMode::System => vec![
+            FollowWriteNewWord,
+            ListenNewWord,
+            DictationNewWord,
+            IdentifyReview,
+            ListenReview,
+            DictationReview,
+        ],
+        WordPracticeMode::Shuffle => vec![Shuffle],
+        WordPracticeMode::Review => vec![IdentifyReview, ListenReview, DictationReview],
+        _ => Vec::new(),
+    }
+}
+
+#[test]
+fn stage_sequence_matches_upstream_mode_map() {
+    let modes = [
+        WordPracticeMode::System,
+        WordPracticeMode::Free,
+        WordPracticeMode::Review,
+        WordPracticeMode::Shuffle,
+        WordPracticeMode::IdentifyOnly,
+        WordPracticeMode::DictationOnly,
+        WordPracticeMode::ListenOnly,
+    ];
+    for mode in modes {
+        let flow = flow_for_mode(mode);
+        let mut actual: Vec<WordPracticeStage> = Vec::new();
+        for (node_index, node) in flow.nodes.iter().enumerate() {
+            for (step_index, _) in node.steps.iter().enumerate() {
+                let cursor = PracticeFlowCursor {
+                    node_index,
+                    step_index,
+                    in_wrong_word_clear: false,
+                    loop_range: None,
+                    end_action_index: None,
+                };
+                let stage = stage_for_cursor(&flow, &cursor);
+                if actual.last() != Some(&stage) {
+                    actual.push(stage);
+                }
+            }
+        }
+        assert_eq!(
+            actual,
+            upstream_stage_map(mode),
+            "模式 {mode:?} 的阶段序列应与上游一致"
+        );
+    }
 }

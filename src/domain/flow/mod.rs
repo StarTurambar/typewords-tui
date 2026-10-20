@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::constants::{CURRENT_FLOW_VERSION, GROUP_SIZE};
 use crate::domain::i18n::tr;
-use crate::domain::types::{TaskWords, Word, WordPracticeMode, WordPracticeType};
+use crate::domain::types::{
+    TaskWords, Word, WordPracticeMode, WordPracticeStage, WordPracticeType,
+};
 
 // ── 游标（需要持久化到练习缓存）────────────────────────────────────────────
 
@@ -499,6 +501,74 @@ pub fn resolve_phase_by_cursor(
     }
 
     phase
+}
+
+/// 当前相位实际生效的练习方式：错词清空与组内巩固子步骤都会覆盖主步骤的方式。
+fn effective_template(
+    config: &PracticeFlowConfig,
+    cursor: &PracticeFlowCursor,
+) -> PracticeStepTemplateId {
+    let step = get_step(config, cursor);
+    if cursor.in_wrong_word_clear {
+        let index = cursor.end_action_index.unwrap_or(0);
+        if let Some(PracticeEndAction::WrongWordClear { template_id, .. }) = step.on_end.get(index)
+        {
+            return *template_id;
+        }
+    }
+    if let Some(loop_range) = &cursor.loop_range
+        && let Some(sub_step) = step.word_advance.sub_steps().get(loop_range.sub_step_index)
+    {
+        return *sub_step;
+    }
+    step.template_id
+}
+
+/// 由游标推出上游的 `WordPracticeStage`（存档里的 `statStoreData.stage`）。
+///
+/// 上游只区分「新词 / 复习」两类词表与四种练习方式；`Spell` 是跟写阶段内的
+/// 组内巩固子步骤，归回跟写阶段。随机复习模式在上游只有 `Shuffle` 一个阶段。
+pub fn stage_for_cursor(
+    config: &PracticeFlowConfig,
+    cursor: &PracticeFlowCursor,
+) -> WordPracticeStage {
+    if config.mode == WordPracticeMode::Shuffle {
+        return WordPracticeStage::Shuffle;
+    }
+    let source = config
+        .nodes
+        .get(cursor.node_index)
+        .map(|node| node.source)
+        .unwrap_or(PracticeWordsSource::TaskNew);
+    let template = effective_template(config, cursor);
+    match (source, template) {
+        (PracticeWordsSource::TaskNew, PracticeStepTemplateId::FollowWrite)
+        | (PracticeWordsSource::TaskNew, PracticeStepTemplateId::Spell)
+        | (PracticeWordsSource::Current, _) => WordPracticeStage::FollowWriteNewWord,
+        (PracticeWordsSource::TaskNew, PracticeStepTemplateId::Identify) => {
+            WordPracticeStage::IdentifyNewWord
+        }
+        (PracticeWordsSource::TaskNew, PracticeStepTemplateId::Listen) => {
+            WordPracticeStage::ListenNewWord
+        }
+        (PracticeWordsSource::TaskNew, PracticeStepTemplateId::Dictation) => {
+            WordPracticeStage::DictationNewWord
+        }
+        (PracticeWordsSource::TaskReview, PracticeStepTemplateId::FollowWrite)
+        | (PracticeWordsSource::TaskReview, PracticeStepTemplateId::Spell) => {
+            WordPracticeStage::FollowWriteReview
+        }
+        (PracticeWordsSource::TaskReview, PracticeStepTemplateId::Identify) => {
+            WordPracticeStage::IdentifyReview
+        }
+        (PracticeWordsSource::TaskReview, PracticeStepTemplateId::Listen) => {
+            WordPracticeStage::ListenReview
+        }
+        (PracticeWordsSource::TaskReview, PracticeStepTemplateId::Dictation) => {
+            WordPracticeStage::DictationReview
+        }
+        (PracticeWordsSource::WrongWords, _) => WordPracticeStage::FollowWriteNewWord,
+    }
 }
 
 pub fn advance_step_cursor(

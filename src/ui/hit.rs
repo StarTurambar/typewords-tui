@@ -27,6 +27,8 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
 
     match app.screen {
         Screen::Home => targets.extend(super::home::targets(app, shell.content)),
+        // 练习页独占整屏，不走 shell 布局
+        Screen::Practice => targets.extend(super::practice::targets(app, area)),
         Screen::DictPicker => targets.extend(super::dict_picker::targets(app, shell.content)),
         Screen::Settings => targets.extend(super::settings::targets(app, shell.content)),
         Screen::Help => targets.push(Target::new(shell.content, Action::HelpBack)),

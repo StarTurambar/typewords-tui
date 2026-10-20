@@ -1,6 +1,9 @@
 //! 练习页渲染：大字单词 + 信息卡片。
 //!
 //! 视觉层次：顶部状态行（进度条/错词/计时）→ 居中大字单词 → 释义/例句/词源卡片 → 阶段与按键条。
+//!
+//! 布局统一由 `layout()` 产出，`render_practice` 与 `targets` 共用同一份矩形，
+//! 满足「同一份布局同时服务绘制与命中」的不变量。
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Flex, Layout, Rect};
@@ -8,7 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use crate::app::App;
+use crate::app::{Action, App};
 use crate::domain::flow::{FlowDisplayState, FlowProgressStage, display_state};
 use crate::domain::i18n::tr;
 use crate::domain::session::PracticeSession;
@@ -16,52 +19,64 @@ use crate::domain::timer::format_duration;
 use crate::domain::types::WordPracticeType;
 use crate::ui::bigtext::{self, BigLetter, GLYPH_WIDTH};
 use crate::ui::shell::toast_line;
+use crate::ui::target::Target;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::{bar_spans, wrap_text};
 
-pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    let Some(session) = app.session.as_ref() else {
-        return;
-    };
-    let display = display_state(
-        session.flow(),
-        session.cursor(),
-        session.data.index,
-        session.data.words.len(),
-    );
+/// 信息卡片内容：(标题, 行内容, 最大行数)
+pub(crate) type CardSpec = (String, Vec<(String, Color)>, usize);
 
-    let constraints = if app.show_toolbar {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(10),
-            Constraint::Length(6),
-        ]
-    } else {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(10),
-            Constraint::Length(1),
-        ]
-    };
+/// 练习页布局：绘制与鼠标命中共用同一份矩形。
+pub struct PracticeLayout {
+    /// 顶部状态行
+    pub header: Rect,
+    /// 主区域（已扣除词表侧栏）
+    pub body: Rect,
+    /// 大字单词区
+    pub word_area: Rect,
+    /// 信息卡片区
+    pub cards_area: Rect,
+    /// 底部阶段条
+    pub footer: Rect,
+    /// 词表侧栏（`show_panel` 关闭时为 `None`）
+    pub word_list: Option<Rect>,
+    /// 词表可见行：(词序号, 矩形)
+    pub word_rows: Vec<(usize, Rect)>,
+    /// 主区域内容宽度（已扣除卡片边框）
+    pub inner_width: usize,
+    /// 大字单词渲染结果：其行数决定单词区高度，故在布局阶段一并算出
+    pub big: Vec<Line<'static>>,
+    /// 信息卡片内容
+    pub cards: Vec<CardSpec>,
+}
+
+/// 计算练习页布局。
+pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -> PracticeLayout {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints(if app.show_toolbar {
+            vec![
+                Constraint::Length(1),
+                Constraint::Min(10),
+                Constraint::Length(6),
+            ]
+        } else {
+            vec![
+                Constraint::Length(1),
+                Constraint::Min(10),
+                Constraint::Length(1),
+            ]
+        })
         .split(area);
 
-    frame.render_widget(
-        Paragraph::new(header(app, session, &display, theme)),
-        outer[0],
-    );
-
-    let body = if app.show_panel {
+    let (body, word_list) = if app.show_panel {
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(30), Constraint::Length(28)])
             .split(outer[1]);
-        render_word_list(app, session, frame, horizontal[1], theme);
-        horizontal[0]
+        (horizontal[0], Some(horizontal[1]))
     } else {
-        outer[1]
+        (outer[1], None)
     };
 
     let inner_width = body.width.saturating_sub(4) as usize;
@@ -84,8 +99,8 @@ pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &
         0
     };
     let big = word_lines(app, session, inner_width, max_big_height, theme);
-    let specs = card_specs(app, session, inner_width, theme);
-    let cards_height: u16 = specs
+    let cards = card_specs(app, session, inner_width, theme);
+    let cards_height: u16 = cards
         .iter()
         .map(|(_, lines, max_lines)| card_height(inner_width, lines, *max_lines))
         .sum();
@@ -103,13 +118,89 @@ pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &
         ])
         .flex(Flex::Center)
         .split(body);
-    word_area(app, session, frame, content[0], theme, &big);
-    render_cards(frame, content[1], &specs, inner_width, theme);
+
+    // 词表是带边框的 List：内容从边框内侧开始，每行一个词
+    let word_rows = word_list
+        .map(|rect| {
+            let visible = rect.height.saturating_sub(2) as usize;
+            session
+                .data
+                .words
+                .iter()
+                .enumerate()
+                .take(visible)
+                .map(|(index, _)| {
+                    (
+                        index,
+                        Rect::new(rect.x, rect.y + 1 + index as u16, rect.width, 1),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    PracticeLayout {
+        header: outer[0],
+        body,
+        word_area: content[0],
+        cards_area: content[1],
+        footer: outer[2],
+        word_list,
+        word_rows,
+        inner_width,
+        big,
+        cards,
+    }
+}
+
+/// 练习页的鼠标目标：点击词表侧栏的某一行跳到该词。
+pub fn targets(app: &App, area: Rect) -> Vec<Target> {
+    let Some(session) = app.session.as_ref() else {
+        return Vec::new();
+    };
+    let theme = app.theme();
+    let layout = layout(app, session, area, &theme);
+    layout
+        .word_rows
+        .iter()
+        .map(|(index, rect)| Target::new(*rect, Action::PracticeGotoWord(*index)))
+        .collect()
+}
+
+pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(session) = app.session.as_ref() else {
+        return;
+    };
+    let display = display_state(
+        session.flow(),
+        session.cursor(),
+        session.data.index,
+        session.data.words.len(),
+    );
+    let layout = layout(app, session, area, theme);
+
+    frame.render_widget(
+        Paragraph::new(header(app, session, &display, theme)),
+        layout.header,
+    );
+
+    if let Some(word_list) = layout.word_list {
+        render_word_list(app, session, frame, word_list, theme);
+    }
+
+    word_area(app, session, frame, layout.word_area, theme, &layout.big);
+    render_cards(
+        frame,
+        layout.cards_area,
+        &layout.cards,
+        layout.inner_width,
+        theme,
+    );
 
     if app.show_toolbar {
-        render_stage_progress(app, session, frame, outer[2], theme, &display.stages);
-    } else if outer[2].height > 0 {
-        frame.render_widget(Paragraph::new(toast_line(app, theme)), outer[2]);
+        render_stage_progress(app, session, frame, layout.footer, theme, &display.stages);
+    } else if layout.footer.height > 0 {
+        frame.render_widget(Paragraph::new(toast_line(app, theme)), layout.footer);
     }
 }
 
@@ -354,8 +445,6 @@ fn word_area(
 
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
 }
-
-type CardSpec = (String, Vec<(String, Color)>, usize);
 
 fn card_specs(
     app: &App,

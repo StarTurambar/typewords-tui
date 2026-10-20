@@ -23,6 +23,8 @@ pub enum Action {
     ActivateSetting(usize),
     // 统计
     StatsScroll(i32),
+    // 练习
+    PracticeGotoWord(usize),
     // 结算
     SummaryContinue,
     SummaryRelearn,
@@ -75,6 +77,7 @@ impl App {
                 }
             }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
+            Action::PracticeGotoWord(index) => self.goto_practice_word(index),
             Action::SummaryContinue => self.continue_after_summary(),
             Action::SummaryRelearn => self.relearn_after_summary(),
             Action::SummaryHome => self.summary_home(),

@@ -526,6 +526,8 @@ impl App {
             return;
         };
         let (word_changed, phase_changed) = session.refresh();
+        // 阶段与存档里的 `statStoreData.stage` 保持一致（上游同名字段）
+        self.stat.stage = session.stage();
         let reset_word = std::mem::take(&mut session.reset_word);
         // 键入引擎里的输入属于「上一个 (单词, 阶段)」，任一变化都必须丢弃：
         // - 进入组内巩固 / 错词巩固时组头可能仍是同一个单词（单词键不变）；
@@ -729,6 +731,21 @@ impl App {
         let notices = session.skip_step(&self.boot.base, &mut self.stat, &mut self.rng);
         self.handle_notices(notices);
         self.typing.reset();
+        self.after_advance();
+    }
+
+    /// 跳到词表中的第 `index` 个词（点击词表侧栏）。
+    fn goto_practice_word(&mut self, index: usize) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if index >= session.data.words.len() {
+            return;
+        }
+        session.data.index = index;
+        self.typing.reset();
+        session.update_question(&mut self.rng);
+        self.identify_select = None;
         self.after_advance();
     }
 

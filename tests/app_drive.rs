@@ -500,3 +500,37 @@ fn cross_day_statistics_count_once_in_today_stats() {
     assert_eq!(app.today_review, 4, "复习计数只应算一次");
     assert_eq!(app.today_wrong, 2, "错词计数只应算一次");
 }
+
+#[test]
+fn clicking_word_list_row_jumps_to_that_word() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    // 词表侧栏默认关闭，Ctrl+L 打开
+    app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+    let area = Rect::new(0, 0, 120, 40);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::PracticeGotoWord(2))
+        .expect("词表侧栏应有点击目标");
+    let column = target.rect.x + target.rect.width / 2;
+    let row = target.rect.y + target.rect.height / 2;
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+
+    let session = app.session.as_ref().expect("session");
+    assert_eq!(session.data.index, 2, "点击词表应跳到该词");
+}

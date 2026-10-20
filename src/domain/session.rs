@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::domain::flow::navigator::{NavState, Navigator, Notice};
 use crate::domain::flow::{
     FlowStartResult, PracticeFlowConfig, PracticeFlowCursor, PracticePhase, flow_for_mode,
-    resolve_flow_start,
+    resolve_flow_start, stage_for_cursor,
 };
 use crate::domain::question::build_question;
 use crate::domain::rng::{Rng, shuffle};
@@ -15,7 +15,7 @@ use crate::domain::timer::{self, close_open_segment};
 use crate::domain::types::{
     BaseState, Dict, PracticeCache, PracticeCacheCompact, PracticeData, PracticeDataCompact,
     PracticeState, Question, RATING_GOOD, SettingState, TaskWords, TaskWordsStr, Word,
-    WordPracticeMode, WordPracticeType,
+    WordPracticeMode, WordPracticeStage, WordPracticeType,
 };
 use crate::domain::typing::TypingSettings;
 
@@ -122,6 +122,11 @@ impl PracticeSession {
 
     pub fn phase(&self) -> PracticePhase {
         self.nav.current_phase()
+    }
+
+    /// 当前阶段（上游 `WordPracticeStage`，写入存档的 `statStoreData.stage`）。
+    pub fn stage(&self) -> WordPracticeStage {
+        stage_for_cursor(&self.nav.flow, &self.nav.cursor)
     }
 
     pub fn practice_type(&self) -> WordPracticeType {
