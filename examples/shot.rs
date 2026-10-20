@@ -40,7 +40,16 @@ use typewords_tui::cli::Cli;
 use typewords_tui::paths::{Paths, locate_assets};
 
 const SUPPORTED_SCREENS: &[&str] = &[
-    "home", "practice", "dict", "stats", "settings", "help", "summary", "edit", "confirm",
+    "home",
+    "practice",
+    "dict",
+    "stats",
+    "settings",
+    "shortcuts",
+    "help",
+    "summary",
+    "edit",
+    "confirm",
 ];
 
 fn main() {
@@ -159,6 +168,7 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
         "dict" => app.screen = Screen::DictPicker,
         "stats" => app.screen = Screen::Stats,
         "settings" => app.screen = Screen::Settings,
+        "shortcuts" => app.screen = Screen::Shortcuts,
         "help" => app.screen = Screen::Help,
         "confirm" => {
             // 主页按 q 请求退出 → 确认弹层（不构造 ConfirmState）。

@@ -23,6 +23,13 @@ pub enum Action {
     ActivateSetting(usize),
     // 统计
     StatsScroll(i32),
+    // 快捷键
+    OpenShortcuts,
+    ShortcutMove(i32),
+    ShortcutCapture,
+    ShortcutClear,
+    ShortcutReset,
+    ShortcutResetAll,
     // 练习
     PracticeGotoWord(usize),
     // 结算
@@ -77,6 +84,12 @@ impl App {
                 }
             }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
+            Action::OpenShortcuts => self.open_shortcuts(),
+            Action::ShortcutMove(delta) => self.move_shortcut_cursor(delta),
+            Action::ShortcutCapture => self.start_shortcut_capture(),
+            Action::ShortcutClear => self.clear_shortcut_binding(),
+            Action::ShortcutReset => self.reset_shortcut_binding(),
+            Action::ShortcutResetAll => self.reset_all_shortcut_bindings(),
             Action::PracticeGotoWord(index) => self.goto_practice_word(index),
             Action::SummaryContinue => self.continue_after_summary(),
             Action::SummaryRelearn => self.relearn_after_summary(),
@@ -125,6 +138,11 @@ impl App {
                 self.screen = Screen::Settings;
                 self.settings_cursor = 0;
             }
+            Screen::Shortcuts => {
+                self.screen = Screen::Shortcuts;
+                self.shortcut_cursor = 0;
+                self.shortcut_capturing = false;
+            }
             Screen::Help => {
                 self.help_scroll = 0;
                 self.screen = Screen::Help;
@@ -152,6 +170,10 @@ impl App {
             Screen::Settings => {
                 self.save_settings_now();
                 self.navigate_to(Screen::Home);
+            }
+            Screen::Shortcuts => {
+                self.save_settings_now();
+                self.navigate_to(Screen::Settings);
             }
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
         }
@@ -324,6 +346,10 @@ impl App {
                     message: super::confirm_message(action),
                     action,
                 });
+            }
+            super::SettingKind::Shortcuts => {
+                self.open_shortcuts();
+                return;
             }
         }
         self.save_settings_now();

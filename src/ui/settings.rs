@@ -254,6 +254,7 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
             theme.fg,
         ),
         SettingKind::Action(_) => ("按 Enter 重置".to_string(), theme.dim),
+        SettingKind::Shortcuts => ("按 Enter 打开".to_string(), theme.dim),
     }
 }
 

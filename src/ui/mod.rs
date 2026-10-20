@@ -13,6 +13,7 @@ pub mod overlays;
 pub mod practice;
 pub mod settings;
 pub mod shell;
+pub mod shortcuts;
 pub mod stats;
 pub mod target;
 pub mod theme;
@@ -44,6 +45,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::DictPicker => dict_picker::render(app, frame, area, &theme),
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),
+        Screen::Shortcuts => shortcuts::render(app, frame, area, &theme),
         Screen::Help => help::render(app, frame, area, &theme),
     }
 

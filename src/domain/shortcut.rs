@@ -392,13 +392,24 @@ impl ShortcutAction {
 
     /// 该动作是否在当前版本有实际功能。
     ///
-    /// 上游的部分动作依赖音频或文章编辑，本项目尚未实现对应能力时
-    /// 仍保留绑定（保持存档互通），但设置页标注为「暂不可用」。
+    /// 依赖音频、文章编辑或尚未接入的练习模式的动作仍保留绑定（保持存档
+    /// 互通），但设置页标注为「暂不可用」。
     pub fn is_available(self) -> bool {
         !matches!(
             self,
             ShortcutAction::EditArticle
                 | ShortcutAction::PlayWordPronunciation
+                | ShortcutAction::CollectToDict
+                | ShortcutAction::PreviousChapter
+                | ShortcutAction::NextChapter
+                | ShortcutAction::DictationChapter
+                | ShortcutAction::ToggleTheme
+                | ShortcutAction::ToggleConciseMode
+                | ShortcutAction::ChooseA
+                | ShortcutAction::ChooseB
+                | ShortcutAction::ChooseC
+                | ShortcutAction::ChooseD
+                | ShortcutAction::WordTestingNext
                 | ShortcutAction::PlaySentence1
                 | ShortcutAction::PlaySentence2
                 | ShortcutAction::PlaySentence3

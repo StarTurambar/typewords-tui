@@ -31,6 +31,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
         Screen::Practice => targets.extend(super::practice::targets(app, area)),
         Screen::DictPicker => targets.extend(super::dict_picker::targets(app, shell.content)),
         Screen::Settings => targets.extend(super::settings::targets(app, shell.content)),
+        Screen::Shortcuts => targets.extend(super::shortcuts::targets(app, shell.content)),
         Screen::Help => targets.push(Target::new(shell.content, Action::HelpBack)),
         _ => {}
     }

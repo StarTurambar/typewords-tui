@@ -141,6 +141,20 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             }
             _ => None,
         },
+        Screen::Shortcuts => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::ShortcutMove(-1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::ShortcutMove(1)),
+            KeyCode::PageUp => Some(Action::ShortcutMove(-10)),
+            KeyCode::PageDown => Some(Action::ShortcutMove(10)),
+            KeyCode::Home => Some(Action::ShortcutMove(-100)),
+            KeyCode::End => Some(Action::ShortcutMove(100)),
+            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ShortcutCapture),
+            KeyCode::Delete => Some(Action::ShortcutClear),
+            KeyCode::Char('r') => Some(Action::ShortcutReset),
+            KeyCode::Char('R') => Some(Action::ShortcutResetAll),
+            _ => None,
+        },
         Screen::Help => Some(Action::HelpBack),
         Screen::Practice => None,
     }

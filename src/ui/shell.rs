@@ -32,7 +32,7 @@ impl Nav {
             Screen::Home | Screen::Practice => Nav::Home,
             Screen::DictPicker => Nav::Dicts,
             Screen::Stats => Nav::Stats,
-            Screen::Settings => Nav::Settings,
+            Screen::Settings | Screen::Shortcuts => Nav::Settings,
             Screen::Help => Nav::Help,
         }
     }
@@ -482,6 +482,13 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::DictPicker => &[("enter", "选择"), ("+/-", "每日词数"), ("esc", "返回")],
         Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
+        Screen::Shortcuts => &[
+            ("↑↓", "选择"),
+            ("enter", "改绑"),
+            ("delete", "清除"),
+            ("r", "恢复默认"),
+            ("esc", "返回"),
+        ],
         Screen::Help => &[("↑↓", "滚动"), ("其它键", "返回")],
         Screen::Practice => &[],
     }

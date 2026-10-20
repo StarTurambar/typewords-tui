@@ -39,6 +39,7 @@ pub enum Screen {
     DictPicker,
     Stats,
     Settings,
+    Shortcuts,
     Help,
 }
 
@@ -78,10 +79,13 @@ pub enum SettingKind {
     Number(EditTarget),
     /// 动作行：按下后弹确认框，确认即执行携带的 `ConfirmAction`。
     Action(ConfirmAction),
+    /// 入口行：按下后进入快捷键编辑页。
+    Shortcuts,
 }
 
 pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ("word_practice_mode", SettingKind::Mode),
+    ("shortcut_settings", SettingKind::Shortcuts),
     ("theme", SettingKind::Theme),
     ("sound_type", SettingKind::SoundType),
     ("big_word", SettingKind::Bool),
@@ -191,6 +195,10 @@ pub struct App {
     pub show_meta: bool,
     /// 快捷键表（由设置派生，改绑后需调用 `refresh_shortcuts`）
     pub shortcuts: ShortcutMap,
+    /// 快捷键编辑页的当前行
+    pub shortcut_cursor: usize,
+    /// 正在捕获新的键位
+    pub shortcut_capturing: bool,
     pub task_preview: Option<(usize, usize, usize)>,
     pub today_spend: i64,
     pub today_new: usize,
@@ -279,6 +287,8 @@ impl App {
             show_panel: false,
             show_meta: true,
             shortcuts: ShortcutMap::default(),
+            shortcut_cursor: 0,
+            shortcut_capturing: false,
             task_preview: None,
             today_spend: 0,
             today_new: 0,
@@ -865,10 +875,117 @@ impl App {
         true
     }
 
+    // ── 快捷键编辑 ───────────────────────────────────────────────────────
+
+    /// 打开快捷键编辑页（从设置页进入）。
+    pub fn open_shortcuts(&mut self) {
+        self.screen = Screen::Shortcuts;
+        self.shortcut_cursor = 0;
+        self.shortcut_capturing = false;
+    }
+
+    /// 当前光标对应的动作。
+    fn current_shortcut_action(&self) -> Option<ShortcutAction> {
+        ShortcutAction::ALL.get(self.shortcut_cursor).copied()
+    }
+
+    fn move_shortcut_cursor(&mut self, delta: i32) {
+        let total = ShortcutAction::ALL.len() as i32;
+        if total == 0 {
+            return;
+        }
+        let next = (self.shortcut_cursor as i32 + delta).clamp(0, total - 1);
+        self.shortcut_cursor = next as usize;
+    }
+
+    fn start_shortcut_capture(&mut self) {
+        if self.current_shortcut_action().is_some() {
+            self.shortcut_capturing = true;
+        }
+    }
+
+    /// 捕获到的新键位。
+    fn apply_shortcut_capture(&mut self, key: KeyEvent) {
+        self.shortcut_capturing = false;
+        let Some(action) = self.current_shortcut_action() else {
+            return;
+        };
+        let Some(shortcut) = keymap::to_shortcut_key(key) else {
+            self.toast(NoticeLevel::Warning, "该按键无法用作快捷键");
+            return;
+        };
+        // 空白与退格没有意义，直接忽略
+        if matches!(
+            shortcut.key,
+            crate::domain::shortcut::BaseKey::Space | crate::domain::shortcut::BaseKey::Backspace
+        ) {
+            self.toast(NoticeLevel::Warning, "该按键无法用作快捷键");
+            return;
+        }
+        let mut map = self.shortcuts.clone();
+        if let Err(message) = map.set(action, shortcut) {
+            self.toast(NoticeLevel::Warning, message);
+            return;
+        }
+        self.boot.settings.shortcut_key_map = map.to_stored();
+        self.refresh_shortcuts();
+        self.save_settings_now();
+        self.toast(
+            NoticeLevel::Success,
+            format!("「{}」已绑定到 {}", action.label(), shortcut.to_upstream()),
+        );
+    }
+
+    fn clear_shortcut_binding(&mut self) {
+        let Some(action) = self.current_shortcut_action() else {
+            return;
+        };
+        self.boot
+            .settings
+            .shortcut_key_map
+            .remove(action.upstream_name());
+        self.refresh_shortcuts();
+        self.save_settings_now();
+        self.toast(
+            NoticeLevel::Info,
+            format!("「{}」已清除绑定", action.label()),
+        );
+    }
+
+    fn reset_shortcut_binding(&mut self) {
+        let Some(action) = self.current_shortcut_action() else {
+            return;
+        };
+        let mut map = self.shortcuts.clone();
+        map.reset(action);
+        self.boot.settings.shortcut_key_map = map.to_stored();
+        self.refresh_shortcuts();
+        self.save_settings_now();
+    }
+
+    fn reset_all_shortcut_bindings(&mut self) {
+        let mut map = self.shortcuts.clone();
+        map.reset_all();
+        self.boot.settings.shortcut_key_map = map.to_stored();
+        self.refresh_shortcuts();
+        self.save_settings_now();
+        self.toast(NoticeLevel::Success, "已恢复全部默认键位");
+    }
+
     // ── 键位分发 ─────────────────────────────────────────────────────────
 
     pub fn on_key(&mut self, key: KeyEvent) {
         self.last_activity = timer::now_ms();
+
+        // 捕获键位时吞掉所有按键
+        if self.shortcut_capturing {
+            if key.code == KeyCode::Esc {
+                self.shortcut_capturing = false;
+            } else {
+                self.apply_shortcut_capture(key);
+            }
+            return;
+        }
 
         if self.edit.is_some() || self.confirm.is_some() || self.summary.is_some() {
             if let Some(action) = keymap::overlay_action(self, key) {

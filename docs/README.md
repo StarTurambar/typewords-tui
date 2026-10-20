@@ -11,6 +11,7 @@
 | 安装、第一次打开界面、完成一轮练习 | [根 README · 快速开始](../README.md#快速开始) → [使用手册](usage.md) |
 | 查某个按键、鼠标操作、命令行参数 | [使用手册](usage.md) |
 | 弄懂某个设置项是干什么的、默认值是多少 | [设置项参考](settings.md) |
+| 改键位、查某个键位是什么作用 | [快捷键](shortcuts.md) |
 | 换配色、写一套自己的主题 | [主题系统](themes.md) |
 | 知道存档在哪、怎么备份/迁移、字段什么意思 | [存档与数据格式](persistence.md) |
 | 参与开发，先跑起来、跑测试、提 PR | [开发指南](development.md) |
@@ -28,6 +29,7 @@
 | [根 README](../README.md) | 项目定位、功能概览、下载/构建、常用命令、文档索引 | 所有人 |
 | [usage.md](usage.md) | 完整使用手册：环境与终端、安装、CLI、界面导览、练习流程、按键、鼠标、FAQ/排障 | 使用者 |
 | [settings.md](settings.md) | 设置项完整参考：分区、默认值、取值范围、生效方式、FSRS 参数、无 UI 的透传字段 | 使用者 / 维护者 |
+| [shortcuts.md](shortcuts.md) | 快捷键完整参考：键位表模型、42 个动作与默认绑定、改绑方式、终端兼容别名、与上游差异 | 使用者 / 维护者 |
 | [themes.md](themes.md) | 主题模型、内置主题、自定义主题 JSON 格式与校验规则、颜色语法、常见问题 | 使用者 / 主题作者 |
 
 ### 设计者与贡献者文档
@@ -48,7 +50,7 @@
 
 ## 推荐阅读路线
 
-- **第一次使用**：根 README 的「快速开始」→ [usage.md](usage.md) 的「安装」「界面导览」「练习流程」→ 需要时查 [settings.md](settings.md)、[themes.md](themes.md)。
+- **第一次使用**：根 README 的「快速开始」→ [usage.md](usage.md) 的「安装」「界面导览」「练习流程」→ 需要时查 [settings.md](settings.md)、[shortcuts.md](shortcuts.md)、[themes.md](themes.md)。
 - **参与开发**：[development.md](development.md)（先跑通构建与测试）→ [architecture.md](architecture.md)（分层、生命周期、约束）→ 按任务读 [domain.md](domain.md) / [app.md](app.md) / [ui.md](ui.md) / [persistence.md](persistence.md)。
 - **评估功能覆盖**：[upstream-parity.md](upstream-parity.md) 的「功能矩阵」「行为差异」→ 根 README 的「功能概览」。
 - **排查问题**：[usage.md · 常见问题与排障](usage.md#常见问题与排障) → [persistence.md](persistence.md)（存档相关）→ [development.md](development.md)（调试工具）。
@@ -83,6 +85,7 @@
 | 断点缓存（practice-word.json） | 当前练习的游标、词表与统计快照；进程退出或定时保存，下次启动恢复到同一词、同一阶段。 |
 | Toast | 底栏的临时提示（成功/警告/错误/信息），数秒后消失。 |
 | 弹层（overlay） | 覆盖在页面之上的结算、输入、确认三类对话框。 |
+| 快捷键（shortcut） | 可配置动作与键位的对应关系，存于设置存档的 `shortcutKeyMap`；动作名沿用上游 `ShortcutKey` 枚举。详见 [shortcuts.md](shortcuts.md)。 |
 | 主题 token | 主题的 13 个颜色语义槽位（bg/panel/element/border/fg/muted/dim/accent/accent_alt/warn/good/bad/selection），渲染层不硬编码颜色。 |
 | 上游 | [zyronon/TypeWords](https://github.com/zyronon/TypeWords)：Nuxt + Vue 的 Web / Tauri 桌面端；本仓库是独立拆分出的终端客户端。 |
 

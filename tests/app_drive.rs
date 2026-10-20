@@ -9,6 +9,26 @@ fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
 }
 
+/// 按 key 定位设置行，避免依赖行号。
+fn setting_row(key: &str) -> usize {
+    app::SETTING_ROWS
+        .iter()
+        .position(|(row_key, _)| *row_key == key)
+        .unwrap_or_else(|| panic!("设置页应有 {key} 行"))
+}
+
+/// 把设置页光标移到指定行。
+fn goto_setting(app: &mut app::App, key: &str) {
+    let target = setting_row(key);
+    while app.settings_cursor < target {
+        press(app, KeyCode::Down);
+    }
+    while app.settings_cursor > target {
+        press(app, KeyCode::Up);
+    }
+    assert_eq!(app.settings_cursor, target, "光标应停在 {key} 行");
+}
+
 fn type_str(app: &mut app::App, text: &str) {
     for character in text.chars() {
         press(app, KeyCode::Char(character));
@@ -92,10 +112,7 @@ fn big_word_setting_toggles_and_persists() {
     let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
     assert!(app.boot.settings.tui_big_word, "默认开启大字");
     press(&mut app, KeyCode::Char('s'));
-    // 设置行顺序：练习模式、主题、音标、大字单词
-    for _ in 0..3 {
-        press(&mut app, KeyCode::Down);
-    }
+    goto_setting(&mut app, "big_word");
     press(&mut app, KeyCode::Enter);
     assert!(!app.boot.settings.tui_big_word, "切换后应关闭大字");
     press(&mut app, KeyCode::Esc);
@@ -301,7 +318,7 @@ fn custom_theme_cycles_and_renders() {
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     assert!(app.boot.themes.contains("ocean"), "应加载自定义主题");
     press(&mut app, KeyCode::Char('s'));
-    press(&mut app, KeyCode::Down); // theme row
+    goto_setting(&mut app, "theme");
     for _ in 0..4 {
         press(&mut app, KeyCode::Enter); // auto -> dark -> light -> high-contrast -> ocean
     }
@@ -627,5 +644,70 @@ fn shortcut_key_map_survives_a_restart() {
             .to_upstream(),
         "Ctrl+K",
         "重启后应从存档恢复改绑"
+    );
+}
+
+#[test]
+fn shortcut_editor_rebinds_and_persists() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+
+    press(&mut app, KeyCode::Char('s'));
+    goto_setting(&mut app, "shortcut_settings");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Shortcuts, "应进入快捷键编辑页");
+
+    // 选中「显示单词」并改绑到 Ctrl+K
+    let index = typewords_tui::domain::shortcut::ShortcutAction::ALL
+        .iter()
+        .position(|action| *action == typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
+        .expect("应有显示单词动作");
+    while app.shortcut_cursor < index {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.shortcut_cursor, index);
+
+    press(&mut app, KeyCode::Enter);
+    assert!(app.shortcut_capturing, "Enter 应进入捕获状态");
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    assert!(!app.shortcut_capturing, "捕获后应退出捕获状态");
+    assert_eq!(
+        app.shortcuts
+            .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
+            .to_upstream(),
+        "Ctrl+K"
+    );
+
+    press(&mut app, KeyCode::Esc);
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(
+        reloaded
+            .shortcuts
+            .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
+            .to_upstream(),
+        "Ctrl+K",
+        "改绑应持久化"
+    );
+}
+
+#[test]
+fn shortcut_editor_rejects_a_conflicting_key() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    goto_setting(&mut app, "shortcut_settings");
+    press(&mut app, KeyCode::Enter);
+
+    let show_word = typewords_tui::domain::shortcut::ShortcutAction::ShowWord;
+    let existing = app.shortcuts.key_for(show_word).to_upstream();
+
+    // 把「显示单词」改绑到已被「收藏」占用的 Enter
+    press(&mut app, KeyCode::Enter);
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        app.shortcuts.key_for(show_word).to_upstream(),
+        existing,
+        "冲突时不应改绑"
     );
 }

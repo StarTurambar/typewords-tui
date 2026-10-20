@@ -114,6 +114,22 @@ fn all_screens_render_without_panic() {
 }
 
 #[test]
+fn shortcuts_screen_renders() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    app.screen = app::Screen::Shortcuts;
+    for (width, height) in [(80u16, 24u16), (120, 40)] {
+        let text = render_text(&app, width, height);
+        assert!(
+            text.contains("快捷键") || text.contains("改绑"),
+            "快捷键页应渲染"
+        );
+        assert!(text.contains("显示单词"), "应列出动作名称");
+    }
+}
+
+#[test]
 fn tiny_terminal_shows_hint() {
     let fixture = common::Fixture::new();
     let app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
