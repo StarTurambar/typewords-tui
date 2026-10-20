@@ -44,6 +44,32 @@ pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
     map
 }
 
+/// 按本地自然日聚合**单本词典**的 statistics。
+///
+/// 与 [`daily_totals`] 的跨词典聚合相对：结算弹层的「本周记录」只统计当前词典，
+/// 与上游 `Statistics.vue` 的口径一致。
+pub fn daily_totals_for_dict(dict: &Dict) -> BTreeMap<NaiveDate, DayTotals> {
+    let mut map: BTreeMap<NaiveDate, DayTotals> = BTreeMap::new();
+    for item in &dict.statistics {
+        let Some(day) = Local
+            .timestamp_millis_opt(item.start_date)
+            .single()
+            .map(|value| value.date_naive())
+        else {
+            continue;
+        };
+        let entry = map.entry(day).or_default();
+        entry.spend += item.spend;
+        if !matches!(item.session_role.as_deref(), Some("middle") | Some("end")) {
+            entry.total += item.total;
+            entry.new_words += item.new_words;
+            entry.review += item.review;
+            entry.wrong += item.wrong;
+        }
+    }
+    map
+}
+
 fn day_key(ms: i64) -> String {
     Local
         .timestamp_millis_opt(ms)

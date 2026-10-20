@@ -664,6 +664,35 @@ fn practice_block(title: &str, theme: &Theme) -> Block<'static> {
         ))
 }
 
+/// 练习页底部的按键提示。
+///
+/// 快捷键部分按当前键位表生成，用户改绑后提示自动跟着变。
+fn practice_hint_lines(app: &App) -> Vec<String> {
+    use crate::domain::shortcut::ShortcutAction;
+    let key = |action: ShortcutAction| app.shortcuts.key_for(action).to_display();
+    vec![
+        format!(
+            " 空格 继续 · {} 显示 · Tab 跳过 · 反引号 掌握 · {} 收藏 · ? 帮助",
+            key(ShortcutAction::ShowWord),
+            key(ShortcutAction::ToggleCollect),
+        ),
+        format!(
+            " {} 翻译 · {} 默写 · {} 暂停 · {} 重学 · {} 换组 · {} 简洁 · {} 返回",
+            key(ShortcutAction::ToggleShowTranslate),
+            key(ShortcutAction::ToggleDictation),
+            TUI_ONLY_PAUSE_KEY,
+            key(ShortcutAction::RepeatChapter),
+            key(ShortcutAction::NextChapter),
+            key(ShortcutAction::ToggleConciseMode),
+            TUI_ONLY_EXIT_KEY,
+        ),
+    ]
+}
+
+/// TUI 专有键位：上游没有对应动作，因此不进键位表。
+const TUI_ONLY_PAUSE_KEY: &str = "Ctrl+P";
+const TUI_ONLY_EXIT_KEY: &str = "Ctrl+C";
+
 fn hint_line(hints: &str, theme: &Theme) -> Line<'static> {
     Line::from(Span::styled(
         hints.to_string(),
@@ -707,14 +736,9 @@ fn render_stage_progress(
     }
     lines.push(Line::from(stage_spans));
 
-    lines.push(hint_line(
-        " 空格 继续 · Esc 显示 · Tab 跳过 · 反引号 掌握 · Enter 收藏 · ? 帮助",
-        theme,
-    ));
-    lines.push(hint_line(
-        " Ctrl+Z 翻译 · Ctrl+I 默写 · Ctrl+P 暂停 · Ctrl+L 词表 · Ctrl+E 例句 · Ctrl+C 返回",
-        theme,
-    ));
+    for hint in practice_hint_lines(app) {
+        lines.push(hint_line(&hint, theme));
+    }
     if area.height >= 6 {
         lines.push(toast_line(app, theme));
     }

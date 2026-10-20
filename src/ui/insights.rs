@@ -2,7 +2,7 @@
 
 use chrono::{Datelike, Days, Local, NaiveDate, TimeZone};
 
-use crate::domain::statistics::{DayTotals, daily_totals};
+use crate::domain::statistics::{DayTotals, daily_totals, daily_totals_for_dict};
 use crate::domain::types::{BaseState, Dict};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,6 +39,20 @@ pub fn accuracy(totals: &Totals) -> u32 {
 /// 本周一~周日，缺失的日子为 None。
 pub fn week_days(base: &BaseState, today: NaiveDate) -> [Option<DayTotals>; 7] {
     let map = daily_totals(base);
+    let monday = today - Days::new(u64::from(today.weekday().num_days_from_monday()));
+    let mut week = [None; 7];
+    for (index, slot) in week.iter_mut().enumerate() {
+        let date = monday + Days::new(index as u64);
+        if let Some(value) = map.get(&date) {
+            *slot = Some(*value);
+        }
+    }
+    week
+}
+
+/// 本周一~周日，**只统计指定词典**（结算弹层的本周记录用）。
+pub fn week_days_for_dict(dict: &Dict, today: NaiveDate) -> [Option<DayTotals>; 7] {
+    let map = daily_totals_for_dict(dict);
     let monday = today - Days::new(u64::from(today.weekday().num_days_from_monday()));
     let mut week = [None; 7];
     for (index, slot) in week.iter_mut().enumerate() {

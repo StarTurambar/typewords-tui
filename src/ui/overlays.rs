@@ -29,8 +29,19 @@ pub struct ConfirmLayout {
     pub cancel: Rect,
 }
 
-pub fn summary_layout(area: Rect) -> SummaryLayout {
-    let rect = widgets::centered_rect(64, 14, area);
+/// 结算弹层在基础内容之外还需要多少行（错词 Top10 + 本周记录）。
+fn summary_extra_lines(summary: &SummaryData) -> u16 {
+    let mut extra = 0u16;
+    if !summary.wrong_top.is_empty() {
+        extra += 2 + summary.wrong_top.len().min(10) as u16;
+    }
+    extra += 2; // 空行 + 本周记录
+    extra
+}
+
+/// 结算弹层布局：高度按内容自适应。
+pub fn summary_layout(area: Rect, extra: u16) -> SummaryLayout {
+    let rect = widgets::centered_rect(72, 12 + extra, area);
     let inner = Rect::new(
         rect.x + 2,
         rect.y + 1,
@@ -247,7 +258,7 @@ fn clear_modal_backdrop(frame: &mut Frame, area: Rect, rect: Rect, theme: &Theme
 }
 
 pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &SummaryData) {
-    let layout = summary_layout(area);
+    let layout = summary_layout(area, summary_extra_lines(summary));
     clear_modal_backdrop(frame, area, layout.rect, theme);
     widgets::paint_rect(frame, layout.rect, theme.panel);
     let percent = if summary.length == 0 {
@@ -256,7 +267,7 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
         ((summary.last_learn_index.min(summary.length) as f64 / summary.length as f64) * 100.0)
             .round() as u32
     };
-    let lines = vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             "今日任务完成",
             Style::default()
@@ -308,6 +319,31 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
             theme.dim,
         )),
     ];
+
+    // 错词 Top10（上游结算报告有这一项）
+    if !summary.wrong_top.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "错词 Top10",
+            Style::default().fg(theme.dim),
+        )));
+        for (word, times) in &summary.wrong_top {
+            if lines.len() as u16 + 2 >= layout.inner.height {
+                break;
+            }
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {word}"), Style::default().fg(theme.fg)),
+                Span::styled(format!("  ×{times}"), Style::default().fg(theme.bad)),
+            ]));
+        }
+    }
+
+    // 本周记录：只统计当前词典，与上游结算报告口径一致
+    if lines.len() as u16 + 2 < layout.inner.height {
+        lines.push(Line::from(""));
+        lines.push(week_line(&summary.week_days, theme));
+    }
+
     frame.render_widget(
         Paragraph::new(lines)
             .style(Style::default().bg(theme.panel))
@@ -338,6 +374,26 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
         theme.fg,
         false,
     );
+}
+
+/// 本周七天的打卡点：有记录用实心点，没有用空心点。
+fn week_line(
+    days: &[Option<crate::domain::statistics::DayTotals>; 7],
+    theme: &Theme,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled("本周 ", Style::default().fg(theme.muted))];
+    for (index, day) in days.iter().enumerate() {
+        let studied = day.is_some();
+        spans.push(Span::styled(
+            crate::ui::insights::weekday_label(index),
+            Style::default().fg(if studied { theme.accent_alt } else { theme.dim }),
+        ));
+        spans.push(Span::styled(
+            if studied { "● " } else { "· " },
+            Style::default().fg(if studied { theme.good } else { theme.dim }),
+        ));
+    }
+    Line::from(spans)
 }
 
 pub fn render_edit(frame: &mut Frame, area: Rect, theme: &Theme, edit: &EditState) {
@@ -410,8 +466,8 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
             Target::new(layout.cancel, Action::ConfirmCancel),
         ];
     }
-    if app.summary.is_some() {
-        let layout = summary_layout(area);
+    if let Some(summary) = &app.summary {
+        let layout = summary_layout(area, summary_extra_lines(summary));
         return vec![
             Target::new(layout.continue_btn, Action::SummaryContinue),
             Target::new(layout.relearn_btn, Action::SummaryRelearn),
@@ -476,8 +532,8 @@ pub fn target_action(app: &crate::app::App, area: Rect, column: u16, row: u16) -
         }
         return None;
     }
-    if app.summary.is_some() {
-        let layout = summary_layout(area);
+    if let Some(summary) = &app.summary {
+        let layout = summary_layout(area, summary_extra_lines(summary));
         if hits(layout.continue_btn) {
             return Some(Action::SummaryContinue);
         }
@@ -498,10 +554,14 @@ mod tests {
 
     #[test]
     fn summary_layout_fits_min_terminal() {
-        let layout = summary_layout(Rect::new(0, 0, 60, 20));
-        assert!(layout.rect.width <= 60);
-        assert!(layout.rect.height <= 20);
-        assert!(layout.continue_btn.right() <= layout.inner.right());
+        // 最小终端 60x20：带满额错词与本周记录时也不能溢出
+        for extra in [0u16, 2, 14] {
+            let layout = summary_layout(Rect::new(0, 0, 60, 20), extra);
+            assert!(layout.rect.width <= 60);
+            assert!(layout.rect.height <= 20);
+            assert!(layout.continue_btn.right() <= layout.inner.right());
+            assert!(layout.continue_btn.bottom() <= layout.rect.bottom());
+        }
     }
 
     #[test]

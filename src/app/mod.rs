@@ -17,6 +17,7 @@ use crate::domain::flow::navigator::{Notice, NoticeLevel};
 use crate::domain::rng::{self, Rng, shuffle};
 use crate::domain::session::{PracticeSession, cache_from_compact, cache_to_compact};
 use crate::domain::shortcut::{ShortcutAction, ShortcutMap};
+use crate::domain::statistics::DayTotals;
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
@@ -147,7 +148,7 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ),
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SummaryData {
     pub spend_ms: i64,
     pub accuracy: u32,
@@ -157,6 +158,10 @@ pub struct SummaryData {
     pub last_learn_index: usize,
     pub length: usize,
     pub complete: bool,
+    /// 错词 Top10：(单词, 错误次数)，按次数倒序
+    pub wrong_top: Vec<(String, i64)>,
+    /// 本周周一~周日的学习记录（只统计当前词典，与上游口径一致）
+    pub week_days: [Option<DayTotals>; 7],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -583,6 +588,26 @@ impl App {
         self.schedule_practice_save();
     }
 
+    /// 空闲自动暂停后，用户一有输入就恢复计时（对齐上游 `usePracticeIdleTimer`）。
+    ///
+    /// 只有「因空闲自动暂停」才会自动恢复；手动暂停（`Ctrl+P`）保持暂停。
+    fn resume_after_idle(&mut self) {
+        if self.screen != Screen::Practice || self.session.is_none() {
+            return;
+        }
+        if !self.stat.timer_paused {
+            return;
+        }
+        if self.stat.timer_pause_reason.as_deref() != Some("auto_idle") {
+            return;
+        }
+        timer::resume(&mut self.stat, timer::now_ms());
+        self.toast(
+            NoticeLevel::Success,
+            crate::domain::i18n::tr("timer_resume"),
+        );
+    }
+
     fn finish_session(&mut self) {
         if self.summary.is_some() {
             return;
@@ -610,6 +635,23 @@ impl App {
             .study_dict()
             .map(|dict| (dict.last_learn_index, dict.length, dict.complete))
             .unwrap_or((0, 0, false));
+        // 错词 Top10：按本轮错误次数倒序
+        let mut wrong_top: Vec<(String, i64)> = session
+            .data
+            .wrong_times_map
+            .iter()
+            .map(|(word, times)| (word.clone(), *times))
+            .filter(|(_, times)| *times > 0)
+            .collect();
+        wrong_top.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
+        wrong_top.truncate(10);
+        // 本周记录：只算当前词典
+        let week_days = self
+            .boot
+            .base
+            .study_dict()
+            .map(|dict| crate::ui::insights::week_days_for_dict(dict, crate::ui::insights::today()))
+            .unwrap_or([None; 7]);
         self.summary = Some(SummaryData {
             spend_ms: self.stat.spend,
             accuracy,
@@ -619,6 +661,8 @@ impl App {
             last_learn_index,
             length,
             complete,
+            wrong_top,
+            week_days,
         });
         self.save_dict_now();
         self.clear_practice_cache();
@@ -1183,6 +1227,7 @@ impl App {
 
     pub fn on_key(&mut self, key: KeyEvent) {
         self.last_activity = timer::now_ms();
+        self.resume_after_idle();
 
         // 捕获键位时吞掉所有按键
         if self.shortcut_capturing {

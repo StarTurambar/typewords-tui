@@ -376,6 +376,7 @@ fn mouse_click_summary_home_button() {
         last_learn_index: 3,
         length: 12,
         complete: false,
+        ..Default::default()
     });
     let area = Rect::new(0, 0, 100, 30);
     let target = typewords_tui::ui::hit::targets(&app, area)
@@ -801,4 +802,38 @@ fn collect_to_dict_picker_collects_into_the_chosen_dict() {
         collect.words.iter().any(|item| item.word == word),
         "词应进入收藏词典"
     );
+}
+
+#[test]
+fn typing_resumes_the_timer_after_an_idle_pause() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+
+    // 模拟空闲 3 分钟：推进 tick 触发自动暂停
+    let start = app.last_activity;
+    app.on_tick(start + 100_000);
+    assert!(!app.stat.timer_paused, "未到空闲阈值时不应暂停");
+    app.on_tick(start + 200_000);
+    assert!(app.stat.timer_paused, "超过空闲阈值应自动暂停");
+    assert_eq!(app.stat.timer_pause_reason.as_deref(), Some("auto_idle"));
+
+    // 一有输入就恢复
+    app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert!(!app.stat.timer_paused, "输入后应自动恢复计时");
+    assert_eq!(app.stat.timer_pause_reason, None);
+}
+
+#[test]
+fn manual_pause_is_not_resumed_by_typing() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    app.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    assert!(app.stat.timer_paused, "Ctrl+P 应暂停计时");
+    assert_eq!(app.stat.timer_pause_reason.as_deref(), Some("manual"));
+
+    app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert!(app.stat.timer_paused, "手动暂停不应被输入自动恢复");
 }

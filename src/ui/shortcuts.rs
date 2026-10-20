@@ -129,7 +129,7 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, action: ShortcutAction, 
     if !action.is_available() {
         label.push_str("（暂不可用）");
     }
-    let binding = app.shortcuts.key_for(action).to_upstream();
+    let binding = app.shortcuts.key_for(action).to_display();
 
     let binding_width = display_width(&binding);
     let label = fit_text(&label, inner_width.saturating_sub(binding_width + 1));

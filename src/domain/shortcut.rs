@@ -38,6 +38,20 @@ pub enum BaseKey {
 }
 
 impl BaseKey {
+    /// 展示写法：与上游写法相同，但方向键用更通用的窄箭头。
+    ///
+    /// 上游用 `➡⬅⬆⬇`（U+27A1 等），不少等宽字体没有这些字形，会显示成方框；
+    /// U+2192 系列是几乎所有等宽字体都覆盖的窄字符，宽度也不变。
+    pub fn to_display(self) -> String {
+        match self {
+            Self::Left => "←".to_string(),
+            Self::Right => "→".to_string(),
+            Self::Up => "↑".to_string(),
+            Self::Down => "↓".to_string(),
+            other => other.to_upstream(),
+        }
+    }
+
     /// 上游写法：字母大写，方向键用箭头符号，空格写作 `Space`。
     pub fn to_upstream(self) -> String {
         match self {
@@ -149,6 +163,22 @@ impl ShortcutKey {
             text.push_str("Shift+");
         }
         text.push_str(&self.key.to_upstream());
+        text
+    }
+
+    /// 展示写法：方向键用通用窄箭头，其余与上游写法一致。
+    pub fn to_display(self) -> String {
+        let mut text = String::new();
+        if self.ctrl {
+            text.push_str("Ctrl+");
+        }
+        if self.alt {
+            text.push_str("Alt+");
+        }
+        if self.shift {
+            text.push_str("Shift+");
+        }
+        text.push_str(&self.key.to_display());
         text
     }
 
@@ -399,12 +429,6 @@ impl ShortcutAction {
             self,
             ShortcutAction::EditArticle
                 | ShortcutAction::PlayWordPronunciation
-                | ShortcutAction::CollectToDict
-                | ShortcutAction::PreviousChapter
-                | ShortcutAction::NextChapter
-                | ShortcutAction::DictationChapter
-                | ShortcutAction::ToggleTheme
-                | ShortcutAction::ToggleConciseMode
                 | ShortcutAction::ChooseA
                 | ShortcutAction::ChooseB
                 | ShortcutAction::ChooseC

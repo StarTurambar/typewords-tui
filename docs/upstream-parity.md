@@ -87,19 +87,19 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
 | 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页 + 主页/词库页 `+`/`-` | 部分 | TUI 步进 5 词；无滑块、预计完成天数、同一弹窗改复习比例 |
-| 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | `create_task_from_group` 已有但无入口 | 部分 | 领域函数已实现，界面未接线（见第 7 节） |
+| 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线 |
 | 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 无 | 缺失 | 用户无法在 TUI 内编辑词条 |
 | 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 无 | 缺失 | 只能使用资源目录内的词库 |
 | 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx/json）、`/import` 入口 | `tw import-dict`（词条数组 JSON） | 部分 | 仅 CLI、仅 JSON、无管理界面 |
-| 词库 | 收藏到指定词典 | `WordCollectPopover.vue`、`useWordCollectPicker.ts` | 只能收藏到「收藏」系统词典 | 缺失 | `Shift+Enter` 无对应实现 |
+| 词库 | 收藏到指定词典 | `WordCollectPopover.vue`、`useWordCollectPicker.ts` | `Shift+Enter` 弹层选择目标词典 | 已对齐 | 目标是「收藏」+ 用户自建词典 |
 | 词库 | 批量标记 | `components/word/WordMarkPickList.vue` | 无 | 缺失 | 只有单词级 1/2/3 与反引号标记 |
 | 练习 | 7 个内置流程 | `practice-flow-config.ts` 的 `BUILTIN_FLOWS`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐 | 节点、步骤、7 词小组、错词清空与上游一致，`tests/flow_parity.rs` 覆盖 |
 | 练习 | 练习模式切换入口 | `words.vue` 的模式下拉（学习/复习/随机/单词测试/随机单词测试） | `m` 键循环 7 种模式；`--mode` 覆盖 | 行为不同 | TUI 无下拉菜单，也没有两种测试模式 |
 | 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（用户流程存 localStorage） | 无 | 缺失 | 枚举值 `Custom` 仅为存档兼容存在 |
 | 练习 | 单词测试模式 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | 无 | 缺失 | 枚举值 7/8 未接入 |
 | 练习 | 随机复习范围/数量设置 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同 | TUI 无「已学 10 词」门槛；学习进度为 0 时取整本词库 |
-| 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 部分 | TUI 无错词 Top10、本周记录与分享入口；学习进度与正确率两端都有 |
-| 练习 | 重学 / 下一组 | 结算弹层按钮、`createRepeatTask` / `createNextTask` | 结算弹层 `r` / `Enter` | 部分 | 逻辑已实现，但只在结算后可用；练习中不可触发 |
+| 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐 | 含错词 Top10 与本周记录（当前词典口径）；无分享入口 |
+| 练习 | 重学 / 下一组 | 结算弹层按钮、`createRepeatTask` / `createNextTask` | 结算弹层 + 练习中 `Ctrl+Enter` / `Alt+←` / `Alt+→` | 已对齐 | 练习中可随时重学本组、上下组 |
 | 练习 | 跳阶段 / 上一词 / 下一词 / 跳过 | `usePracticeWordNavigator` + 快捷键 | `domain/flow/navigator.rs` + 键位 | 已对齐 | 键位有差异，语义一致（见 4.2） |
 | 练习 | 自测选择题 | `components/word/WordIdentifyPanel.vue`、`utils/word-test.ts` | `src/domain/question.rs` | 已对齐 | 4 选 1、相似度排序、随机扰动 |
 | 调度 | 评级阈值 | `core/hooks/fsrs.ts` 的 `getGradeByWrongTimes` | `src/domain/scheduler.rs` | 已对齐 | 默认 0 / 3 / 6 次错误分档 |
@@ -113,13 +113,13 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
 | 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 部分 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
 | 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（6 分区 24 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
-| 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 固定键位 | 缺失 | 帮助页只读展示 |
+| 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
 | 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
 | 外观 | 主题 | CSS 变量 + `hooks/theme.ts`（light / dark / auto） | 13 token、3 套内置 + 自定义 JSON | 行为不同 | TUI 独有自定义主题；`auto` 等同深色，不跟随系统 |
 | 外观 | 响应式布局 | CSS 断点 + 移动端顶部导航 | 终端宽窄外壳（100 / 120 列阈值，60×20 下限） | 行为不同 | 见第 6 节与 [渲染层](ui.md) |
 | 外观 | 动画 / 过渡 | SCSS 动画、Vue Transition、Shepherd Tour | 无 | 缺失 | 终端字符渲染无法对等（见第 9 节） |
-| 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 固定键位 + 终端鼠标（点击/滚轮） | 部分 | 见 4.2 与 4.6 |
+| 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 可配置键位 + 终端鼠标（点击/滚轮） | 已对齐 | 见 4.2 与 4.6 |
 | 交互 | 拖拽 / 悬停 | 列表拖拽排序、hover 显示单词 | 无拖拽、无 hover | 缺失 | 终端鼠标没有悬停语义 |
 | 交互 | 文本选择与复制 | 浏览器原生选择 | 鼠标捕获下用 `Shift+拖拽` | 行为不同 | 见 [使用手册](usage.md) 的鼠标一节 |
 | 断点 | 本地练习缓存 | `PracticeSaveWord` v2 | `practice-word.json` v2 | 已对齐 | 同构 compact 结构（含 `sessionSnapshot`） |
@@ -164,7 +164,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 ### 4.2 键位
 
-上游 42 个动作全部可在设置里改键（`DefaultShortcutKeyMap`）；TUI 键位写死在 `src/app/keymap.rs` 与 `src/app/mod.rs` 的练习分支。同名动作的对照：
+上游 42 个动作全部可在设置里改键（`DefaultShortcutKeyMap`）；TUI 同样把键位做成数据（`src/domain/shortcut.rs` 的 `ShortcutMap`，存于 `shortcutKeyMap`），可在设置页改绑。默认键位与上游逐条一致，只有下列差异。同名动作的对照：
 
 | 动作 | 上游默认键 | TUI | 差异 |
 | --- | --- | --- | --- |
@@ -172,29 +172,29 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 显示单词 | `Escape` | `Esc` | 已对齐（遮罩时计一次错误） |
 | 跳过单词 | `Tab` | `Tab` | 已对齐 |
 | 收藏 | `Enter` | `Enter` | 已对齐 |
-| 收藏到指定词典 | `Shift+Enter` | 无 | 缺失 |
+| 收藏到指定词典 | `Shift+Enter` | 同左 | 已对齐 |
 | 标记已掌握 | 反引号 | 反引号 | 已对齐 |
 | 上/下一个词 | `Ctrl+←` / `Ctrl+→` | 同左，另有 `Ctrl+N` 为「下一个词」别名 | 已对齐（TUI 增补别名） |
 | 跳到下一阶段 | `Shift+→` | 同左，另有 `Ctrl+J` 别名 | 已对齐（TUI 增补别名） |
-| 上一章 / 下一章 | `Alt+←` / `Alt+→` | 无 | 缺失 |
-| 重复本章（重学） | `Ctrl+Enter` | `Ctrl+Enter` 只保存进度与词典 | 行为不同 |
-| 默写本章 | `Alt+Enter` | 无 | 缺失 |
+| 上一章 / 下一章 | `Alt+←` / `Alt+→` | 同左（按学习组重放） | 已对齐（TUI 的「章」= 一个学习组） |
+| 重复本章（重学） | `Ctrl+Enter` | 同左（重学本组） | 已对齐 |
+| 默写本章 | `Alt+Enter` | 同左（本组改默写模式） | 已对齐 |
 | 播放单词发音 | `Ctrl+P` | `Ctrl+P` 暂停 / 恢复计时 | 行为不同（TUI 复用该键） |
 | 切换翻译 | `Ctrl+Z` | 同左 | 已对齐 |
 | 切换默写遮罩 | `Ctrl+I` | 同左 | 已对齐 |
 | 工具栏 / 词表侧栏 | `Ctrl+B` / `Ctrl+L` | 同左 | 已对齐 |
 | 随机默写 | `Ctrl+R` | 同左 | 已对齐 |
-| 切主题 / 简洁模式 / 编辑文章 | `Ctrl+Q` / `Ctrl+M` / `Ctrl+E` | 无 / 无 / 显示隐藏例句与词源 | 缺失或语义不同 |
+| 切主题 / 简洁模式 / 编辑文章 | `Ctrl+Q` / `Ctrl+M` / `Ctrl+E` | `Ctrl+Q` / `Ctrl+G` / 显示隐藏例句与词源 | 主题与简洁模式已对齐；`Ctrl+M` 在终端等同回车，简洁模式改用 `Ctrl+G`；文章编辑尚未实现 |
 | 自测三键 | `1` / `2` / `3` | 同左 | 已对齐 |
 | 自测选择题 | `Alt+1`~ `Alt+4` | 同左 | 已对齐 |
 | 播放例句 1~9 | `Ctrl+1`~ `Ctrl+9` | 无 | 缺失（无音频） |
 | 单词测试下一题 | `Space` | 无 | 缺失（无测试模式） |
 
-TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页面、`m` 循环练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键` 等组合键，TUI 因此提供了 ASCII 别名并允许直接拼写代替选择题；完整键表见 [使用手册](usage.md)。
+TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页面、`m` 循环练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键` 等组合键，TUI 因此提供了 ASCII 别名并允许直接拼写代替选择题；完整键表见 [使用手册](usage.md) 与 [快捷键](shortcuts.md)。
 
 ### 4.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 28 个具名字段：27 个与上游同名（`theme`、`repeatCount`、`fsrsParameters` 等）+ TUI 专有的 `tuiBigWord`；其余 31 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 22 个配置项 + 2 个动作项（清空练习进度、清除所有数据），共 24 行。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 29 个具名字段：28 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord`；其余 30 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 23 个配置项 + 3 个动作项（快捷键、清空练习进度、清除所有数据），共 26 行。
 
 | 类别 | 项 |
 | --- | --- |
@@ -226,7 +226,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 - 上游有 CSS 动画、Vue 过渡、hover 显示单词、拖拽、Shepherd 引导；TUI 全部没有。终端鼠标只有点击与滚轮，没有悬停、拖拽和右键菜单。
 - 上游可播放键盘音效、正确/错误音效与单词发音（受设置开关控制）；TUI 无音频，听写阶段靠音标与释义回忆。
-- 计时：两端都有「无操作 3 分钟自动暂停」。上游在检测到键入活动时会自动恢复并提示「已恢复计时」，切走标签页时也会暂停；TUI 的空闲暂停是「粘性」的，需要按 `Ctrl+P` 恢复，也没有页面可见性场景。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
+- 计时：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（`Ctrl+P`）不会被自动恢复。差异是上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
 - TUI 事件循环是 100 ms 轮询 + 批量读事件；上游是浏览器事件驱动。对键盘手感影响可忽略，但 TUI 没有帧动画。
 
 ### 4.7 数据存储
@@ -304,13 +304,21 @@ Web 备份 data.json                       TUI 数据目录
 
 ### 7.1 现状核实
 
-- **跳组**：`src/domain/session.rs` 的 `create_task_from_group` 已实现、无调用点（全仓库仅定义处出现），界面没有任何入口。
-- **上一组 / 下一组**：`create_repeat_task` / `create_next_task` 已实现，只在结算弹层通过 `r` / `Enter` 触发；练习中 `Ctrl+Enter` 仅执行 `save_practice_now` + `save_dict_now`。
-- **Shift+Enter**：练习页 `Enter` 只判断 `Ctrl`，Shift 被忽略，实际行为等同收藏到「收藏」。
-- **笔记**：`BaseState.note_data` 只出现在类型定义与默认值，无读取/写入/渲染代码。
-- **Ctrl+M / Ctrl+Q**：`src/app/mod.rs` 的练习键位与 `src/app/keymap.rs` 均无对应分支。
-- **FSRS 高级项**：`maximum_interval`、21 个 `w`、`enable_fuzz` 由调度器读取并生效（`enable_fuzz` 为近似实现），但设置页没有入口。
-- **本版已修复**：`showUsageTips` 已控制练习页提示行；`repeatCustomCount` 已增加设置页编辑入口；`import-dict` 重复导入不再追加重复目录项；跨天统计不再重复计数。
+- **已接线（本轮）**：
+  - 跳组：状态行「第 N 组」可点击，弹层选组跳转；`create_task_from_group` 有了调用点。
+  - 上一组 / 下一组 / 重学本组 / 默写本组：练习中 `Alt+←` / `Alt+→` / `Ctrl+Enter` / `Alt+Enter`。
+  - `Shift+Enter`：弹层选择收藏目标词典。
+  - 简洁模式（`Ctrl+G`）与切主题（`Ctrl+Q`）。
+  - 快捷键表：42 个动作数据化，可在设置页改绑，存于 `shortcutKeyMap`（见 [快捷键](shortcuts.md)）。
+  - FSRS：改为逐条移植上游 ts-fsrs 5.4.1，学习步进、`enable_short_term`、`enable_fuzz`、`maximum_interval` 全部生效，黄金样本见 `tests/fsrs_parity.rs`。
+  - 结算报告：补齐错词 Top10 与本周记录（当前词典口径）。
+  - 计时：空闲自动暂停后，输入即自动恢复。
+- **仍待接线**：
+  - **笔记**：`BaseState.note_data` 只出现在类型定义与默认值，无读取/写入/渲染代码。
+  - **FSRS 高级项 UI**：`maximum_interval`、21 个 `w`、`enable_fuzz` 已生效，但设置页还没有入口。
+  - **练习模式面板**：目前 `m` 键循环 7 种模式，没有上游那样的下拉（含单词测试模式）。
+  - **单词测试模式**：`ShuffleWordsTest` / `ReviewWordsTest` 枚举值仍未接入。
+  - **词条管理屏**：词条增删改查、批量标记、自定义词典都还没有。
 - **可复用的已完成品**：7 个内置流程、跳阶段、自测选择题、错词清空、结算/重学/下一组、缓存恢复、统计写入都有测试覆盖，补齐时优先接线而不是重写。
 
 ### 7.2 优先级

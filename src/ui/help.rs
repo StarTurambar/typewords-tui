@@ -48,6 +48,12 @@ const PRACTICE: &[HelpEntry] = &[
     HelpEntry::Key("Ctrl+B / Ctrl+L", "收起状态栏 / 词表"),
     HelpEntry::Key("Ctrl+E", "显示 / 隐藏例句与词源"),
     HelpEntry::Key("Shift+→ / Ctrl+J", "跳到下一阶段"),
+    HelpEntry::Key("Ctrl+Enter", "重学本组"),
+    HelpEntry::Key("Alt+← / Alt+→", "上一组 / 下一组"),
+    HelpEntry::Key("Alt+Enter", "默写本组"),
+    HelpEntry::Key("Shift+Enter", "收藏到指定词典"),
+    HelpEntry::Key("Ctrl+G", "切换简洁模式"),
+    HelpEntry::Key("Ctrl+Q", "切换主题"),
     HelpEntry::Key("Ctrl+C", "保存并返回主页"),
 ];
 

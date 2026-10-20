@@ -12,10 +12,10 @@
 | `src/ui/theme.rs` | `Theme`（13 个 token 映射为 ratatui `Color`）与 `Theme::from_spec` |
 | `src/ui/shell.rs` | 外壳：响应式侧栏/顶栏/底栏、`Nav`、`ShellLayout`/`SidebarLayout`、颜色提示文案 |
 | `src/ui/home.rs` | 主页 dashboard 与 `targets` |
-| `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏） |
+| `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏）与 `PracticeLayout` |
 | `src/ui/bigtext.rs` | 5×7 点阵字体、1×/2× 放大、遮罩占位、折行 |
-| `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs` | 词库页、统计页、设置页、帮助页 |
-| `src/ui/overlays.rs` | 结算/输入/确认弹层的布局、绘制、按钮命中 |
+| `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页 |
+| `src/ui/overlays.rs` | 结算/输入/确认/跳组/收藏目标弹层的布局、绘制、命中 |
 | `src/ui/widgets.rs` | 通用文本与小部件工具（宽计算、截断、折行、按钮、进度条、弹层边框） |
 | `src/ui/target.rs`、`hit.rs` | `Target`（Rect + `Action`）与命中检测 `targets`/`action_at`/`wheel_action` |
 | `src/ui/insights.rs` | 主页/统计页使用的纯数据聚合（总量、正确率、本周、最近 N 天、预计完成日期） |

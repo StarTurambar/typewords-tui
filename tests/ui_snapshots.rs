@@ -228,6 +228,7 @@ fn overlay_screens_render() {
         last_learn_index: 5,
         length: 12,
         complete: false,
+        ..Default::default()
     });
     let text = render_text(&app, 100, 30);
     assert!(text.contains("今日任务完成"));

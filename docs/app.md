@@ -63,6 +63,7 @@
 | `DictPicker` | 词库页 | `Nav::Dicts` | 2 |
 | `Stats` | 统计页 | `Nav::Stats` | 3 |
 | `Settings` | 设置页 | `Nav::Settings` | 4 |
+| `Shortcuts` | 快捷键编辑页 | `Nav::Settings` | —（由设置页进入） |
 | `Help` | 帮助页 | `Nav::Help` | 5 |
 
 ### 2.3 提示与弹层数据
