@@ -88,11 +88,11 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
 | 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页 + 主页/词库页 `+`/`-` | 部分 | TUI 步进 5 词；无滑块、预计完成天数、同一弹窗改复习比例 |
 | 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线 |
-| 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 无 | 缺失 | 用户无法在 TUI 内编辑词条 |
-| 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 无 | 缺失 | 只能使用资源目录内的词库 |
-| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx/json）、`/import` 入口 | `tw import-dict`（词条数组 JSON） | 部分 | 仅 CLI、仅 JSON、无管理界面 |
+| 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 词条管理页（搜索 / 编辑 / 增删 / 排序 / 批量标记） | 已对齐 | 见 [使用手册 · 词条管理](usage.md#词条管理) |
+| 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 词库页 `n` 新建、`c` 复制 | 已对齐 | 自建词典落在数据目录，会自动出现在词库页 |
+| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx/json）、`/import` 入口 | `tw import-dict`（词条数组 JSON） | 部分 | 仅 CLI、仅 JSON；xlsx 需要新依赖，本版不做 |
 | 词库 | 收藏到指定词典 | `WordCollectPopover.vue`、`useWordCollectPicker.ts` | `Shift+Enter` 弹层选择目标词典 | 已对齐 | 目标是「收藏」+ 用户自建词典 |
-| 词库 | 批量标记 | `components/word/WordMarkPickList.vue` | 无 | 缺失 | 只有单词级 1/2/3 与反引号标记 |
+| 词库 | 批量标记 | `components/word/WordMarkPickList.vue` | 词条管理页勾选后 `1`/`2`/`3` | 已对齐 | 认识 / 已掌握 / 不认识 |
 | 练习 | 7 个内置流程 | `practice-flow-config.ts` 的 `BUILTIN_FLOWS`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐 | 节点、步骤、7 词小组、错词清空与上游一致，`tests/flow_parity.rs` 覆盖 |
 | 练习 | 练习模式切换入口 | `words.vue` 的模式下拉（学习/复习/随机/单词测试/随机单词测试） | `m` 键或主页「模式」提示打开选择弹层，九种模式 | 已对齐 | TUI 独有下拉菜单；`--mode` 仍可覆盖 |
 | 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（用户流程存 localStorage） | 无 | 缺失 | 枚举值 `Custom` 仅为存档兼容存在 |

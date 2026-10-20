@@ -57,7 +57,22 @@ pub fn overlay_action(app: &App, key: KeyEvent) -> Option<Action> {
     if app.collect_picker.is_some() {
         return collect_action(key);
     }
+    if app.word_edit.is_some() {
+        return word_edit_action(key);
+    }
     None
+}
+
+fn word_edit_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc => Some(Action::WordsEditCancel),
+        KeyCode::Enter => Some(Action::WordsEditSave),
+        KeyCode::Tab | KeyCode::Down => Some(Action::WordsEditField(1)),
+        KeyCode::BackTab | KeyCode::Up => Some(Action::WordsEditField(-1)),
+        KeyCode::Backspace => Some(Action::WordsEditBackspace),
+        KeyCode::Char(character) => Some(Action::WordsEditChar(character)),
+        _ => None,
+    }
 }
 
 fn collect_action(key: KeyEvent) -> Option<Action> {
@@ -66,6 +81,41 @@ fn collect_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CollectMove(-1)),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CollectMove(1)),
         KeyCode::Enter => Some(Action::CollectSelect),
+        _ => None,
+    }
+}
+
+/// 词条管理页的键位。
+///
+/// 搜索框有焦点时普通按键输入搜索词，`Esc` 结束搜索；没有焦点时按键是动作。
+fn words_action(app: &App, key: KeyEvent) -> Option<Action> {
+    if app.words_search_focus {
+        return match key.code {
+            KeyCode::Esc => Some(Action::WordsSearchToggle),
+            KeyCode::Backspace => Some(Action::WordsSearchBackspace),
+            KeyCode::Char(character) => Some(Action::WordsSearchChar(character)),
+            _ => None,
+        };
+    }
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::WordsMove(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::WordsMove(1)),
+        KeyCode::PageUp => Some(Action::WordsMove(-10)),
+        KeyCode::PageDown => Some(Action::WordsMove(10)),
+        KeyCode::Home => Some(Action::WordsMove(-100_000)),
+        KeyCode::End => Some(Action::WordsMove(100_000)),
+        KeyCode::Enter => Some(Action::WordsEdit),
+        KeyCode::Char(' ') => Some(Action::WordsToggleMark),
+        KeyCode::Char('/') => Some(Action::WordsSearchToggle),
+        KeyCode::Char('a') => Some(Action::WordsAdd),
+        KeyCode::Char('d') => Some(Action::WordsDelete),
+        KeyCode::Char('1') => Some(Action::WordsMarkKnow),
+        KeyCode::Char('2') => Some(Action::WordsMarkMastered),
+        KeyCode::Char('3') => Some(Action::WordsMarkUnknown),
+        KeyCode::Char('c') => Some(Action::WordsCopyDict),
+        KeyCode::Char('o') => Some(Action::WordsSort),
+        KeyCode::Char('n') => Some(Action::WordsNewDict),
         _ => None,
     }
 }
@@ -99,7 +149,8 @@ fn edit_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Esc => Some(Action::EditCancel),
         KeyCode::Enter => Some(Action::EditSave),
         KeyCode::Backspace => Some(Action::EditBackspace),
-        KeyCode::Char(character) if character.is_ascii_digit() => Some(Action::EditChar(character)),
+        // 是否只接受数字由 apply_action 按编辑目标判断
+        KeyCode::Char(character) if !character.is_control() => Some(Action::EditChar(character)),
         _ => None,
     }
 }
@@ -130,7 +181,13 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             _ => Some(Action::HelpBack),
         };
     }
+    // 数字切页只在没有会话、且当前页不占用数字键时生效
+    let digits_are_page_switches = matches!(
+        app.screen,
+        Screen::Home | Screen::DictPicker | Screen::Stats | Screen::Settings | Screen::Help
+    );
     if app.session.is_none()
+        && digits_are_page_switches
         && key.modifiers.is_empty()
         && let KeyCode::Char(character @ '1'..='5') = key.code
     {
@@ -165,6 +222,8 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Enter => Some(Action::ActivateDict(app.dict_cursor)),
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
+            KeyCode::Char('w') => Some(Action::OpenSelectedWords),
+            KeyCode::Char('n') => Some(Action::WordsNewDict),
             _ => None,
         },
         Screen::Stats => match key.code {
@@ -189,6 +248,7 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             }
             _ => None,
         },
+        Screen::Words => words_action(app, key),
         Screen::WordTest => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::WordTestExit),
             KeyCode::Char('1') => Some(Action::WordTestChoose(0)),

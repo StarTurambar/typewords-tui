@@ -310,6 +310,56 @@ pub fn render_collect_picker(
     );
 }
 
+/// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
+pub fn render_word_edit(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    edit: &crate::app::WordEditState,
+) {
+    let rect = widgets::centered_rect(56, 11, area);
+    clear_modal_backdrop(frame, area, rect, theme);
+    widgets::paint_rect(frame, rect, theme.panel);
+
+    const LABELS: [&str; 4] = ["单词", "音标", "释义", "笔记"];
+    let values = [
+        edit.word.clone(),
+        edit.phonetic.clone(),
+        edit.translation.clone(),
+        edit.note.clone(),
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        if edit.index.is_some() {
+            " 编辑词条（Tab 切换字段 · Enter 保存 · Esc 取消）"
+        } else {
+            " 新增词条（Tab 切换字段 · Enter 保存 · Esc 取消）"
+        },
+        Style::default().fg(theme.muted),
+    )));
+    for (index, label) in LABELS.iter().enumerate() {
+        let active = index == edit.field;
+        let marker = if active { "▶" } else { " " };
+        let style = if active {
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.muted)
+        };
+        let text = if active {
+            format!("{marker} {label:<4} {}_", values[index])
+        } else {
+            format!("{marker} {label:<4} {}", values[index])
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(Style::default().bg(theme.panel))
+            .block(widgets::modal_block(" 词条 ", theme)),
+        rect,
+    );
+}
+
 fn clear_modal_backdrop(frame: &mut Frame, area: Rect, rect: Rect, theme: &Theme) {
     let margin = 2u16;
     let left = rect.x.saturating_sub(margin).max(area.x);
@@ -525,6 +575,7 @@ fn edit_label(edit: &EditState) -> String {
         crate::app::EditTarget::Retention => tr("request_retention"),
         crate::app::EditTarget::Note => "单词笔记".to_string(),
         crate::app::EditTarget::WordSoundSpeed => "发音倍速".to_string(),
+        crate::app::EditTarget::DictName => "词典名称".to_string(),
     }
 }
 

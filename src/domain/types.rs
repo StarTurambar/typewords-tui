@@ -844,6 +844,26 @@ impl BaseState {
     }
 
     /// 设置当前学习词典：已存在则就地更新元数据，否则追加。
+    /// Current study dictionary index within `word.book_list`.
+    pub fn study_dict_index(&self) -> Option<usize> {
+        if self.word.study_index < 0 {
+            return None;
+        }
+        let index = self.word.study_index as usize;
+        if index < self.word.book_list.len() {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    /// Point the study dictionary at book_list entry `index`.
+    pub fn set_study_index(&mut self, index: usize) {
+        if index < self.word.book_list.len() {
+            self.word.study_index = index as i32;
+        }
+    }
+
     pub fn set_study_dict(&mut self, dict: Dict) {
         if let Some(index) = self.word.book_list.iter().position(|item| {
             item.matches_id(&dict.id)

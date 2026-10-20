@@ -40,6 +40,7 @@ pub enum Screen {
     Home,
     Practice,
     WordTest,
+    Words,
     DictPicker,
     Stats,
     Settings,
@@ -64,6 +65,33 @@ pub struct GroupPickerState {
 #[derive(Clone, Debug)]
 pub struct ModePickerState {
     pub cursor: usize,
+}
+
+/// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
+#[derive(Clone, Debug)]
+pub struct WordEditState {
+    /// 原词在词表里的下标；`None` 表示新增
+    pub index: Option<usize>,
+    pub word: String,
+    pub phonetic: String,
+    pub translation: String,
+    pub note: String,
+    /// 当前编辑的字段
+    pub field: usize,
+}
+
+impl WordEditState {
+    pub const FIELDS: usize = 4;
+
+    /// 当前字段的可变引用。
+    pub fn current(&mut self) -> &mut String {
+        match self.field {
+            0 => &mut self.word,
+            1 => &mut self.phonetic,
+            2 => &mut self.translation,
+            _ => &mut self.note,
+        }
+    }
 }
 
 /// 单词测试的进行中状态。
@@ -107,6 +135,8 @@ pub enum EditTarget {
     Note,
     /// 发音倍速
     WordSoundSpeed,
+    /// 新建词典的名字（自由文本）
+    DictName,
 }
 
 #[derive(Clone, Debug)]
@@ -231,6 +261,8 @@ pub struct ConfirmState {
 }
 
 pub struct App {
+    /// 解析后的路径（新建词典、写词条文件时需要）
+    pub paths: Option<crate::paths::Paths>,
     pub boot: Bootstrapped,
     pub store: FileStore,
     pub screen: Screen,
@@ -268,6 +300,18 @@ pub struct App {
     pub mode_picker: Option<ModePickerState>,
     /// 单词测试（一题 4 选 1）
     pub word_test: Option<WordTestState>,
+    /// 词条管理页的光标（过滤后的下标）
+    pub words_cursor: usize,
+    /// 词条管理页的搜索词
+    pub words_filter: String,
+    /// 词条管理页：搜索框是否有焦点（有焦点时普通按键输入搜索词）
+    pub words_search_focus: bool,
+    /// 词条管理页：批量标记模式下已勾选的词（原始下标）
+    pub words_marked: Vec<usize>,
+    /// 词条管理页：排序方式
+    pub words_sort: crate::domain::wordbook::SortOrder,
+    /// 词条编辑弹层
+    pub word_edit: Option<WordEditState>,
     /// 跳组弹层
     pub group_picker: Option<GroupPickerState>,
     /// 「收藏到指定词典」弹层
@@ -338,6 +382,7 @@ impl App {
         let now = timer::now_ms();
 
         let mut app = Self {
+            paths: Some(paths.clone()),
             boot,
             store,
             screen: Screen::Home,
@@ -370,6 +415,12 @@ impl App {
             shortcut_capturing: false,
             mode_picker: None,
             word_test: None,
+            words_cursor: 0,
+            words_filter: String::new(),
+            words_search_focus: false,
+            words_marked: Vec::new(),
+            words_sort: crate::domain::wordbook::SortOrder::Normal,
+            word_edit: None,
             group_picker: None,
             collect_picker: None,
             task_preview: None,
@@ -1309,6 +1360,358 @@ impl App {
         self.refresh_task_preview();
     }
 
+    // ── 词条管理 ─────────────────────────────────────────────────────────
+
+    /// 打开词库页当前选中词典的词条管理页。
+    fn open_selected_words(&mut self) {
+        let index = self.dict_cursor;
+        let Some(resource) = self.boot.catalog.resources().get(index).cloned() else {
+            return;
+        };
+        let id = resource.id_string();
+        if let Err(err) = self.boot.select_dict(&id) {
+            self.toast(NoticeLevel::Error, format!("打开词库失败: {err}"));
+            return;
+        }
+        self.save_dict_now();
+        self.open_words();
+    }
+
+    /// 打开词条管理页。
+    pub fn open_words(&mut self) {
+        if self.boot.base.study_dict().is_none() {
+            self.toast(NoticeLevel::Warning, "没有可管理的词库");
+            return;
+        }
+        self.screen = Screen::Words;
+        self.words_cursor = 0;
+        self.words_filter.clear();
+        self.words_search_focus = false;
+        self.words_marked.clear();
+    }
+
+    /// 当前词典里符合搜索词的词条下标。
+    pub fn filtered_word_indices(&self) -> Vec<usize> {
+        let Some(dict) = self.boot.base.study_dict() else {
+            return Vec::new();
+        };
+        crate::domain::wordbook::filter_words(&dict.words, &self.words_filter)
+    }
+
+    /// 当前词典是不是系统词典（收藏 / 错词 / 已掌握，词条存在存档里）。
+    pub fn words_is_system(&self) -> bool {
+        self.boot
+            .base
+            .study_dict()
+            .map(|dict| dict.system)
+            .unwrap_or(false)
+    }
+
+    /// 保存词表：系统词典存在存档里，其余词典写回词条文件。
+    fn persist_words(&mut self) {
+        if self.words_is_system() {
+            self.save_dict_now();
+            return;
+        }
+        let Some(dict) = self.boot.base.study_dict() else {
+            return;
+        };
+        let Some(resource) = self.boot.catalog.find(&dict.id).cloned() else {
+            self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
+            return;
+        };
+        let Some(path) = self.boot.catalog.dict_file(&resource) else {
+            self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
+            return;
+        };
+        let text = match serde_json::to_string_pretty(&dict.words) {
+            Ok(text) => text,
+            Err(err) => {
+                self.toast(NoticeLevel::Error, format!("保存词条失败: {err}"));
+                return;
+            }
+        };
+        if let Err(err) = std::fs::write(&path, text) {
+            self.toast(
+                NoticeLevel::Error,
+                format!("写入 {} 失败: {err}", path.display()),
+            );
+            return;
+        }
+        self.toast(NoticeLevel::Success, "词条已保存");
+    }
+
+    /// 移动词条列表的光标。
+    fn move_words_cursor(&mut self, delta: i32) {
+        let total = self.filtered_word_indices().len() as i32;
+        if total == 0 {
+            self.words_cursor = 0;
+            return;
+        }
+        let next = (self.words_cursor as i32 + delta).clamp(0, total - 1);
+        self.words_cursor = next as usize;
+    }
+
+    /// 在搜索框里追加字符。
+    fn words_search_push(&mut self, character: char) {
+        if !self.words_search_focus {
+            return;
+        }
+        self.words_filter.push(character);
+        self.words_cursor = 0;
+    }
+
+    /// 删除搜索框的最后一个字符。
+    fn words_search_backspace(&mut self) {
+        if !self.words_search_focus {
+            return;
+        }
+        self.words_filter.pop();
+        self.words_cursor = 0;
+    }
+
+    /// 切换词条排序方式。
+    fn cycle_words_sort(&mut self) {
+        self.words_sort = self.words_sort.next();
+        let order = self.words_sort;
+        let Some(dict) = self.boot.base.study_dict_mut() else {
+            return;
+        };
+        let mut words = std::mem::take(&mut dict.words);
+        crate::domain::wordbook::sort_words(&mut words, order, &mut self.rng);
+        if let Some(dict) = self.boot.base.study_dict_mut() {
+            dict.words = words;
+        }
+        self.persist_words();
+        self.toast(NoticeLevel::Success, format!("排序：{}", order.label()));
+    }
+
+    /// 切换搜索框的焦点。
+    fn toggle_words_search(&mut self) {
+        self.words_search_focus = !self.words_search_focus;
+        if self.words_search_focus {
+            self.words_filter.clear();
+        }
+        self.words_cursor = 0;
+    }
+
+    /// 勾选 / 取消勾选当前词条。
+    fn words_toggle_mark(&mut self) {
+        let indices = self.filtered_word_indices();
+        let Some(index) = indices.get(self.words_cursor).copied() else {
+            return;
+        };
+        match self.words_marked.iter().position(|item| *item == index) {
+            Some(position) => {
+                self.words_marked.remove(position);
+            }
+            None => self.words_marked.push(index),
+        }
+    }
+
+    /// 编辑当前词条。
+    fn edit_current_word(&mut self) {
+        let indices = self.filtered_word_indices();
+        let Some(index) = indices.get(self.words_cursor).copied() else {
+            return;
+        };
+        self.open_word_edit(Some(index));
+    }
+
+    /// 切换词条编辑弹层的字段。
+    fn move_word_edit_field(&mut self, delta: i32) {
+        let Some(edit) = self.word_edit.as_mut() else {
+            return;
+        };
+        let total = WordEditState::FIELDS as i32;
+        edit.field = ((edit.field as i32 + delta).rem_euclid(total)) as usize;
+    }
+
+    /// 在词条编辑弹层里追加字符。
+    fn word_edit_push(&mut self, character: char) {
+        if let Some(edit) = self.word_edit.as_mut() {
+            edit.current().push(character);
+        }
+    }
+
+    /// 删除词条编辑弹层当前字段的最后一个字符。
+    fn word_edit_backspace(&mut self) {
+        if let Some(edit) = self.word_edit.as_mut() {
+            edit.current().pop();
+        }
+    }
+
+    /// 打开词条编辑弹层（`index` 为 `None` 表示新增）。
+    pub fn open_word_edit(&mut self, index: Option<usize>) {
+        let word = match index {
+            Some(index) => self
+                .boot
+                .base
+                .study_dict()
+                .and_then(|dict| dict.words.get(index).cloned()),
+            None => None,
+        };
+        self.word_edit = Some(match word {
+            Some(word) => WordEditState {
+                index,
+                word: word.word.clone(),
+                phonetic: word.phonetic0.clone(),
+                translation: word
+                    .trans
+                    .iter()
+                    .map(|item| format!("{}{}", item.pos, item.cn))
+                    .collect::<Vec<_>>()
+                    .join("；"),
+                note: self
+                    .boot
+                    .base
+                    .note_data
+                    .get(&word.word)
+                    .cloned()
+                    .unwrap_or_default(),
+                field: 0,
+            },
+            None => WordEditState {
+                index: None,
+                word: String::new(),
+                phonetic: String::new(),
+                translation: String::new(),
+                note: String::new(),
+                field: 0,
+            },
+        });
+    }
+
+    /// 保存词条编辑。
+    fn save_word_edit(&mut self) {
+        let Some(edit) = self.word_edit.take() else {
+            return;
+        };
+        let word_text = edit.word.trim().to_string();
+        if word_text.is_empty() {
+            self.toast(NoticeLevel::Warning, "单词不能为空");
+            return;
+        }
+        let note = edit.note.trim().to_string();
+        let Some(dict) = self.boot.base.study_dict_mut() else {
+            return;
+        };
+        let entry = crate::domain::types::Word {
+            word: word_text.clone(),
+            phonetic0: edit.phonetic.trim().to_string(),
+            phonetic1: edit.phonetic.trim().to_string(),
+            trans: vec![crate::domain::types::Trans {
+                pos: String::new(),
+                cn: edit.translation.trim().to_string(),
+                frequency: None,
+            }],
+            ..Default::default()
+        };
+        match edit.index {
+            Some(index) if index < dict.words.len() => dict.words[index] = entry,
+            Some(_) => {}
+            None => dict.words.push(entry),
+        }
+        dict.length = dict.words.len();
+        // 笔记存在存档的 note_data 里
+        if note.is_empty() {
+            self.boot.base.note_data.remove(&word_text);
+        } else {
+            self.boot.base.note_data.insert(word_text, note);
+        }
+        self.persist_words();
+    }
+
+    /// 删除当前选中的词条。
+    fn delete_current_word(&mut self) {
+        let indices = self.filtered_word_indices();
+        let Some(index) = indices.get(self.words_cursor).copied() else {
+            return;
+        };
+        let Some(dict) = self.boot.base.study_dict_mut() else {
+            return;
+        };
+        if index >= dict.words.len() {
+            return;
+        }
+        let word = dict.words.remove(index);
+        dict.length = dict.words.len();
+        self.boot.base.note_data.remove(&word.word);
+        self.words_marked.retain(|item| *item != index);
+        self.persist_words();
+    }
+
+    /// 批量标记：把勾选的词条按 `kind` 处理。
+    fn apply_word_mark(&mut self, kind: crate::domain::wordbook::MarkKind) {
+        let marked = self.words_marked.clone();
+        if marked.is_empty() {
+            self.toast(NoticeLevel::Warning, "先用空格勾选词条");
+            return;
+        }
+        let Some(dict) = self.boot.base.study_dict() else {
+            return;
+        };
+        let words: Vec<crate::domain::types::Word> = marked
+            .iter()
+            .filter_map(|index| dict.words.get(*index).cloned())
+            .collect();
+        match kind {
+            crate::domain::wordbook::MarkKind::Mastered => {
+                crate::domain::wordbook::mark_mastered(&mut self.boot.base, &words);
+            }
+            crate::domain::wordbook::MarkKind::Unknown => {
+                crate::domain::wordbook::mark_unknown(&mut self.boot.base, &words);
+            }
+            crate::domain::wordbook::MarkKind::Know => {}
+        }
+        self.words_marked.clear();
+        self.save_dict_now();
+        self.toast(
+            NoticeLevel::Success,
+            format!("已处理 {} 个词条", words.len()),
+        );
+    }
+
+    /// 把当前词典复制成自定义词典（副本落在数据目录里，可以随意编辑）。
+    fn copy_study_dict(&mut self) {
+        let Some(dict) = self.boot.base.study_dict().cloned() else {
+            return;
+        };
+        let name = format!("{} 副本", dict.name);
+        self.create_custom_dict(&name, dict.words);
+    }
+
+    /// 打开「新建词典」的输入弹层。
+    fn open_new_dict(&mut self) {
+        self.edit = Some(EditState {
+            target: EditTarget::DictName,
+            buffer: String::new(),
+        });
+    }
+
+    /// 新建一本自定义词典：词条文件落在数据目录里，并切换过去。
+    fn create_custom_dict(&mut self, name: &str, words: Vec<crate::domain::types::Word>) {
+        let Some(paths) = self.paths.clone() else {
+            return;
+        };
+        match crate::domain::catalog::create_custom_dict(&paths, name, words) {
+            Ok(resource) => {
+                let id = resource.id_string();
+                if let Ok(catalog) = crate::domain::catalog::Catalog::load(&paths) {
+                    self.boot.catalog = catalog;
+                }
+                if let Err(err) = self.boot.select_dict(&id) {
+                    self.toast(NoticeLevel::Error, format!("切换词库失败: {err}"));
+                    return;
+                }
+                self.save_dict_now();
+                self.refresh_task_preview();
+                self.toast(NoticeLevel::Success, format!("已新建「{name}」"));
+            }
+            Err(err) => self.toast(NoticeLevel::Error, format!("新建词典失败: {err}")),
+        }
+    }
+
     // ── 练习模式选择 ─────────────────────────────────────────────────────
 
     /// 打开练习模式选择弹层，光标停在当前模式。
@@ -1498,6 +1901,7 @@ impl App {
             || self.mode_picker.is_some()
             || self.group_picker.is_some()
             || self.collect_picker.is_some()
+            || self.word_edit.is_some()
         {
             if let Some(action) = keymap::overlay_action(self, key) {
                 self.apply_action(action);
@@ -1755,6 +2159,7 @@ impl App {
             }
             EditTarget::Note => 0,
             EditTarget::WordSoundSpeed => (settings.word_sound_speed * 100.0).round() as i64,
+            EditTarget::DictName => 0,
         }
     }
 
@@ -1793,6 +2198,7 @@ impl App {
                     EditTarget::WordSoundSpeed => {
                         settings.word_sound_speed = (value.clamp(50, 300) as f64) / 100.0
                     }
+                    EditTarget::DictName => {}
                 }
                 self.save_settings_now();
             }

@@ -15,3 +15,4 @@ pub mod study_task;
 pub mod timer;
 pub mod types;
 pub mod typing;
+pub mod wordbook;

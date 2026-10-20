@@ -298,5 +298,6 @@ fn number_text(target: EditTarget, value: i64) -> String {
         EditTarget::PerDay => format!("{value} 词"),
         EditTarget::Note => String::new(),
         EditTarget::WordSoundSpeed => format!("{value}%"),
+        EditTarget::DictName => String::new(),
     }
 }

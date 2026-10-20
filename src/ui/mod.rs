@@ -19,6 +19,7 @@ pub mod target;
 pub mod theme;
 pub mod widgets;
 pub mod word_test;
+pub mod words;
 
 pub use theme::Theme;
 
@@ -44,6 +45,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Home => home::render_home(app, frame, area, &theme),
         Screen::Practice => practice::render_practice(app, frame, area, &theme),
         Screen::WordTest => word_test::render(app, frame, area, &theme),
+        Screen::Words => words::render(app, frame, area, &theme),
         Screen::DictPicker => dict_picker::render(app, frame, area, &theme),
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),
@@ -54,6 +56,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     let modal_open = app.summary.is_some()
         || app.edit.is_some()
         || app.confirm.is_some()
+        || app.word_edit.is_some()
         || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some();
@@ -72,6 +75,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
     if let Some(confirm) = &app.confirm {
         overlays::render_confirm(frame, area, &theme, confirm);
+    }
+    if let Some(edit) = &app.word_edit {
+        overlays::render_word_edit(frame, area, &theme, edit);
     }
     if let Some(picker) = &app.mode_picker {
         overlays::render_mode_picker(

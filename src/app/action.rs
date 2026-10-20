@@ -32,6 +32,28 @@ pub enum Action {
     CollectMove(i32),
     CollectSelect,
     CollectCancel,
+    // 词条管理
+    OpenWords,
+    OpenSelectedWords,
+    WordsMove(i32),
+    WordsSearchChar(char),
+    WordsSearchToggle,
+    WordsSearchBackspace,
+    WordsToggleMark,
+    WordsEdit,
+    WordsAdd,
+    WordsDelete,
+    WordsMarkKnow,
+    WordsMarkMastered,
+    WordsMarkUnknown,
+    WordsCopyDict,
+    WordsSort,
+    WordsNewDict,
+    WordsEditField(i32),
+    WordsEditChar(char),
+    WordsEditBackspace,
+    WordsEditSave,
+    WordsEditCancel,
     // 单词测试
     WordTestChoose(usize),
     WordTestNext,
@@ -113,6 +135,31 @@ impl App {
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
             Action::CollectCancel => self.collect_picker = None,
+            Action::OpenWords => self.open_words(),
+            Action::OpenSelectedWords => self.open_selected_words(),
+            Action::WordsMove(delta) => self.move_words_cursor(delta),
+            Action::WordsSearchChar(character) => self.words_search_push(character),
+            Action::WordsSearchToggle => self.toggle_words_search(),
+            Action::WordsSearchBackspace => self.words_search_backspace(),
+            Action::WordsToggleMark => self.words_toggle_mark(),
+            Action::WordsEdit => self.edit_current_word(),
+            Action::WordsAdd => self.open_word_edit(None),
+            Action::WordsDelete => self.delete_current_word(),
+            Action::WordsMarkKnow => self.apply_word_mark(crate::domain::wordbook::MarkKind::Know),
+            Action::WordsMarkMastered => {
+                self.apply_word_mark(crate::domain::wordbook::MarkKind::Mastered)
+            }
+            Action::WordsMarkUnknown => {
+                self.apply_word_mark(crate::domain::wordbook::MarkKind::Unknown)
+            }
+            Action::WordsCopyDict => self.copy_study_dict(),
+            Action::WordsSort => self.cycle_words_sort(),
+            Action::WordsNewDict => self.open_new_dict(),
+            Action::WordsEditField(delta) => self.move_word_edit_field(delta),
+            Action::WordsEditChar(character) => self.word_edit_push(character),
+            Action::WordsEditBackspace => self.word_edit_backspace(),
+            Action::WordsEditSave => self.save_word_edit(),
+            Action::WordsEditCancel => self.word_edit = None,
             Action::WordTestChoose(index) => self.word_test_choose(index),
             Action::WordTestNext => self.word_test_next(),
             Action::WordTestExit => self.leave_word_test(),
@@ -140,9 +187,9 @@ impl App {
             Action::EditCancel => self.edit = None,
             Action::EditChar(character) => {
                 if let Some(edit) = self.edit.as_mut() {
-                    // 笔记是自由文本，其余设置项只接受数字
+                    // 笔记与词典名是自由文本，其余设置项只接受数字
                     let accepted = match edit.target {
-                        crate::app::EditTarget::Note => {
+                        crate::app::EditTarget::Note | crate::app::EditTarget::DictName => {
                             !character.is_control() && edit.buffer.chars().count() < 200
                         }
                         _ => character.is_ascii_digit() && edit.buffer.len() < 6,
@@ -192,6 +239,13 @@ impl App {
             Screen::WordTest => {
                 self.screen = Screen::WordTest;
             }
+            Screen::Words => {
+                self.screen = Screen::Words;
+                self.words_cursor = 0;
+                self.words_filter.clear();
+                self.words_search_focus = false;
+                self.words_marked.clear();
+            }
             Screen::Help => {
                 self.help_scroll = 0;
                 self.screen = Screen::Help;
@@ -225,6 +279,7 @@ impl App {
                 self.navigate_to(Screen::Settings);
             }
             Screen::WordTest => self.leave_word_test(),
+            Screen::Words => self.navigate_to(Screen::DictPicker),
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
         }
     }
@@ -276,6 +331,13 @@ impl App {
         let Some(edit) = self.edit.take() else {
             return;
         };
+        if edit.target == crate::app::EditTarget::DictName {
+            let name = edit.buffer.trim().to_string();
+            if !name.is_empty() {
+                self.create_custom_dict(&name, Vec::new());
+            }
+            return;
+        }
         if edit.target == crate::app::EditTarget::Note {
             self.save_word_note(edit.buffer);
             return;

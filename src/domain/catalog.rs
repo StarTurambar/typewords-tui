@@ -7,6 +7,7 @@
 //! 查找顺序：数据目录（用户 `import-dict`）优先，其次只读资源目录。
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -64,6 +65,14 @@ impl DictResource {
             .as_deref()
             .map(|kind| kind == "word")
             .unwrap_or(true)
+    }
+
+    /// 是否是用户自建的词典（目录项里的 `custom` 标记）。
+    pub fn is_custom(&self) -> bool {
+        self.extra
+            .get("custom")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
     }
 
     /// 转为可持久化的 Dict（词表由调用方补）。
@@ -220,6 +229,85 @@ impl Catalog {
         }
         let text = serde_json::to_string_pretty(value)?;
         crate::store::write_atomic(&file, &text)
+    }
+}
+
+/// 在数据目录里新建一本自定义词典，返回登记好的目录项。
+///
+/// 自定义词典与 `import-dict` 导入的词典一样落在 `<home>` 下，因此会自动出现在
+/// 词库页；词条存在 `<home>/dicts/en/word/<id>.json`。
+pub fn create_custom_dict(paths: &Paths, name: &str, words: Vec<Word>) -> Result<DictResource> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(anyhow!("词典名称不能为空"));
+    }
+    let catalog = Catalog::load(paths)?;
+    let id = unique_custom_id(&catalog, name);
+    let file_name = format!("{id}.json");
+    let text = serde_json::to_string_pretty(&words)?;
+    let file = catalog.user_dict_file(&file_name);
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("创建目录失败: {}", parent.display()))?;
+    }
+    crate::store::write_atomic(&file, &text)?;
+
+    let mut entries = catalog.read_user_catalog()?;
+    let resource = DictResource {
+        id: serde_json::Value::String(id.clone()),
+        en_name: id.clone(),
+        name: name.to_string(),
+        description: "自建词库".to_string(),
+        url: file_name,
+        length: words.len(),
+        category: "我的词库".to_string(),
+        tags: vec!["自建".to_string()],
+        language: "en".to_string(),
+        translate_language: "zh_CN".to_string(),
+        kind: Some("word".to_string()),
+        version: Some(1),
+        cover: None,
+        extra: serde_json::Map::new(),
+    };
+    let mut value = serde_json::to_value(&resource)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("custom".to_string(), serde_json::Value::Bool(true));
+    }
+    entries.retain(|entry| {
+        entry
+            .get("id")
+            .and_then(|id| id.as_str())
+            .map(|id| id != resource.id_string())
+            .unwrap_or(true)
+    });
+    entries.push(value);
+    catalog.write_user_catalog(&entries)?;
+    Ok(resource)
+}
+
+/// 生成不与现有词典冲突的自定义词典 id。
+fn unique_custom_id(catalog: &Catalog, name: &str) -> String {
+    let mut index = 1usize;
+    loop {
+        let id = format!("custom-{index}");
+        let taken = catalog
+            .resources()
+            .iter()
+            .any(|resource| resource.id_string() == id)
+            || catalog
+                .read_user_catalog()
+                .ok()
+                .map(|entries| {
+                    entries.iter().any(|entry| {
+                        entry.get("id").and_then(|id| id.as_str()) == Some(id.as_str())
+                    })
+                })
+                .unwrap_or(false);
+        if !taken {
+            return id;
+        }
+        index += 1;
+        let _ = name;
     }
 }
 
