@@ -9,3 +9,7 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python（仅维护者截图工具用）
+.venv/
+__pycache__/
