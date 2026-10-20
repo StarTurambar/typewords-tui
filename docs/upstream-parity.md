@@ -325,32 +325,45 @@ Web 备份 data.json                       TUI 数据目录
 
 ### 7.2 优先级
 
-| 优先级 | 内容 | 上游参考 | 代码落点 | 依赖 | 复杂度 | 验收标准 |
-| --- | --- | --- | --- | --- | --- | --- |
-| P0 | 跳组 | `GroupList.vue`、`createTaskFromGroup` | `src/domain/session.rs`（已有）+ `src/app/action.rs` + 练习页状态行入口 | 无 | S | 练习中可选组重建会话并更新缓存；补 `tests/app_drive.rs` |
-| P0 | 练习中重学 / 下一组 | 结算弹层、`createRepeatTask` / `createNextTask` | `src/app/mod.rs` 练习键位 + 会话方法 | 无 | S | 组合键触发成功且统计/进度正确，不再只保存 |
-| P0 | 笔记显示与编辑 | `TypeWord.vue` 笔记区 | `src/domain/types.rs`（字段已有）+ `src/ui/practice.rs` + 复用输入弹层 | 无 | M | 显示、编辑、删除并持久化到 `dict.json`；重启后保留 |
-| P0 | `Ctrl+M` 简洁模式 | `toggleConciseMode` | `src/app/mod.rs` | 无 | S | 切换工具栏/词表显示 |
-| P0 | 收藏到指定词典 | `WordCollectPopover.vue` | 新 Action + 词库选择弹层 + `session.toggle_collect` 扩展 | 多词库选择 UI | M | `Shift+Enter` 选择目标词典并写入 |
-| P0 | FSRS 高级参数 UI | `FsrsSetting.vue` | `src/app/mod.rs` 的 `SETTING_ROWS` / `EditTarget` | 无 | M | `maximum_interval` / `w` / `enable_fuzz`（fuzz 已接入近似实现）可在设置页编辑并写入 |
-| P1 | 词库 / 单词管理屏 | `dict.vue`、`BaseTable.vue`、`WordItem.vue` | 新 `src/ui` 页面 + `domain/catalog.rs` 写路径 + 自定义词典 | 词库文件读写 | L | 搜索/增删改/批量删除/自定义词典可用 |
-| P1 | 单词测试模式 | `words-test/[id].vue`、`utils/word-test.ts` | `domain/question.rs`（已有）+ 新 Screen + 结算 | 无 | M | 4 选 1、判分、错词入错词本 |
-| P1 | 统计按词典拆分 + 日历 | `app/base/Calendar.vue`、`(words)/words.vue` 日记录弹窗 | `src/ui/stats.rs`、`domain/statistics.rs` | 无 | M | 可按日/按词典查看，复用已有 `statistics` 数据 |
-| P1 | `Ctrl+Q` 切主题 / 可配置键位 | `setting.vue` 快捷键 tab、`shortcutKeyMap` | `src/app/keymap.rs` 重构为映射表 + 设置页 | 与 `shortcutKeyMap` 存档对齐 | L | 快捷键可修改、持久化并在重启后生效 |
-| P2 | Web 备份 JSON 导入导出 | `hooks/export.ts`、`setting.vue` 数据管理 | `src/cli.rs` 子命令 + `store` 适配器 | 无 | M | 能读写 `BackupData` v5（先 JSON，ZIP 后置） |
-| P2 | 音频（发音 + 键音） | `hooks/sound.ts` | 新增音频后端依赖 + 练习页播放触发 + 设置项 | 新 crate 与音频资源 | L | 发音与键音可开关，失败可回退 |
-| P2 | 文章背诵 | `(articles)/*`、`hooks/article.ts`、`practice-sentences/*` | 新领域模型 + 屏幕 + 资源加载 | 文章资源、音频 | XL | 句子级跟打/默写与结算 |
-| P2 | 自定义流程编辑器 | `practice-flow-runtime.ts` | 流程配置序列化 + 新 Screen | 与上游 flow v6 兼容 | L | 可创建/选择/保存流程，缓存可恢复 |
-| P2 | 云同步 | `useDataSyncPersistence.ts` | 新网络层 + 冲突合并 | HTTP 客户端、用户 Supabase | XL | 不建议近期做：上游已标「过时功能」 |
+| 优先级 | 内容 | 上游参考 | 代码落点 | 状态 |
+| --- | --- | --- | --- | --- |
+| P0 | 跳组 | `GroupList.vue`、`createTaskFromGroup` | 练习页状态行「第 N 组」→ 跳组弹层 | 已完成 |
+| P0 | 练习中重学 / 上下组 / 默写本组 | `createRepeatTask` / `createNextTask` | `Ctrl+Enter` / `Alt+←` `Alt+→` / `Alt+Enter` | 已完成 |
+| P0 | 笔记显示与编辑 | `TypeWord.vue` 笔记区 | 练习页「笔记」卡片 + `Ctrl+O` 编辑弹层 | 已完成 |
+| P0 | 简洁模式 | `toggleConciseMode` | `Ctrl+G`（上游 `Ctrl+M` 在终端等同回车） | 已完成 |
+| P0 | 收藏到指定词典 | `WordCollectPopover.vue` | `Shift+Enter` → 词典选择弹层 | 已完成 |
+| P0 | FSRS 逐条对齐 | `ts-fsrs` 5.4.1 | `src/domain/fsrs.rs`（自实现，含黄金样本比对） | 已完成 |
+| P0 | 可配置键位 | `setting.vue` 快捷键 tab、`shortcutKeyMap` | `src/domain/shortcut.rs` + 快捷键编辑页 | 已完成 |
+| P1 | 词库 / 单词管理屏 | `dict.vue`、`BaseTable.vue`、`WordItem.vue` | `src/ui/words.rs` + `src/domain/wordbook.rs` | 已完成 |
+| P1 | 单词测试模式 | `words-test/[id].vue`、`utils/word-test.ts` | `src/ui/word_test.rs` | 已完成 |
+| P1 | 统计按词典拆分 + 日历 | `app/base/Calendar.vue` | `src/ui/stats.rs`（月历 + 当日明细 + 按词典视图） | 已完成 |
+| P2 | Web 备份 JSON 导入导出 | `hooks/export.ts` | `tw import-web` / `tw export-web` | 已完成 |
+| P2 | 音频（发音 + 键音） | `hooks/sound.ts` | `src/audio/`（响铃 + 系统 TTS + 有道接口） | 已完成（降级实现） |
+| P2 | 文章背诵 | `(articles)/*`、`hooks/article.ts` | `src/domain/article.rs` + `src/ui/articles.rs` | 已完成（无逐句音频时间轴） |
+| P2 | 自定义流程编辑器 | `practice-flow-runtime.ts` | `src/domain/flow/store.rs` + `src/ui/flows.rs` | 已完成（不含节点增删） |
+| P2 | 云同步 | `useDataSyncPersistence.ts` | — | 不做：上游已标「过时功能」 |
 
-### 7.3 建议顺序与风险
+### 7.3 仍未对齐的部分
 
-1. 先做 P0 中不引入新依赖的项（跳组、重学/下一组、笔记、`Ctrl+M`），每项单独提交并补 `tests/app_drive.rs`。
-2. 再做收藏到指定词典与 FSRS 高级参数：前者需要先有多词典选择 UI，后者改动会影响所有卡片，必须用设置备份 + 回归测试兜底。
-3. P1 的管理屏与测试模式工作量最大，建议先做词条只读浏览、再做写操作；统计拆分可以复用现有聚合函数，风险最低。
-4. P2 的音频、文章、云同步都会引入平台依赖或网络依赖，与「单二进制、离线」定位冲突，需要单独评审。
+| 项 | 差距 | 原因 |
+| --- | --- | --- |
+| FSRS 高级参数 UI | `maximum_interval`、21 个 `w`、`enable_fuzz` 已在调度器里生效，但设置页还没有编辑入口 | 需要一个 21 项数值的编辑界面，优先级低于其它项 |
+| 词条导入 / 导出 | 只有 `tw import-dict`（词条数组 JSON），没有词库整体导出，也没有 xlsx | xlsx 需要新依赖，与「保持 TUI 轻量」冲突 |
+| 节点与步骤的完整编辑 | 流程页能增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点的词表来源 | 终端里编辑多级结构的交互成本高 |
+| 文章逐句音频对齐 | 没有 LRC 时间轴，无法做卡拉OK式逐句高亮 | 不打包 mp3，改用系统 TTS 整句朗读 |
+| 单词笔记的词库页入口 | 笔记只能在练习页编辑，词库页还没有笔记列 | 词库页只有基础的增删改查 |
+| 词频与近义词的完整展示 | 释义按词频着色，近义词只显示前两条 | 练习页高度有限，完整信息在词条编辑弹层里 |
 
-主要风险：键位可配置会与终端保留键（`Ctrl+C`、`Ctrl+Z`、`Ctrl+M` 等）冲突；FSRS 参数改动没有回滚 UI；音频/文章/网络需要新的 crate 与资源（体积、跨平台、许可证）；上游数据版本变化会让手工迁移失效，所以每次同步上游都要先核对版本号。
+
+
+### 7.3 实施过程中的取舍
+
+- **键位与终端保留键的冲突**：`Ctrl+M` 在多数终端等同回车、`Ctrl+I` 在 Unix 终端被报成 `Tab`，因此简洁模式改用 `Ctrl+G`，并为「下一个词」「下一阶段」补了 `Ctrl+N` / `Ctrl+J` 别名。
+- **音频的取舍**：不打包任何 mp3，键音与对错音退化为终端响铃，发音与朗读走系统 TTS（Windows `System.Speech` / macOS `say` / Linux `espeak-ng`），有道接口作为可选来源并自动降级。
+- **文章的取舍**：只内置《新概念英语1》5 篇，断句与分词规则与上游一致，但没有逐句音频时间轴。
+- **依赖的取舍**：移除 `fsrs` crate 换取与上游一致的调度算法；xlsx 导入导出与云同步不做。
+
+主要风险：可配置键位可能与终端保留键冲突；上游数据版本变化会让手工迁移失效，所以每次同步上游都要先核对版本号。
 
 ## 8. 上游同步维护
 
