@@ -468,8 +468,13 @@ impl App {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        let (word_changed, _phase_changed) = session.refresh();
-        if word_changed {
+        let (word_changed, phase_changed) = session.refresh();
+        let reset_word = std::mem::take(&mut session.reset_word);
+        // 键入引擎里的输入属于「上一个 (单词, 阶段)」，任一变化都必须丢弃：
+        // - 进入组内巩固 / 错词巩固时组头可能仍是同一个单词（单词键不变）；
+        // - 切换步骤时新词表可能恰好以刚练完的单词开头（同样是单词键不变）；
+        // 残留的输入会让当前单词再也无法完成，练习卡在巩固阶段。
+        if word_changed || phase_changed || reset_word {
             self.typing.reset();
         }
         session.update_question(&mut self.rng);

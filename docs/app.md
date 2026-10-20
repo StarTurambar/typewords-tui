@@ -303,7 +303,7 @@ app.save_all()
 | `prev_word` / `skip_step` / `skip_word` | `session.prev` / `session.skip_step` / `session.skip` | 重置键入 + `after_advance` |
 | `random_write`（Ctrl+R） | `session.random_write(rng)` | 重置键入 + `after_advance` |
 
-`after_advance` 的固定动作：`session.refresh()` 同步显隐策略（阶段变化清空遮罩/翻译覆盖与揭示状态），单词变化时 `typing.reset()`；`session.update_question(rng)` 生成自测题；清空 `identify_select`；若 `session.complete` 则 `finish_session`；最后 `schedule_practice_save`。
+`after_advance` 的固定动作：`session.refresh()` 同步显隐策略（阶段变化清空遮罩/翻译覆盖与揭示状态），单词或阶段变化、或会话置位 `reset_word` 时 `typing.reset()`（进入组内巩固/错词巩固、切换步骤时当前单词可能不变，键入状态必须一并丢弃，否则当前词无法完成）；`session.update_question(rng)` 生成自测题；清空 `identify_select`；若 `session.complete` 则 `finish_session`；最后 `schedule_practice_save`。
 
 ### 7.4 自测操作
 

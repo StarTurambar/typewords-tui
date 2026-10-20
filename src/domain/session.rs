@@ -75,6 +75,11 @@ pub struct PracticeSession {
     pub mode: WordPracticeMode,
     pub complete: bool,
     pub last_word_key: String,
+    /// 上一次推进是否要求重置当前单词的键入状态（对应 Web 的 `EventKey.resetWord`）。
+    ///
+    /// 进入组内巩固 / 错词巩固时若组头仍是同一个单词，单词键不变，界面不会自行重置，
+    /// 必须由推进器显式置位。由界面层在 `after_advance` 读取并清除。
+    pub reset_word: bool,
 }
 
 fn shuffle_words(rng: &mut Rng, words: &mut [Word]) {
@@ -92,6 +97,7 @@ impl PracticeSession {
             mode,
             complete: false,
             last_word_key: String::new(),
+            reset_word: false,
         }
     }
 
@@ -259,6 +265,7 @@ impl PracticeSession {
     ) -> FlowStartResult {
         self.nav = Navigator::new(flow_for_mode(self.mode));
         self.complete = false;
+        self.reset_word = false;
         let mut task_words = task;
         let start = resolve_flow_start(&self.nav.flow, &task_words, &[], &mut |words| {
             shuffle_words(rng, words)
@@ -330,6 +337,7 @@ impl PracticeSession {
             timer::resume(stat, now);
         }
         self.complete = false;
+        self.reset_word = false;
         self.last_word_key = String::new();
         self.refresh();
         self.update_question(rng);
@@ -372,6 +380,7 @@ impl PracticeSession {
             };
             self.nav.next(&mut state, is_typing, false);
         }
+        self.reset_word = reset_word;
         if completed {
             self.complete = true;
         }
@@ -400,6 +409,7 @@ impl PracticeSession {
             completed: &mut completed,
         };
         self.nav.prev(&mut state);
+        self.reset_word = reset_word;
         notices
     }
 
@@ -425,6 +435,7 @@ impl PracticeSession {
             completed: &mut completed,
         };
         self.nav.skip_step(&mut state);
+        self.reset_word = reset_word;
         if completed {
             self.complete = true;
         }

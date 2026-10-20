@@ -413,7 +413,7 @@ TUI 的调度器消费 `w`、`request_retention`、`maximum_interval` 与 `enabl
 | `advance_step_cursor(config, cursor)` | 返回下一游标与“是否已到终点”；跨节点时进入下一节点第 0 步，否则步骤 +1，并清空错词/子步骤/动作下标 |
 | `display_state(config, cursor, word_index, word_count)` | 生成状态文案与阶段条：子步骤显示“小组巩固”，错词清空显示“错词巩固”，多节点/多步骤时显示“节点 · 步骤”，否则显示流程名；单节点单步骤只返回一根进度条 |
 
-小组循环（WordLoop）语义：每完成 `group_size` 个词，把该组回放一遍子步骤（System 新词跟写后回放 Spell）；最后一组不满 `group_size` 时在词表结束时补齐回放。进入循环时 `cursor.loop_range` 生效、`data.index` 回到组首；子步骤用尽后 `index = end_index + 1` 继续主词表。`display_state` 的阶段条被 [练习页](screenshots/practice-120x40-dark.png) 使用。
+小组循环（WordLoop）语义：每完成 `group_size` 个词，把该组回放一遍子步骤（System 新词跟写后回放 Spell）；最后一组不满 `group_size` 时在词表结束时补齐回放。进入循环时 `cursor.loop_range` 生效、`data.index` 回到组首；子步骤用尽后 `index = end_index + 1` 继续主词表。组首若仍是进入循环前的那个单词（如组内只剩 1 个词、错词巩固只剩 1 个错词），单词键不变、界面不会自行重置，此时 `enter_loop` 置位 `NavState.reset_word`，由会话层转存到 `PracticeSession::reset_word`、界面层在 `after_advance` 消费。`display_state` 的阶段条被 [练习页](screenshots/practice-120x40-dark.png) 使用。
 
 `CURRENT_FLOW_VERSION` 只写入 `PracticeFlowConfig.version`，并参与会话的 `phase_key`（用于检测相位变化）；断点缓存不保存流程版本，恢复时依靠 `flow_id` 命中内置流程 + 游标结构校验（见 12.4）。缓存的版本兼容由 `PRACTICE_CACHE_VERSION` 控制。
 
@@ -455,7 +455,7 @@ TUI 的调度器消费 `w`、`request_retention`、`maximum_interval` 与 `enabl
 
 快照恢复时逐项校验：`flow_id` 必须命中内置流程（否则回退 `system`）；节点/步骤下标越界、`in_wrong_word_clear` 但 `end_action_index` 未指向 `WrongWordClear`、`loop_range` 与 `WordLoop` 不匹配或范围超出当前词表，都会重置到 `system` 的初始游标；工作词表优先用 `node_working_word_keys` 从任务词/当前词/错词中按单词字符串重建，缺 key 时按当前节点词源重建。
 
-现状与限制：`create_task_from_group`（跳组）已在会话层实现但未接到界面；`complete_current_list` 无调用点；`NavState.reset_word` 由推进器置位但会话层未消费；“上一组/下一组”尚未实现。对应界面入口与路线图见 [应用层](app.md) 与 [与上游 TypeWords 的差异](upstream-parity.md)。
+现状与限制：`create_task_from_group`（跳组）已在会话层实现但未接到界面；`complete_current_list` 无调用点；“上一组/下一组”尚未实现。对应界面入口与路线图见 [应用层](app.md) 与 [与上游 TypeWords 的差异](upstream-parity.md)。
 
 ## 11. 自测题（question.rs）
 
