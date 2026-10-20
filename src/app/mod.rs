@@ -20,7 +20,7 @@ use crate::domain::shortcut::{ShortcutAction, ShortcutMap};
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
-    BaseState, PracticeState, SettingState, TaskWords, WordPracticeMode, WordPracticeType,
+    BaseState, Dict, PracticeState, SettingState, TaskWords, WordPracticeMode, WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
 use crate::paths::Paths;
@@ -48,6 +48,18 @@ pub struct Toast {
     pub message: String,
     pub level: NoticeLevel,
     pub until: i64,
+}
+
+/// 跳组弹层的状态。
+#[derive(Clone, Debug)]
+pub struct GroupPickerState {
+    pub cursor: usize,
+}
+
+/// 「收藏到指定词典」弹层的状态。
+#[derive(Clone, Debug)]
+pub struct CollectPickerState {
+    pub cursor: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,6 +211,10 @@ pub struct App {
     pub shortcut_cursor: usize,
     /// 正在捕获新的键位
     pub shortcut_capturing: bool,
+    /// 跳组弹层
+    pub group_picker: Option<GroupPickerState>,
+    /// 「收藏到指定词典」弹层
+    pub collect_picker: Option<CollectPickerState>,
     pub task_preview: Option<(usize, usize, usize)>,
     pub today_spend: i64,
     pub today_new: usize,
@@ -289,6 +305,8 @@ impl App {
             shortcuts: ShortcutMap::default(),
             shortcut_cursor: 0,
             shortcut_capturing: false,
+            group_picker: None,
+            collect_picker: None,
             task_preview: None,
             today_spend: 0,
             today_new: 0,
@@ -874,6 +892,196 @@ impl App {
         true
     }
 
+    // ── 练习内动作 ───────────────────────────────────────────────────────
+
+    /// 简洁模式：同时隐藏工具栏与词表面板（上游 `toggleConciseMode`）。
+    fn toggle_concise_mode(&mut self) {
+        // 只要还有一块可见就进入简洁模式；两块都藏起来时恢复
+        let next = !(self.show_toolbar || self.show_panel);
+        self.show_toolbar = next;
+        self.show_panel = next;
+    }
+
+    /// 当前词库每组的词数。
+    fn words_per_group(&self) -> usize {
+        self.boot
+            .base
+            .study_dict()
+            .map(Dict::per_day)
+            .unwrap_or(20)
+            .max(1)
+    }
+
+    /// 当前学习到第几组（1 起）。
+    ///
+    /// 练习中的推进量还没写回词典进度，因此要把本轮已学的新词数算进去。
+    pub fn current_group(&self) -> usize {
+        let per_day = self.words_per_group();
+        let learned = self
+            .boot
+            .base
+            .study_dict()
+            .map(|dict| dict.last_learn_index)
+            .unwrap_or(0)
+            + self.stat.new_word_number;
+        learned / per_day + 1
+    }
+
+    /// 词库一共多少组。
+    pub fn total_groups(&self) -> usize {
+        let per_day = self.words_per_group();
+        let length = self
+            .boot
+            .base
+            .study_dict()
+            .map(|dict| dict.length)
+            .unwrap_or(0);
+        length.div_ceil(per_day).max(1)
+    }
+
+    /// 跳到指定组（1 起）重新开始本轮。
+    pub fn jump_to_group(&mut self, group: usize) {
+        let group = group.clamp(1, self.total_groups());
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let task = session.create_task_from_group(
+            &mut self.boot.base,
+            &self.boot.settings,
+            &mut self.rng,
+            group,
+        );
+        if task.is_empty() {
+            self.toast(
+                NoticeLevel::Warning,
+                crate::domain::i18n::tr("no_words_to_study"),
+            );
+            return;
+        }
+        let mode = self.boot.settings.word_practice_mode;
+        self.begin_session_with_task(task, mode);
+        self.toast(NoticeLevel::Success, format!("已跳到第 {group} 组"));
+    }
+
+    /// 重学当前组：按组重建会话，词表回到组首。
+    fn repeat_current_group(&mut self) {
+        let group = self.current_group();
+        self.jump_to_group(group);
+    }
+
+    /// 上一组 / 下一组。
+    fn shift_group(&mut self, delta: i32) {
+        let group = (self.current_group() as i32 + delta).clamp(1, self.total_groups() as i32);
+        self.jump_to_group(group as usize);
+    }
+
+    /// 默写当前组：按组重建会话，但用默写模式。
+    fn dictate_current_group(&mut self) {
+        let group = self.current_group();
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let task = session.create_task_from_group(
+            &mut self.boot.base,
+            &self.boot.settings,
+            &mut self.rng,
+            group,
+        );
+        if task.is_empty() {
+            self.toast(
+                NoticeLevel::Warning,
+                crate::domain::i18n::tr("no_words_to_study"),
+            );
+            return;
+        }
+        self.begin_session_with_task(task, WordPracticeMode::DictationOnly);
+        self.toast(NoticeLevel::Success, format!("第 {group} 组进入默写"));
+    }
+
+    // ── 收藏到指定词典 ───────────────────────────────────────────────────
+
+    /// 可收藏的目标词典（收藏 + 自建词典）。
+    pub fn collectible_dicts(&self) -> Vec<(usize, String)> {
+        self.boot
+            .base
+            .collectible_dict_indices()
+            .into_iter()
+            .filter_map(|index| {
+                self.boot
+                    .base
+                    .word
+                    .book_list
+                    .get(index)
+                    .map(|dict| (index, dict.name.clone()))
+            })
+            .collect()
+    }
+
+    fn open_collect_picker(&mut self) {
+        let total = self.collectible_dicts().len();
+        if total == 0 {
+            self.toast(NoticeLevel::Warning, "没有可收藏的词典");
+            return;
+        }
+        self.collect_picker = Some(CollectPickerState { cursor: 0 });
+    }
+
+    fn move_collect_cursor(&mut self, delta: i32) {
+        let total = self.collectible_dicts().len() as i32;
+        if total == 0 {
+            return;
+        }
+        let Some(picker) = self.collect_picker.as_mut() else {
+            return;
+        };
+        let next = (picker.cursor as i32 + delta).clamp(0, total - 1);
+        picker.cursor = next as usize;
+    }
+
+    /// 把当前词收藏到选中的词典。
+    fn select_collect_dict(&mut self) {
+        let Some(picker) = self.collect_picker.take() else {
+            return;
+        };
+        let Some((index, name)) = self.collectible_dicts().get(picker.cursor).cloned() else {
+            return;
+        };
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        session.toggle_collect_to(&mut self.boot.base, index);
+        self.toast(NoticeLevel::Success, format!("已收藏到「{name}」"));
+        self.schedule_practice_save();
+    }
+
+    // ── 跳组弹层 ─────────────────────────────────────────────────────────
+
+    /// 打开跳组弹层，光标停在当前组。
+    pub fn open_group_picker(&mut self) {
+        let cursor = self.current_group().saturating_sub(1);
+        self.group_picker = Some(GroupPickerState { cursor });
+    }
+
+    fn move_group_cursor(&mut self, delta: i32) {
+        let total = self.total_groups() as i32;
+        if total == 0 {
+            return;
+        }
+        let Some(picker) = self.group_picker.as_mut() else {
+            return;
+        };
+        let next = (picker.cursor as i32 + delta).clamp(0, total - 1);
+        picker.cursor = next as usize;
+    }
+
+    /// 跳到弹层选中的组并关闭弹层。
+    fn select_group(&mut self) {
+        let Some(picker) = self.group_picker.take() else {
+            return;
+        };
+        self.jump_to_group(picker.cursor + 1);
+    }
+
     // ── 快捷键编辑 ───────────────────────────────────────────────────────
 
     /// 打开快捷键编辑页（从设置页进入）。
@@ -986,7 +1194,12 @@ impl App {
             return;
         }
 
-        if self.edit.is_some() || self.confirm.is_some() || self.summary.is_some() {
+        if self.edit.is_some()
+            || self.confirm.is_some()
+            || self.summary.is_some()
+            || self.group_picker.is_some()
+            || self.collect_picker.is_some()
+        {
             if let Some(action) = keymap::overlay_action(self, key) {
                 self.apply_action(action);
             }
@@ -1044,6 +1257,10 @@ impl App {
                 }
                 true
             }
+            CollectToDict => {
+                self.open_collect_picker();
+                true
+            }
             ToggleSimple => {
                 if let Some(session) = self.session.as_mut() {
                     session.toggle_word_simple_for_current(&mut self.boot.base);
@@ -1093,8 +1310,27 @@ impl App {
                 true
             }
             RepeatChapter => {
-                self.save_practice_now();
-                self.save_dict_now();
+                self.repeat_current_group();
+                true
+            }
+            PreviousChapter => {
+                self.shift_group(-1);
+                true
+            }
+            NextChapter => {
+                self.shift_group(1);
+                true
+            }
+            DictationChapter => {
+                self.dictate_current_group();
+                true
+            }
+            ToggleConciseMode => {
+                self.toggle_concise_mode();
+                true
+            }
+            ToggleTheme => {
+                self.cycle_theme();
                 true
             }
             KnowWord => self.is_identify() && self.identify_know(),

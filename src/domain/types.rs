@@ -757,6 +757,17 @@ impl BaseState {
     }
 
     /// 当前学习词典。
+    /// 可收藏的目标词典下标：收藏词典 + 用户自建词典（与上游 `getCollectibleDicts` 一致）。
+    pub fn collectible_dict_indices(&self) -> Vec<usize> {
+        self.word
+            .book_list
+            .iter()
+            .enumerate()
+            .filter(|(_, dict)| dict.id == DICT_WORD_COLLECT || dict.custom)
+            .map(|(index, _)| index)
+            .collect()
+    }
+
     pub fn study_dict(&self) -> Option<&Dict> {
         if self.word.study_index < 0 {
             return None;

@@ -21,7 +21,7 @@ use crate::ui::bigtext::{self, BigLetter, GLYPH_WIDTH};
 use crate::ui::shell::toast_line;
 use crate::ui::target::Target;
 use crate::ui::theme::Theme;
-use crate::ui::widgets::{bar_spans, wrap_text};
+use crate::ui::widgets::{bar_spans, display_width, wrap_text};
 
 /// 信息卡片内容：(标题, 行内容, 最大行数)
 pub(crate) type CardSpec = (String, Vec<(String, Color)>, usize);
@@ -30,6 +30,10 @@ pub(crate) type CardSpec = (String, Vec<(String, Color)>, usize);
 pub struct PracticeLayout {
     /// 顶部状态行
     pub header: Rect,
+    /// 顶部状态行的内容
+    pub header_line: Line<'static>,
+    /// 状态行里「第 N 组」的命中区域（点击打开跳组弹层）
+    pub group_target: Option<Rect>,
     /// 主区域（已扣除词表侧栏）
     pub body: Rect,
     /// 大字单词区
@@ -52,6 +56,12 @@ pub struct PracticeLayout {
 
 /// 计算练习页布局。
 pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -> PracticeLayout {
+    let display = display_state(
+        session.flow(),
+        session.cursor(),
+        session.data.index,
+        session.data.words.len(),
+    );
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints(if app.show_toolbar {
@@ -139,8 +149,14 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
         })
         .unwrap_or_default();
 
+    let (header_line, group_span) = header(app, session, &display, theme);
+    let group_target = group_span
+        .map(|(start, width)| Rect::new(outer[0].x + start as u16, outer[0].y, width as u16, 1));
+
     PracticeLayout {
         header: outer[0],
+        header_line,
+        group_target,
         body,
         word_area: content[0],
         cards_area: content[1],
@@ -160,11 +176,15 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
     };
     let theme = app.theme();
     let layout = layout(app, session, area, &theme);
-    layout
+    let mut targets: Vec<Target> = layout
         .word_rows
         .iter()
         .map(|(index, rect)| Target::new(*rect, Action::PracticeGotoWord(*index)))
-        .collect()
+        .collect();
+    if let Some(rect) = layout.group_target {
+        targets.push(Target::new(rect, Action::OpenGroupPicker));
+    }
+    targets
 }
 
 pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -179,10 +199,7 @@ pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &
     );
     let layout = layout(app, session, area, theme);
 
-    frame.render_widget(
-        Paragraph::new(header(app, session, &display, theme)),
-        layout.header,
-    );
+    frame.render_widget(Paragraph::new(layout.header_line.clone()), layout.header);
 
     if let Some(word_list) = layout.word_list {
         render_word_list(app, session, frame, word_list, theme);
@@ -204,12 +221,15 @@ pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &
     }
 }
 
+/// 顶部状态行。
+///
+/// 第二个返回值是「第 N 组」提示在行内的位置（起始列与宽度），供鼠标命中用。
 fn header(
     app: &App,
     session: &PracticeSession,
     display: &FlowDisplayState,
     theme: &Theme,
-) -> Line<'static> {
+) -> (Line<'static>, Option<(usize, usize)>) {
     let dict_name = app
         .boot
         .study_dict()
@@ -235,14 +255,26 @@ fn header(
             .fg(theme.accent)
             .add_modifier(Modifier::BOLD),
     )];
+    let mut column = display_width(&format!(" {dict_name} "));
     if !display.status.is_empty() {
         spans.push(Span::styled("· ", Style::default().fg(theme.dim)));
         spans.push(Span::styled(
             display.status.clone(),
             Style::default().fg(theme.fg),
         ));
+        column += display_width("· ") + display_width(&display.status);
     }
-    spans.push(Span::raw("   "));
+    // 「第 N 组」：点击可打开跳组弹层
+    let group_label = format!("第 {} 组", app.current_group());
+    let group_start = column + 3;
+    spans.push(Span::styled("   ", Style::default().fg(theme.dim)));
+    spans.push(Span::styled(
+        group_label.clone(),
+        Style::default()
+            .fg(theme.accent_alt)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled("   ", Style::default().fg(theme.dim)));
     spans.extend(bar(percent, 16, theme.good, theme.dim));
     spans.push(Span::styled(
         format!(" {index}/{total}"),
@@ -262,7 +294,10 @@ fn header(
             theme.dim
         }),
     ));
-    Line::from(spans)
+    (
+        Line::from(spans),
+        Some((group_start, display_width(&group_label))),
+    )
 }
 
 fn bar(percent: u32, width: usize, filled: Color, empty: Color) -> Vec<Span<'static>> {

@@ -711,3 +711,94 @@ fn shortcut_editor_rejects_a_conflicting_key() {
         "冲突时不应改绑"
     );
 }
+
+#[test]
+fn group_picker_jumps_to_the_selected_group() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 12 个词、每组 4 个 → 3 组
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.per_day_study_number = 4;
+    }
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    assert_eq!(app.total_groups(), 3);
+
+    app.apply_action(app::Action::OpenGroupPicker);
+    assert!(app.group_picker.is_some(), "应打开跳组弹层");
+    app.apply_action(app::Action::GroupMove(2));
+    app.apply_action(app::Action::GroupSelect);
+    assert!(app.group_picker.is_none(), "选择后弹层应关闭");
+
+    let dict = app.boot.base.study_dict().expect("当前词库");
+    assert_eq!(dict.last_learn_index, 8, "跳到第 3 组应把进度指到该组开头");
+}
+
+#[test]
+fn concise_mode_toggles_toolbar_and_panel() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    assert!(app.show_toolbar, "默认显示工具栏");
+
+    app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    assert!(!app.show_toolbar, "简洁模式应隐藏工具栏");
+    assert!(!app.show_panel, "简洁模式应隐藏词表面板");
+
+    app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    assert!(app.show_toolbar, "再次触发应恢复工具栏");
+}
+
+#[test]
+fn theme_shortcut_cycles_the_theme() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    let before = app.boot.settings.theme.clone();
+
+    app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+    assert_ne!(app.boot.settings.theme, before, "Ctrl+Q 应切换主题");
+}
+
+#[test]
+fn repeat_chapter_restarts_the_current_group() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.per_day_study_number = 4;
+    }
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+
+    // 先推进两个词，再重学本组
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    let index = app.session.as_ref().expect("session").data.index;
+    assert!(index > 0, "应已推进");
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+    let session = app.session.as_ref().expect("session");
+    assert_eq!(session.data.index, 0, "重学本组应回到组首");
+}
+
+#[test]
+fn collect_to_dict_picker_collects_into_the_chosen_dict() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    let word = app.session.as_ref().expect("session").current_word().word;
+
+    // Shift+Enter 打开「收藏到指定词典」
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+    assert!(app.collect_picker.is_some(), "应打开收藏目标弹层");
+    app.apply_action(app::Action::CollectSelect);
+    assert!(app.collect_picker.is_none(), "选择后弹层应关闭");
+
+    let collect = app.boot.base.collect_word().expect("收藏词典");
+    assert!(
+        collect.words.iter().any(|item| item.word == word),
+        "词应进入收藏词典"
+    );
+}

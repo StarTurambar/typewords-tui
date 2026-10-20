@@ -49,7 +49,11 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Help => help::render(app, frame, area, &theme),
     }
 
-    let modal_open = app.summary.is_some() || app.edit.is_some() || app.confirm.is_some();
+    let modal_open = app.summary.is_some()
+        || app.edit.is_some()
+        || app.confirm.is_some()
+        || app.group_picker.is_some()
+        || app.collect_picker.is_some();
     if modal_open {
         // 无 alpha 的终端里用 DIM 模拟遮罩；弹层自身会在 Clear 后恢复高亮。
         for cell in frame.buffer_mut().content.iter_mut() {
@@ -65,5 +69,24 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
     if let Some(confirm) = &app.confirm {
         overlays::render_confirm(frame, area, &theme, confirm);
+    }
+    if let Some(picker) = &app.group_picker {
+        overlays::render_group_picker(
+            frame,
+            area,
+            &theme,
+            app.total_groups(),
+            picker.cursor,
+            app.current_group(),
+        );
+    }
+    if let Some(picker) = &app.collect_picker {
+        overlays::render_collect_picker(
+            frame,
+            area,
+            &theme,
+            &app.collectible_dicts(),
+            picker.cursor,
+        );
     }
 }

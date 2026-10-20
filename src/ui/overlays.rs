@@ -82,6 +82,154 @@ pub fn confirm_layout(area: Rect) -> ConfirmLayout {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct GroupPickerLayout {
+    pub rect: Rect,
+    pub inner: Rect,
+    /// (组号, 矩形)
+    pub rows: Vec<(usize, Rect)>,
+}
+
+/// 跳组弹层：列出词库的所有学习组。
+pub fn group_picker_layout(total_groups: usize, cursor: usize, area: Rect) -> GroupPickerLayout {
+    let rect = widgets::centered_rect(44, 18, area);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height.saturating_sub(2),
+    );
+    // 顶部一行标题，底部一行提示，中间是列表
+    let list = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    let visible = list.height as usize;
+    let offset = cursor.saturating_sub(visible.saturating_sub(1));
+    let rows = (offset..total_groups.min(offset + visible))
+        .map(|index| {
+            (
+                index,
+                Rect::new(list.x, list.y + (index - offset) as u16, list.width, 1),
+            )
+        })
+        .collect();
+    GroupPickerLayout { rect, inner, rows }
+}
+
+pub fn render_group_picker(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    total_groups: usize,
+    cursor: usize,
+    current_group: usize,
+) {
+    let layout = group_picker_layout(total_groups, cursor, area);
+    clear_modal_backdrop(frame, area, layout.rect, theme);
+    widgets::paint_rect(frame, layout.rect, theme.panel);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("跳到第几组（共 {total_groups} 组）"),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    for (index, rect) in layout.rows.iter() {
+        let group = index + 1;
+        let selected = group == cursor + 1;
+        let current = group == current_group;
+        let marker = if current { "●" } else { " " };
+        let text = format!("{marker} 第 {group} 组");
+        let color = if selected {
+            theme.accent
+        } else if current {
+            theme.good
+        } else {
+            theme.fg
+        };
+        let style = if selected {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        let mut spans = vec![Span::styled(text, style)];
+        if current {
+            spans.push(Span::styled("  当前", Style::default().fg(theme.dim)));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), *rect);
+    }
+    let hint_y = layout.inner.bottom().saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "↑↓ 选择 · Enter 跳转 · Esc 取消",
+            Style::default().fg(theme.dim),
+        ))),
+        Rect::new(layout.inner.x, hint_y, layout.inner.width, 1),
+    );
+}
+
+/// 「收藏到指定词典」弹层：列出可收藏的词典。
+pub fn render_collect_picker(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    dicts: &[(usize, String)],
+    cursor: usize,
+) {
+    let rect = widgets::centered_rect(44, 12, area);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height.saturating_sub(2),
+    );
+    clear_modal_backdrop(frame, area, rect, theme);
+    widgets::paint_rect(frame, rect, theme.panel);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "收藏到哪个词典",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    let list_y = inner.y + 1;
+    for (offset, (_, name)) in dicts.iter().enumerate() {
+        if offset as u16 + 1 >= inner.height.saturating_sub(1) {
+            break;
+        }
+        let selected = offset == cursor;
+        let style = if selected {
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.fg)
+        };
+        let marker = if selected { "▶ " } else { "  " };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!("{marker}{name}"), style))),
+            Rect::new(inner.x, list_y + offset as u16, inner.width, 1),
+        );
+    }
+
+    let hint_y = inner.bottom().saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "↑↓ 选择 · Enter 收藏 · Esc 取消",
+            Style::default().fg(theme.dim),
+        ))),
+        Rect::new(inner.x, hint_y, inner.width, 1),
+    );
+}
+
 fn clear_modal_backdrop(frame: &mut Frame, area: Rect, rect: Rect, theme: &Theme) {
     let margin = 2u16;
     let left = rect.x.saturating_sub(margin).max(area.x);
@@ -270,6 +418,22 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
             Target::new(layout.home_btn, Action::SummaryHome),
         ];
     }
+    if app.collect_picker.is_some() {
+        return Vec::new();
+    }
+    if let Some(picker) = &app.group_picker {
+        let layout = group_picker_layout(app.total_groups(), picker.cursor, area);
+        return layout
+            .rows
+            .iter()
+            .map(|(index, rect)| {
+                Target::new(
+                    *rect,
+                    Action::GroupMove(*index as i32 - picker.cursor as i32),
+                )
+            })
+            .collect();
+    }
     Vec::new()
 }
 
@@ -277,6 +441,21 @@ pub fn target_action(app: &crate::app::App, area: Rect, column: u16, row: u16) -
     let hits = |rect: Rect| {
         column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom()
     };
+    if app.collect_picker.is_some() {
+        return None;
+    }
+    if let Some(picker) = &app.group_picker {
+        let layout = group_picker_layout(app.total_groups(), picker.cursor, area);
+        for (index, rect) in layout.rows.iter() {
+            if hits(*rect) {
+                return Some(Action::GroupMove(*index as i32 - picker.cursor as i32));
+            }
+        }
+        if !hits(layout.rect) {
+            return Some(Action::GroupCancel);
+        }
+        return None;
+    }
     if app.confirm.is_some() {
         let layout = confirm_layout(area);
         if hits(layout.accept) {

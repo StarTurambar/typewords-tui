@@ -48,7 +48,37 @@ pub fn overlay_action(app: &App, key: KeyEvent) -> Option<Action> {
     if app.summary.is_some() {
         return summary_action(key);
     }
+    if app.group_picker.is_some() {
+        return group_action(key);
+    }
+    if app.collect_picker.is_some() {
+        return collect_action(key);
+    }
     None
+}
+
+fn collect_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::CollectCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::CollectMove(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::CollectMove(1)),
+        KeyCode::Enter => Some(Action::CollectSelect),
+        _ => None,
+    }
+}
+
+fn group_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::GroupCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::GroupMove(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::GroupMove(1)),
+        KeyCode::PageUp => Some(Action::GroupMove(-10)),
+        KeyCode::PageDown => Some(Action::GroupMove(10)),
+        KeyCode::Home => Some(Action::GroupMove(-1000)),
+        KeyCode::End => Some(Action::GroupMove(1000)),
+        KeyCode::Enter => Some(Action::GroupSelect),
+        _ => None,
+    }
 }
 
 fn edit_action(key: KeyEvent) -> Option<Action> {

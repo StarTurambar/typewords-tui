@@ -8,7 +8,12 @@ use crate::ui::shell::{self, Nav};
 pub use super::target::Target;
 
 pub fn targets(app: &App, area: Rect) -> Vec<Target> {
-    if app.confirm.is_some() || app.edit.is_some() || app.summary.is_some() {
+    if app.confirm.is_some()
+        || app.edit.is_some()
+        || app.summary.is_some()
+        || app.group_picker.is_some()
+        || app.collect_picker.is_some()
+    {
         return super::overlays::targets(app, area);
     }
 
@@ -39,7 +44,12 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
 }
 
 pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action> {
-    if app.confirm.is_some() || app.edit.is_some() || app.summary.is_some() {
+    if app.confirm.is_some()
+        || app.edit.is_some()
+        || app.summary.is_some()
+        || app.group_picker.is_some()
+        || app.collect_picker.is_some()
+    {
         return super::overlays::target_action(app, area, column, row);
     }
     targets(app, area)
@@ -49,7 +59,12 @@ pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action>
 }
 
 pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32) -> Option<Action> {
-    if app.confirm.is_some() || app.edit.is_some() || app.summary.is_some() {
+    if app.confirm.is_some()
+        || app.edit.is_some()
+        || app.summary.is_some()
+        || app.group_picker.is_some()
+        || app.collect_picker.is_some()
+    {
         return None;
     }
     match app.screen {

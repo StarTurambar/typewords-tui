@@ -23,6 +23,16 @@ pub enum Action {
     ActivateSetting(usize),
     // 统计
     StatsScroll(i32),
+    // 收藏到指定词典
+    OpenCollectPicker,
+    CollectMove(i32),
+    CollectSelect,
+    CollectCancel,
+    // 跳组
+    OpenGroupPicker,
+    GroupMove(i32),
+    GroupSelect,
+    GroupCancel,
     // 快捷键
     OpenShortcuts,
     ShortcutMove(i32),
@@ -84,6 +94,14 @@ impl App {
                 }
             }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
+            Action::OpenCollectPicker => self.open_collect_picker(),
+            Action::CollectMove(delta) => self.move_collect_cursor(delta),
+            Action::CollectSelect => self.select_collect_dict(),
+            Action::CollectCancel => self.collect_picker = None,
+            Action::OpenGroupPicker => self.open_group_picker(),
+            Action::GroupMove(delta) => self.move_group_cursor(delta),
+            Action::GroupSelect => self.select_group(),
+            Action::GroupCancel => self.group_picker = None,
             Action::OpenShortcuts => self.open_shortcuts(),
             Action::ShortcutMove(delta) => self.move_shortcut_cursor(delta),
             Action::ShortcutCapture => self.start_shortcut_capture(),
@@ -356,7 +374,7 @@ impl App {
         self.refresh_task_preview();
     }
 
-    fn cycle_theme(&mut self) {
+    pub(crate) fn cycle_theme(&mut self) {
         let ids = self.boot.themes.cycle_ids();
         if ids.is_empty() {
             return;

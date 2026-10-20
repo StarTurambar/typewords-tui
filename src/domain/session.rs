@@ -600,6 +600,29 @@ impl PracticeSession {
         }
     }
 
+    /// 把当前词收藏到指定词典（再次触发则取消收藏）。
+    ///
+    /// `dict_index` 是 `BaseState::word.book_list` 的下标。
+    pub fn toggle_collect_to(&mut self, base: &mut BaseState, dict_index: usize) {
+        let word = self.current_word();
+        if word.word.is_empty() {
+            return;
+        }
+        let Some(dict) = base.word.book_list.get_mut(dict_index) else {
+            return;
+        };
+        if let Some(position) = dict
+            .words
+            .iter()
+            .position(|item| item.word.to_lowercase() == word.word.to_lowercase())
+        {
+            dict.words.remove(position);
+        } else {
+            dict.words.push(word);
+        }
+        dict.length = dict.words.len();
+    }
+
     pub fn is_collect(&self, base: &BaseState) -> bool {
         let word = self.current_word();
         base.collect_word()
