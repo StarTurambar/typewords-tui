@@ -12,7 +12,7 @@
 | --- | --- |
 | `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
-| `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态 |
+| `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
 | `src/bootstrap.rs` | `Bootstrapped`（存档、词库目录、主题、`notices`、`readonly_dict`）与 `bootstrap::load` |
 | `src/main.rs`、`src/lib.rs` | 入口：`Cli::parse` → `Paths::resolve` → 子命令分发 → `app::run` |
@@ -60,6 +60,7 @@
 | --- | --- | --- | --- |
 | `Home` | 主页 | `Nav::Home`（`Practice` 也映射到它） | 1 |
 | `Practice` | 练习页（全屏，不套外壳） | — | 无（练习中数字属于键入/自测） |
+| `WordTest` | 单词测试页（一题 4 选 1） | `Nav::Home` | 无（数字用于选答案） |
 | `DictPicker` | 词库页 | `Nav::Dicts` | 2 |
 | `Stats` | 统计页 | `Nav::Stats` | 3 |
 | `Settings` | 设置页 | `Nav::Settings` | 4 |

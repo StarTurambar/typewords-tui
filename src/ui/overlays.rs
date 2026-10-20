@@ -101,6 +101,75 @@ pub struct GroupPickerLayout {
     pub rows: Vec<(usize, Rect)>,
 }
 
+/// 练习模式选择弹层：列出全部练习模式。
+pub fn render_mode_picker(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    modes: &[(crate::domain::types::WordPracticeMode, &str)],
+    cursor: usize,
+    current: crate::domain::types::WordPracticeMode,
+) {
+    let rect = widgets::centered_rect(40, 4 + modes.len() as u16, area);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height.saturating_sub(2),
+    );
+    clear_modal_backdrop(frame, area, rect, theme);
+    widgets::paint_rect(frame, rect, theme.panel);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "选择练习模式",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    for (offset, (mode, name)) in modes.iter().enumerate() {
+        let row_y = inner.y + 1 + offset as u16;
+        if row_y >= inner.bottom().saturating_sub(1) {
+            break;
+        }
+        let selected = offset == cursor;
+        let is_current = *mode == current;
+        let marker = if is_current { "●" } else { " " };
+        let color = if selected {
+            theme.accent
+        } else if is_current {
+            theme.good
+        } else {
+            theme.fg
+        };
+        let style = if selected {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        let mut spans = vec![Span::styled(format!("{marker} {name}"), style)];
+        if is_current {
+            spans.push(Span::styled("  当前", Style::default().fg(theme.dim)));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    let hint_y = inner.bottom().saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "↑↓ 选择 · Enter 确认 · Esc 取消",
+            Style::default().fg(theme.dim),
+        ))),
+        Rect::new(inner.x, hint_y, inner.width, 1),
+    );
+}
+
 /// 跳组弹层：列出词库的所有学习组。
 pub fn group_picker_layout(total_groups: usize, cursor: usize, area: Rect) -> GroupPickerLayout {
     let rect = widgets::centered_rect(44, 18, area);
@@ -477,6 +546,19 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
     }
     if app.collect_picker.is_some() {
         return Vec::new();
+    }
+    if let Some(picker) = &app.mode_picker {
+        let modes = crate::domain::constants::PRACTICE_MODE_NAMES;
+        return modes
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                Target::new(
+                    Rect::new(area.x, area.y + index as u16, area.width, 1),
+                    Action::ModeMove(index as i32 - picker.cursor as i32),
+                )
+            })
+            .collect();
     }
     if let Some(picker) = &app.group_picker {
         let layout = group_picker_layout(app.total_groups(), picker.cursor, area);

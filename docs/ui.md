@@ -14,7 +14,7 @@
 | `src/ui/home.rs` | 主页 dashboard 与 `targets` |
 | `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏）与 `PracticeLayout` |
 | `src/ui/bigtext.rs` | 5×7 点阵字体、1×/2× 放大、遮罩占位、折行 |
-| `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页 |
+| `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs`、`word_test.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页、单词测试页 |
 | `src/ui/overlays.rs` | 结算/输入/确认/跳组/收藏目标弹层的布局、绘制、命中 |
 | `src/ui/widgets.rs` | 通用文本与小部件工具（宽计算、截断、折行、按钮、进度条、弹层边框） |
 | `src/ui/target.rs`、`hit.rs` | `Target`（Rect + `Action`）与命中检测 `targets`/`action_at`/`wheel_action` |

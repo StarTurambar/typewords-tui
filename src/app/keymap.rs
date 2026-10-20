@@ -48,6 +48,9 @@ pub fn overlay_action(app: &App, key: KeyEvent) -> Option<Action> {
     if app.summary.is_some() {
         return summary_action(key);
     }
+    if app.mode_picker.is_some() {
+        return mode_action(key);
+    }
     if app.group_picker.is_some() {
         return group_action(key);
     }
@@ -63,6 +66,16 @@ fn collect_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CollectMove(-1)),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CollectMove(1)),
         KeyCode::Enter => Some(Action::CollectSelect),
+        _ => None,
+    }
+}
+
+fn mode_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::ModeCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::ModeMove(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::ModeMove(1)),
+        KeyCode::Enter => Some(Action::ModeSelect),
         _ => None,
     }
 }
@@ -138,7 +151,7 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('d') => Some(Action::Navigate(Screen::DictPicker)),
             KeyCode::Char('s') => Some(Action::Navigate(Screen::Settings)),
             KeyCode::Char('t') => Some(Action::Navigate(Screen::Stats)),
-            KeyCode::Char('m') => Some(Action::CycleMode),
+            KeyCode::Char('m') => Some(Action::OpenModePicker),
             KeyCode::Char('?') => Some(Action::Navigate(Screen::Help)),
             KeyCode::Char('q') => Some(Action::QuitRequest),
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
@@ -169,6 +182,15 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Enter | KeyCode::Char(' ') => {
                 Some(Action::ActivateSetting(app.settings_cursor))
             }
+            _ => None,
+        },
+        Screen::WordTest => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::WordTestExit),
+            KeyCode::Char('1') => Some(Action::WordTestChoose(0)),
+            KeyCode::Char('2') => Some(Action::WordTestChoose(1)),
+            KeyCode::Char('3') => Some(Action::WordTestChoose(2)),
+            KeyCode::Char('4') => Some(Action::WordTestChoose(3)),
+            KeyCode::Char(' ') => Some(Action::WordTestNext),
             _ => None,
         },
         Screen::Shortcuts => match key.code {

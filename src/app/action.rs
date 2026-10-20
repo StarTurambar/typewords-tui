@@ -12,7 +12,6 @@ pub enum Action {
     StartPractice,
     StartFreePractice,
     AdjustDaily(i64),
-    CycleMode,
     // 词库
     DictMove(i32),
     SelectDict(usize),
@@ -28,6 +27,15 @@ pub enum Action {
     CollectMove(i32),
     CollectSelect,
     CollectCancel,
+    // 单词测试
+    WordTestChoose(usize),
+    WordTestNext,
+    WordTestExit,
+    // 练习模式
+    OpenModePicker,
+    ModeMove(i32),
+    ModeSelect,
+    ModeCancel,
     // 跳组
     OpenGroupPicker,
     GroupMove(i32),
@@ -73,7 +81,6 @@ impl App {
             Action::StartPractice => self.start_practice(),
             Action::StartFreePractice => self.start_free_practice(),
             Action::AdjustDaily(delta) => self.adjust_daily_target(delta),
-            Action::CycleMode => self.cycle_practice_mode(),
             Action::DictMove(delta) => self.move_dict_cursor(delta),
             Action::SelectDict(index) => {
                 if index < self.boot.catalog.resources().len() {
@@ -98,6 +105,13 @@ impl App {
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
             Action::CollectCancel => self.collect_picker = None,
+            Action::WordTestChoose(index) => self.word_test_choose(index),
+            Action::WordTestNext => self.word_test_next(),
+            Action::WordTestExit => self.leave_word_test(),
+            Action::OpenModePicker => self.open_mode_picker(),
+            Action::ModeMove(delta) => self.move_mode_cursor(delta),
+            Action::ModeSelect => self.select_practice_mode(),
+            Action::ModeCancel => self.mode_picker = None,
             Action::OpenGroupPicker => self.open_group_picker(),
             Action::GroupMove(delta) => self.move_group_cursor(delta),
             Action::GroupSelect => self.select_group(),
@@ -167,6 +181,9 @@ impl App {
                 self.shortcut_cursor = 0;
                 self.shortcut_capturing = false;
             }
+            Screen::WordTest => {
+                self.screen = Screen::WordTest;
+            }
             Screen::Help => {
                 self.help_scroll = 0;
                 self.screen = Screen::Help;
@@ -199,6 +216,7 @@ impl App {
                 self.save_settings_now();
                 self.navigate_to(Screen::Settings);
             }
+            Screen::WordTest => self.leave_word_test(),
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
         }
     }
@@ -303,15 +321,6 @@ impl App {
         }
     }
 
-    pub fn cycle_practice_mode(&mut self) {
-        let modes = super::practice_modes();
-        let current = self.boot.settings.word_practice_mode;
-        let index = modes.iter().position(|mode| *mode == current).unwrap_or(0);
-        self.boot.settings.word_practice_mode = modes[(index + 1) % modes.len()];
-        self.save_settings_now();
-        self.refresh_task_preview();
-    }
-
     fn move_dict_cursor(&mut self, delta: i32) {
         let count = self.boot.catalog.resources().len();
         if count == 0 {
@@ -372,7 +381,10 @@ impl App {
             return;
         };
         match kind {
-            super::SettingKind::Mode => self.cycle_practice_mode(),
+            super::SettingKind::Mode => {
+                self.open_mode_picker();
+                return;
+            }
             super::SettingKind::Theme => self.cycle_theme(),
             super::SettingKind::SoundType => {
                 self.boot.settings.sound_type = if self.boot.settings.sound_type == "us" {

@@ -37,11 +37,13 @@ use unicode_width::UnicodeWidthStr;
 
 use typewords_tui::app::{self, App, SETTING_ROWS, Screen};
 use typewords_tui::cli::Cli;
+use typewords_tui::domain::types::WordPracticeMode;
 use typewords_tui::paths::{Paths, locate_assets};
 
 const SUPPORTED_SCREENS: &[&str] = &[
     "home",
     "practice",
+    "wordtest",
     "dict",
     "stats",
     "settings",
@@ -165,6 +167,7 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
     match screen {
         "home" => app.screen = Screen::Home,
         "practice" => start_practice(app)?,
+        "wordtest" => start_word_test(app)?,
         "dict" => app.screen = Screen::DictPicker,
         "stats" => app.screen = Screen::Stats,
         "settings" => app.screen = Screen::Settings,
@@ -201,6 +204,16 @@ fn start_practice(app: &mut App) -> Result<()> {
             app.screen,
             app.session.is_some()
         );
+    }
+    Ok(())
+}
+
+fn start_word_test(app: &mut App) -> Result<()> {
+    app.screen = Screen::Home;
+    app.boot.settings.word_practice_mode = WordPracticeMode::ShuffleWordsTest;
+    press(app, KeyCode::Enter);
+    if app.screen != Screen::WordTest {
+        bail!("could not start word test (screen={:?})", app.screen);
     }
     Ok(())
 }

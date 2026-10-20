@@ -94,11 +94,14 @@ fn settings_screen_toggles_persist() {
     let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
     press(&mut app, KeyCode::Char('s'));
     assert_eq!(app.screen, app::Screen::Settings);
-    // 第一行是练习模式，Enter 应切换
+    // 第一行是练习模式，Enter 打开模式选择弹层
     let before = app.boot.settings.word_practice_mode;
     press(&mut app, KeyCode::Enter);
+    assert!(app.mode_picker.is_some(), "应打开模式选择弹层");
+    app.apply_action(app::Action::ModeMove(1));
+    app.apply_action(app::Action::ModeSelect);
     let after = app.boot.settings.word_practice_mode;
-    assert_ne!(before, after);
+    assert_ne!(before, after, "选中别的模式后应生效");
     press(&mut app, KeyCode::Esc);
 
     let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
@@ -890,4 +893,65 @@ fn clearing_a_note_removes_it() {
         !app.boot.base.note_data.contains_key(&word),
         "清空后应删除笔记"
     );
+}
+
+#[test]
+fn word_test_mode_asks_questions_and_records_wrong_answers() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 切到「随机单词测试」模式
+    app.boot.settings.word_practice_mode =
+        typewords_tui::domain::types::WordPracticeMode::ShuffleWordsTest;
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::WordTest, "应进入单词测试页");
+    let (wrong_index, answer) = {
+        let state = app.word_test.as_ref().expect("测试状态");
+        assert!(!state.words.is_empty(), "应有题目");
+        let question = state.question.as_ref().expect("题目");
+        let wrong_index = (question.correct_index + 1) % question.candidates.len();
+        let answer = question.candidates[question.correct_index]
+            .word
+            .word
+            .clone();
+        (wrong_index, answer)
+    };
+    app.apply_action(app::Action::WordTestChoose(wrong_index));
+    assert_eq!(app.word_test.as_ref().expect("测试状态").wrong, 1);
+
+    // 正确答案应进入错词本
+    let wrong_dict = app.boot.base.wrong().expect("错词本");
+    assert!(
+        wrong_dict.words.iter().any(|item| item.word == answer),
+        "答错的正确答案应进入错词本"
+    );
+
+    // 空格进入下一题
+    app.apply_action(app::Action::WordTestNext);
+    let state = app.word_test.as_ref().expect("测试状态");
+    assert_eq!(state.index, 1, "应进入下一题");
+    assert_eq!(state.selected, None, "新的一题不应有选择");
+}
+
+#[test]
+fn word_test_finishes_with_a_summary() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot.settings.word_practice_mode =
+        typewords_tui::domain::types::WordPracticeMode::ShuffleWordsTest;
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::WordTest);
+
+    // 走完所有题目
+    for _ in 0..200 {
+        let Some(state) = app.word_test.as_ref() else {
+            break;
+        };
+        if state.selected.is_none() {
+            let question = state.question.as_ref().expect("题目");
+            app.apply_action(app::Action::WordTestChoose(question.correct_index));
+        }
+        app.apply_action(app::Action::WordTestNext);
+    }
+    assert!(app.word_test.is_none(), "答完后应结束测试");
+    assert!(app.summary.is_some(), "应给出结算");
 }

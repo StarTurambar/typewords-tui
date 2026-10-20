@@ -28,6 +28,8 @@ pub struct HomeLayout {
     pub goal_minus: Option<Rect>,
     pub goal_plus: Option<Rect>,
     pub goal_short: bool,
+    /// 练习模式提示（可点击打开模式选择）
+    pub mode_row: Option<Rect>,
     pub stats: Option<Rect>,
     pub stats_tiles: Option<Rect>,
     pub week: Option<Rect>,
@@ -98,6 +100,18 @@ pub fn layout(body: Rect) -> HomeLayout {
         )
     };
 
+    // 练习模式：显示在「今日任务」标题行的右端，点击打开模式选择
+    let mode_label = "模式 学习 ▾";
+    let mode_width = display_width(mode_label) as u16;
+    let mode_row = (hero_right.width >= mode_width + 12).then(|| {
+        Rect::new(
+            hero_right.right().saturating_sub(mode_width),
+            hero_right.y,
+            mode_width,
+            1,
+        )
+    });
+
     let stats = Some(chunks[2]);
     let week_mode = body.width >= 60;
     let stats_left_width = if week_mode {
@@ -153,6 +167,7 @@ pub fn layout(body: Rect) -> HomeLayout {
 
     let _ = Screen::Home;
     HomeLayout {
+        mode_row,
         hero,
         hero_inner,
         hero_left,
@@ -340,6 +355,20 @@ fn render_hero_right(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &
         ])),
         Rect::new(right.x, right.y, right.width, 1),
     );
+
+    // 练习模式：可点击打开模式选择
+    if let Some(mode_rect) = layout.mode_row {
+        let mode_name =
+            crate::domain::constants::practice_mode_name(app.boot.settings.word_practice_mode);
+        let text = format!("模式 {mode_name} ▾");
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                fit_text(&text, mode_rect.width as usize),
+                Style::default().fg(theme.accent_alt),
+            )),
+            mode_rect,
+        );
+    }
 
     let dict = app.boot.study_dict();
     let per_day = dict.map(|dict| dict.per_day()).unwrap_or(0);
@@ -815,6 +844,9 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     }
     if let Some(plus) = layout.goal_plus {
         targets.push(Target::new(plus, crate::app::Action::AdjustDaily(5)));
+    }
+    if let Some(mode) = layout.mode_row {
+        targets.push(Target::new(mode, crate::app::Action::OpenModePicker));
     }
     if let Some(open) = layout.open_dicts {
         targets.push(Target::new(

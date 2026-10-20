@@ -18,6 +18,7 @@ pub mod stats;
 pub mod target;
 pub mod theme;
 pub mod widgets;
+pub mod word_test;
 
 pub use theme::Theme;
 
@@ -42,6 +43,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     match app.screen {
         Screen::Home => home::render_home(app, frame, area, &theme),
         Screen::Practice => practice::render_practice(app, frame, area, &theme),
+        Screen::WordTest => word_test::render(app, frame, area, &theme),
         Screen::DictPicker => dict_picker::render(app, frame, area, &theme),
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),
@@ -52,6 +54,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     let modal_open = app.summary.is_some()
         || app.edit.is_some()
         || app.confirm.is_some()
+        || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some();
     if modal_open {
@@ -69,6 +72,16 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
     if let Some(confirm) = &app.confirm {
         overlays::render_confirm(frame, area, &theme, confirm);
+    }
+    if let Some(picker) = &app.mode_picker {
+        overlays::render_mode_picker(
+            frame,
+            area,
+            &theme,
+            crate::domain::constants::PRACTICE_MODE_NAMES,
+            picker.cursor,
+            app.boot.settings.word_practice_mode,
+        );
     }
     if let Some(picker) = &app.group_picker {
         overlays::render_group_picker(

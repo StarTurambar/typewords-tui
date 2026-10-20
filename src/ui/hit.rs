@@ -11,6 +11,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
     if app.confirm.is_some()
         || app.edit.is_some()
         || app.summary.is_some()
+        || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some()
     {
@@ -47,6 +48,7 @@ pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action>
     if app.confirm.is_some()
         || app.edit.is_some()
         || app.summary.is_some()
+        || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some()
     {
@@ -62,6 +64,7 @@ pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32)
     if app.confirm.is_some()
         || app.edit.is_some()
         || app.summary.is_some()
+        || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some()
     {

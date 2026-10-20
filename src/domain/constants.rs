@@ -49,7 +49,30 @@ pub const PRACTICE_MODE_NAMES: &[(WordPracticeMode, &str)] = &[
     (WordPracticeMode::ListenOnly, "听写"),
     (WordPracticeMode::Shuffle, "随机复习"),
     (WordPracticeMode::Review, "复习"),
+    (WordPracticeMode::ShuffleWordsTest, "随机单词测试"),
+    (WordPracticeMode::ReviewWordsTest, "单词测试"),
 ];
+
+/// 全部可选的练习模式（顺序与上游 `WordPracticeMode` 一致）。
+pub const PRACTICE_MODES: [WordPracticeMode; 9] = [
+    WordPracticeMode::System,
+    WordPracticeMode::Free,
+    WordPracticeMode::IdentifyOnly,
+    WordPracticeMode::DictationOnly,
+    WordPracticeMode::ListenOnly,
+    WordPracticeMode::Shuffle,
+    WordPracticeMode::Review,
+    WordPracticeMode::ShuffleWordsTest,
+    WordPracticeMode::ReviewWordsTest,
+];
+
+/// 该模式是否走「单词测试」流程（4 选 1 答题），而不是键入练习。
+pub fn is_words_test_mode(mode: WordPracticeMode) -> bool {
+    matches!(
+        mode,
+        WordPracticeMode::ShuffleWordsTest | WordPracticeMode::ReviewWordsTest
+    )
+}
 
 pub fn practice_mode_name(mode: WordPracticeMode) -> &'static str {
     PRACTICE_MODE_NAMES

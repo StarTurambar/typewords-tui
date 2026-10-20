@@ -37,6 +37,7 @@ pub use action::Action;
 pub enum Screen {
     Home,
     Practice,
+    WordTest,
     DictPicker,
     Stats,
     Settings,
@@ -55,6 +56,31 @@ pub struct Toast {
 #[derive(Clone, Debug)]
 pub struct GroupPickerState {
     pub cursor: usize,
+}
+
+/// 练习模式选择弹层的状态。
+#[derive(Clone, Debug)]
+pub struct ModePickerState {
+    pub cursor: usize,
+}
+
+/// 单词测试的进行中状态。
+#[derive(Clone, Debug)]
+pub struct WordTestState {
+    /// 题目词表
+    pub words: Vec<crate::domain::types::Word>,
+    /// 候选词池（整本词库）
+    pub pool: Vec<crate::domain::types::Word>,
+    /// 当前题号
+    pub index: usize,
+    /// 当前题
+    pub question: Option<crate::domain::types::Question>,
+    /// 已选答案的下标
+    pub selected: Option<usize>,
+    /// 答对数
+    pub correct: usize,
+    /// 答错数
+    pub wrong: usize,
 }
 
 /// 「收藏到指定词典」弹层的状态。
@@ -218,6 +244,10 @@ pub struct App {
     pub shortcut_cursor: usize,
     /// 正在捕获新的键位
     pub shortcut_capturing: bool,
+    /// 练习模式选择弹层
+    pub mode_picker: Option<ModePickerState>,
+    /// 单词测试（一题 4 选 1）
+    pub word_test: Option<WordTestState>,
     /// 跳组弹层
     pub group_picker: Option<GroupPickerState>,
     /// 「收藏到指定词典」弹层
@@ -312,6 +342,8 @@ impl App {
             shortcuts: ShortcutMap::default(),
             shortcut_cursor: 0,
             shortcut_capturing: false,
+            mode_picker: None,
+            word_test: None,
             group_picker: None,
             collect_picker: None,
             task_preview: None,
@@ -514,6 +546,11 @@ impl App {
     pub fn start_practice_with_mode(&mut self, mode: WordPracticeMode) {
         if self.boot.base.study_dict().is_none() {
             self.toast(NoticeLevel::Warning, crate::domain::i18n::tr("no_assets"));
+            return;
+        }
+        // 单词测试模式走 4 选 1 的答题流程，不进入键入练习
+        if crate::domain::constants::is_words_test_mode(mode) {
+            self.start_word_test(mode);
             return;
         }
         let task = if mode == WordPracticeMode::Shuffle {
@@ -1100,6 +1137,190 @@ impl App {
         self.schedule_practice_save();
     }
 
+    // ── 单词测试 ─────────────────────────────────────────────────────────
+
+    /// 开始单词测试：题面是一题 4 选 1。
+    ///
+    /// 对齐上游 `words-test/[id].vue`：「单词测试」用今日任务的复习词，
+    /// 「随机单词测试」用整本词库打乱；题目的候选池始终是整本词库。
+    pub fn start_word_test(&mut self, mode: WordPracticeMode) {
+        let Some(dict) = self.boot.base.study_dict() else {
+            return;
+        };
+        let pool = dict.words.clone();
+        if pool.is_empty() {
+            self.toast(NoticeLevel::Warning, "没有可测试的单词");
+            return;
+        }
+        let mut words = match mode {
+            WordPracticeMode::ReviewWordsTest => {
+                let review = self
+                    .session
+                    .as_ref()
+                    .map(|session| session.task_words.review.clone())
+                    .unwrap_or_default();
+                if review.is_empty() {
+                    let mut all = pool.clone();
+                    shuffle(&mut self.rng, &mut all);
+                    all
+                } else {
+                    review
+                }
+            }
+            _ => {
+                let mut all = pool.clone();
+                shuffle(&mut self.rng, &mut all);
+                all
+            }
+        };
+        words.truncate(100);
+        let question = words.first().and_then(|word| {
+            crate::domain::question::build_question(word, &pool, &mut self.rng, 4)
+        });
+        self.word_test = Some(WordTestState {
+            words,
+            pool,
+            index: 0,
+            question,
+            selected: None,
+            correct: 0,
+            wrong: 0,
+        });
+        self.screen = Screen::WordTest;
+        self.summary = None;
+    }
+
+    /// 回答当前题。
+    fn word_test_choose(&mut self, index: usize) {
+        let Some(state) = self.word_test.as_mut() else {
+            return;
+        };
+        if state.selected.is_some() {
+            return;
+        }
+        let Some(question) = state.question.as_ref() else {
+            return;
+        };
+        if index >= question.candidates.len() {
+            return;
+        }
+        state.selected = Some(index);
+        if index == question.correct_index {
+            state.correct += 1;
+            return;
+        }
+        state.wrong += 1;
+        // 答错：把正确答案放进错词本
+        let answer = question.candidates[question.correct_index].word.clone();
+        if let Some(wrong) = self.boot.base.wrong_mut() {
+            if !wrong
+                .words
+                .iter()
+                .any(|item| item.word.eq_ignore_ascii_case(&answer.word))
+            {
+                wrong.words.push(answer);
+            }
+            wrong.length = wrong.words.len();
+        }
+        self.save_dict_now();
+    }
+
+    /// 下一题；答完最后一题时给结算。
+    fn word_test_next(&mut self) {
+        let Some(state) = self.word_test.as_mut() else {
+            return;
+        };
+        if state.selected.is_none() {
+            return;
+        }
+        if state.index + 1 >= state.words.len() {
+            self.finish_word_test();
+            return;
+        }
+        state.index += 1;
+        state.selected = None;
+        let question = state.words.get(state.index).and_then(|word| {
+            crate::domain::question::build_question(word, &state.pool, &mut self.rng, 4)
+        });
+        state.question = question;
+    }
+
+    /// 单词测试结算。
+    fn finish_word_test(&mut self) {
+        let Some(state) = self.word_test.take() else {
+            return;
+        };
+        let total = state.correct + state.wrong;
+        let accuracy = if total == 0 {
+            100
+        } else {
+            ((state.correct as f64 / total as f64) * 100.0).round() as u32
+        };
+        self.summary = Some(SummaryData {
+            spend_ms: self.stat.spend,
+            accuracy,
+            new_words: 0,
+            review: total,
+            wrong: state.wrong,
+            last_learn_index: 0,
+            length: total,
+            complete: true,
+            wrong_top: Vec::new(),
+            week_days: [None; 7],
+        });
+        self.screen = Screen::Practice;
+    }
+
+    /// 退出单词测试，回主页。
+    pub fn leave_word_test(&mut self) {
+        self.word_test = None;
+        self.screen = Screen::Home;
+        self.refresh_stats();
+        self.refresh_task_preview();
+    }
+
+    // ── 练习模式选择 ─────────────────────────────────────────────────────
+
+    /// 打开练习模式选择弹层，光标停在当前模式。
+    pub fn open_mode_picker(&mut self) {
+        let modes = practice_modes();
+        let current = self.boot.settings.word_practice_mode;
+        let cursor = modes.iter().position(|mode| *mode == current).unwrap_or(0);
+        self.mode_picker = Some(ModePickerState { cursor });
+    }
+
+    fn move_mode_cursor(&mut self, delta: i32) {
+        let total = practice_modes().len() as i32;
+        if total == 0 {
+            return;
+        }
+        let Some(picker) = self.mode_picker.as_mut() else {
+            return;
+        };
+        let next = (picker.cursor as i32 + delta).rem_euclid(total);
+        picker.cursor = next as usize;
+    }
+
+    /// 选中练习模式并保存。
+    fn select_practice_mode(&mut self) {
+        let Some(picker) = self.mode_picker.take() else {
+            return;
+        };
+        let Some(mode) = practice_modes().get(picker.cursor).copied() else {
+            return;
+        };
+        self.boot.settings.word_practice_mode = mode;
+        self.save_settings_now();
+        self.refresh_task_preview();
+        self.toast(
+            NoticeLevel::Success,
+            format!(
+                "练习模式：{}",
+                crate::domain::constants::practice_mode_name(mode)
+            ),
+        );
+    }
+
     // ── 跳组弹层 ─────────────────────────────────────────────────────────
 
     /// 打开跳组弹层，光标停在当前组。
@@ -1244,6 +1465,7 @@ impl App {
         if self.edit.is_some()
             || self.confirm.is_some()
             || self.summary.is_some()
+            || self.mode_picker.is_some()
             || self.group_picker.is_some()
             || self.collect_picker.is_some()
         {
@@ -1616,16 +1838,8 @@ impl App {
     }
 }
 
-fn practice_modes() -> [WordPracticeMode; 7] {
-    [
-        WordPracticeMode::System,
-        WordPracticeMode::Free,
-        WordPracticeMode::Review,
-        WordPracticeMode::Shuffle,
-        WordPracticeMode::IdentifyOnly,
-        WordPracticeMode::DictationOnly,
-        WordPracticeMode::ListenOnly,
-    ]
+fn practice_modes() -> [WordPracticeMode; 9] {
+    crate::domain::constants::PRACTICE_MODES
 }
 
 fn key_to_input(key: &KeyEvent) -> Option<KeyInput> {
