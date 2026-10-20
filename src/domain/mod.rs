@@ -8,6 +8,7 @@ pub mod question;
 pub mod rng;
 pub mod scheduler;
 pub mod session;
+pub mod shortcut;
 pub mod statistics;
 pub mod study_task;
 pub mod timer;

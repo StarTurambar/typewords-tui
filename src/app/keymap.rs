@@ -1,8 +1,42 @@
 //! 键位映射：非练习页与弹层只产出 Action，不直接改状态。
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{Action, App, Screen};
+use crate::domain::shortcut::{BaseKey, ShortcutKey};
+
+/// 把终端按键事件转成领域层的键位表示。
+///
+/// 无法映射的按键（功能键以外的修饰键、媒体键等）返回 `None`。
+pub fn to_shortcut_key(key: KeyEvent) -> Option<ShortcutKey> {
+    let base = match key.code {
+        KeyCode::Char(' ') => BaseKey::Space,
+        // 上游 `getShortcutKey` 把字母统一大写，键位表沿用同一约定
+        KeyCode::Char(character) => BaseKey::Char(character.to_ascii_uppercase()),
+        KeyCode::Enter => BaseKey::Enter,
+        KeyCode::Esc => BaseKey::Esc,
+        KeyCode::Tab => BaseKey::Tab,
+        KeyCode::Backspace => BaseKey::Backspace,
+        KeyCode::Delete => BaseKey::Delete,
+        KeyCode::Insert => BaseKey::Insert,
+        KeyCode::Left => BaseKey::Left,
+        KeyCode::Right => BaseKey::Right,
+        KeyCode::Up => BaseKey::Up,
+        KeyCode::Down => BaseKey::Down,
+        KeyCode::Home => BaseKey::Home,
+        KeyCode::End => BaseKey::End,
+        KeyCode::PageUp => BaseKey::PageUp,
+        KeyCode::PageDown => BaseKey::PageDown,
+        KeyCode::F(number) => BaseKey::F(number),
+        _ => return None,
+    };
+    Some(ShortcutKey {
+        ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
+        alt: key.modifiers.contains(KeyModifiers::ALT),
+        shift: key.modifiers.contains(KeyModifiers::SHIFT),
+        key: base,
+    })
+}
 
 pub fn overlay_action(app: &App, key: KeyEvent) -> Option<Action> {
     if app.edit.is_some() {

@@ -16,6 +16,7 @@ use crate::domain::flow::get_flow_config;
 use crate::domain::flow::navigator::{Notice, NoticeLevel};
 use crate::domain::rng::{self, Rng, shuffle};
 use crate::domain::session::{PracticeSession, cache_from_compact, cache_to_compact};
+use crate::domain::shortcut::{ShortcutAction, ShortcutMap};
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
@@ -188,6 +189,8 @@ pub struct App {
     pub show_toolbar: bool,
     pub show_panel: bool,
     pub show_meta: bool,
+    /// 快捷键表（由设置派生，改绑后需调用 `refresh_shortcuts`）
+    pub shortcuts: ShortcutMap,
     pub task_preview: Option<(usize, usize, usize)>,
     pub today_spend: i64,
     pub today_new: usize,
@@ -202,6 +205,11 @@ pub struct App {
 impl App {
     pub fn base(&self) -> &BaseState {
         &self.boot.base
+    }
+
+    /// 从设置重建快捷键表（改绑或载入设置后调用）。
+    pub fn refresh_shortcuts(&mut self) {
+        self.shortcuts = self.boot.settings.shortcut_map();
     }
 
     pub fn settings(&self) -> &SettingState {
@@ -270,6 +278,7 @@ impl App {
             show_toolbar: true,
             show_panel: false,
             show_meta: true,
+            shortcuts: ShortcutMap::default(),
             task_preview: None,
             today_spend: 0,
             today_new: 0,
@@ -281,6 +290,7 @@ impl App {
             pending_practice_save: None,
         };
 
+        app.refresh_shortcuts();
         for notice in notices {
             app.toast(NoticeLevel::Warning, notice);
         }
@@ -347,6 +357,7 @@ impl App {
         if self.boot.readonly_settings {
             return;
         }
+        self.refresh_shortcuts();
         if let Err(err) = self.store.save_settings(&self.boot.settings) {
             self.toast(NoticeLevel::Error, format!("保存设置失败: {err}"));
         }
@@ -774,9 +785,9 @@ impl App {
             .unwrap_or(false)
     }
 
-    fn identify_know(&mut self) {
+    fn identify_know(&mut self) -> bool {
         if !self.is_identify() {
-            return;
+            return false;
         }
         let word = self
             .session
@@ -789,36 +800,39 @@ impl App {
         }
         self.typing.mark_correct(&word.word);
         self.schedule_practice_save();
+        true
     }
 
-    fn identify_unknown(&mut self) {
+    fn identify_unknown(&mut self) -> bool {
         if !self.is_identify() {
-            return;
+            return false;
         }
         if let Some(session) = self.session.as_mut() {
             session.display.show_word_result = true;
             session.on_type_wrong(&mut self.boot.base, &mut self.stat);
         }
         self.schedule_practice_save();
+        true
     }
 
-    fn identify_mastered(&mut self) {
+    fn identify_mastered(&mut self) -> bool {
         if !self.is_identify() {
-            return;
+            return false;
         }
         if let Some(session) = self.session.as_mut() {
             session.on_word_mastered(&mut self.boot.base);
         }
         self.typing.reset();
         self.advance_word(false);
+        true
     }
 
-    fn identify_choose(&mut self, index: usize) {
+    fn identify_choose(&mut self, index: usize) -> bool {
         if !self.is_identify() {
-            return;
+            return false;
         }
         let Some(word) = self.session.as_ref().map(|session| session.current_word()) else {
-            return;
+            return false;
         };
         let correct = self
             .session
@@ -833,7 +847,7 @@ impl App {
             .map(|question| index < question.candidates.len())
             .unwrap_or(false);
         if !valid {
-            return;
+            return false;
         }
         self.identify_select = Some(index);
         if let Some(session) = self.session.as_mut() {
@@ -848,6 +862,7 @@ impl App {
             session.on_type_wrong(&mut self.boot.base, &mut self.stat);
         }
         self.schedule_practice_save();
+        true
     }
 
     // ── 键位分发 ─────────────────────────────────────────────────────────
@@ -872,55 +887,121 @@ impl App {
         }
     }
 
+    /// 练习页按键：先查快捷键表，剩下的按键交给键入引擎。
+    ///
+    /// 快捷键表与上游 `shortcutKeyMap` 同构，动作 → 键位；
+    /// TUI 专有键位（暂停计时、退出等）放在 `handle_practice_tui_key`。
     fn on_practice_key(&mut self, key: KeyEvent) {
-        let modifiers = key.modifiers;
-        let ctrl = modifiers.contains(KeyModifiers::CONTROL);
-        let alt = modifiers.contains(KeyModifiers::ALT);
-        let shift = modifiers.contains(KeyModifiers::SHIFT);
+        if let Some(shortcut) = keymap::to_shortcut_key(key) {
+            let actions = self.shortcuts.actions_for(&shortcut);
+            for action in actions {
+                if self.handle_practice_shortcut(action) {
+                    return;
+                }
+            }
+        }
+        if self.handle_practice_tui_key(key) {
+            return;
+        }
+        if let Some(input) = key_to_input(&key) {
+            self.handle_typing_key(input);
+        }
+    }
 
-        match key.code {
-            KeyCode::Esc => {
+    /// 处理练习页的快捷键动作；返回 `true` 表示该动作已消费按键。
+    fn handle_practice_shortcut(&mut self, action: ShortcutAction) -> bool {
+        use ShortcutAction::*;
+        match action {
+            ShowWord => {
                 if let Some(session) = self.session.as_mut() {
                     session.show_word(&mut self.boot.base, &mut self.stat);
                 }
+                true
             }
-            KeyCode::Tab => self.skip_word(),
-            KeyCode::Enter => {
-                if ctrl {
-                    self.save_practice_now();
-                    self.save_dict_now();
-                } else if let Some(session) = self.session.as_mut() {
+            Ignore => {
+                self.skip_word();
+                true
+            }
+            ToggleCollect => {
+                if let Some(session) = self.session.as_mut() {
                     session.toggle_collect(&mut self.boot.base);
                 }
+                true
             }
-            KeyCode::Char('?') => {
-                self.help_scroll = 0;
-                self.screen = Screen::Help;
-            }
-            KeyCode::Char('\u{60}') => {
+            ToggleSimple => {
                 if let Some(session) = self.session.as_mut() {
                     session.toggle_word_simple_for_current(&mut self.boot.base);
                 }
                 self.typing.reset();
                 self.advance_word(false);
+                true
             }
-            KeyCode::Char('1') if alt => self.identify_choose(0),
-            KeyCode::Char('2') if alt => self.identify_choose(1),
-            KeyCode::Char('3') if alt => self.identify_choose(2),
-            KeyCode::Char('4') if alt => self.identify_choose(3),
-            KeyCode::Char('1') if !ctrl && self.is_identify() => self.identify_know(),
-            KeyCode::Char('2') if !ctrl && self.is_identify() => self.identify_unknown(),
-            KeyCode::Char('3') if !ctrl && self.is_identify() => self.identify_mastered(),
-            KeyCode::Char('z') if ctrl => {
+            ToggleShowTranslate => {
                 if let Some(session) = self.session.as_mut() {
                     session.toggle_translate();
                 }
+                true
             }
-            KeyCode::Char('i') if ctrl => {
+            ToggleDictation => {
                 if let Some(session) = self.session.as_mut() {
                     session.toggle_dictation();
                 }
+                true
             }
+            ToggleToolbar => {
+                self.show_toolbar = !self.show_toolbar;
+                true
+            }
+            TogglePanel => {
+                self.show_panel = !self.show_panel;
+                true
+            }
+            RandomWrite => {
+                if let Some(session) = self.session.as_mut() {
+                    session.random_write(&mut self.rng);
+                }
+                self.typing.reset();
+                self.after_advance();
+                true
+            }
+            Next => {
+                self.advance_word(false);
+                true
+            }
+            Previous => {
+                self.prev_word();
+                true
+            }
+            NextStep => {
+                self.skip_step();
+                true
+            }
+            RepeatChapter => {
+                self.save_practice_now();
+                self.save_dict_now();
+                true
+            }
+            KnowWord => self.is_identify() && self.identify_know(),
+            UnknownWord => self.is_identify() && self.identify_unknown(),
+            MasteredWord => self.is_identify() && self.identify_mastered(),
+            SelfTestingChooseA => self.identify_choose(0),
+            SelfTestingChooseB => self.identify_choose(1),
+            SelfTestingChooseC => self.identify_choose(2),
+            SelfTestingChooseD => self.identify_choose(3),
+            _ => false,
+        }
+    }
+
+    /// TUI 专有键位：上游没有对应动作，或功能尚未实现。
+    fn handle_practice_tui_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('?') => {
+                self.help_scroll = 0;
+                self.screen = Screen::Help;
+                true
+            }
+            // 暂停计时：上游该键位是「播放单词发音」，发音功能落地后移交
             KeyCode::Char('p') if ctrl => {
                 if self.stat.timer_paused {
                     timer::resume(&mut self.stat, timer::now_ms());
@@ -932,32 +1013,20 @@ impl App {
                     timer::pause(&mut self.stat, "manual", timer::now_ms());
                     self.toast(NoticeLevel::Info, crate::domain::i18n::tr("timer_paused"));
                 }
+                true
             }
-            KeyCode::Char('r') if ctrl => {
-                if let Some(session) = self.session.as_mut() {
-                    session.random_write(&mut self.rng);
-                }
-                self.typing.reset();
-                self.after_advance();
+            // 例句 / 词源开关：上游该键位是「编辑文章」
+            KeyCode::Char('e') if ctrl => {
+                self.show_meta = !self.show_meta;
+                true
             }
-            KeyCode::Char('b') if ctrl => self.show_toolbar = !self.show_toolbar,
-            KeyCode::Char('l') if ctrl => self.show_panel = !self.show_panel,
-            KeyCode::Char('e') if ctrl => self.show_meta = !self.show_meta,
             KeyCode::Char('c') if ctrl => {
                 self.save_practice_now();
                 self.save_dict_now();
                 self.leave_practice();
+                true
             }
-            KeyCode::Char('n') if ctrl => self.advance_word(false),
-            KeyCode::Char('j') if ctrl => self.skip_step(),
-            KeyCode::Right if ctrl => self.advance_word(false),
-            KeyCode::Left if ctrl => self.prev_word(),
-            KeyCode::Right if shift => self.skip_step(),
-            _ => {
-                if let Some(input) = key_to_input(&key) {
-                    self.handle_typing_key(input);
-                }
-            }
+            _ => false,
         }
     }
 

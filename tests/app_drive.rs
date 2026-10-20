@@ -534,3 +534,98 @@ fn clicking_word_list_row_jumps_to_that_word() {
     let session = app.session.as_ref().expect("session");
     assert_eq!(session.data.index, 2, "点击词表应跳到该词");
 }
+
+#[test]
+fn practice_shortcuts_follow_the_configured_key_map() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+
+    // 默认绑定：Ctrl+Z 切换翻译
+    let before = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+    let after = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    assert_ne!(before, after, "Ctrl+Z 应切换翻译显示");
+}
+
+#[test]
+fn rebinding_a_shortcut_takes_effect_immediately() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+
+    // 把「切换翻译」改绑到 Ctrl+K
+    app.boot
+        .settings
+        .shortcut_key_map
+        .insert("ToggleShowTranslate".to_string(), "Ctrl+K".to_string());
+    app.refresh_shortcuts();
+
+    let before = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    let after = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    assert_ne!(before, after, "改绑后 Ctrl+K 应切换翻译");
+
+    // 原键位不再生效
+    let after_rebind = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+    let unchanged = app
+        .session
+        .as_ref()
+        .map(|session| session.view_state().is_show_translate)
+        .unwrap_or(false);
+    assert_eq!(after_rebind, unchanged, "原键位应失效");
+}
+
+#[test]
+fn shortcut_key_map_survives_a_restart() {
+    let fixture = common::Fixture::new();
+    {
+        let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+        app.boot
+            .settings
+            .shortcut_key_map
+            .insert("ShowWord".to_string(), "Ctrl+K".to_string());
+        app.save_settings_now();
+    }
+
+    let app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert_eq!(
+        app.boot
+            .settings
+            .shortcut_key_map
+            .get("ShowWord")
+            .map(String::as_str),
+        Some("Ctrl+K"),
+        "快捷键表应写入 setting.json"
+    );
+    assert_eq!(
+        app.shortcuts
+            .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
+            .to_upstream(),
+        "Ctrl+K",
+        "重启后应从存档恢复改绑"
+    );
+}

@@ -4,7 +4,7 @@
 //! - 大部分结构使用 camelCase 序列化（与前端对象属性一致）
 //! - `Card` 使用 ts-fsrs 的 snake_case 字段名
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -463,6 +463,8 @@ pub struct SettingState {
     pub fsrs_good_limit: i64,
     pub fsrs_hard_limit: i64,
     pub fsrs_parameters: FsrsParameters,
+    /// 快捷键表：动作名 → 键位（上游 `shortcutKeyMap`，同样式 `Record<string,string>`）
+    pub shortcut_key_map: BTreeMap<String, String>,
     /// TUI 专属：练习页是否使用 2 倍大字（空间足够时）
     #[serde(rename = "tuiBigWord")]
     pub tui_big_word: bool,
@@ -501,6 +503,7 @@ impl Default for SettingState {
             fsrs_good_limit: 3,
             fsrs_hard_limit: 6,
             fsrs_parameters: FsrsParameters::default(),
+            shortcut_key_map: BTreeMap::new(),
             tui_big_word: true,
             ignore_watch: false,
             extra: serde_json::Map::new(),
@@ -525,6 +528,11 @@ impl SettingState {
 
     pub fn space_cooldown_ms(&self) -> u64 {
         self.space_cooldown_time.clamp(0, 10_000) as u64
+    }
+
+    /// 解析后的快捷键表（缺失或非法条目回退默认绑定）。
+    pub fn shortcut_map(&self) -> crate::domain::shortcut::ShortcutMap {
+        crate::domain::shortcut::ShortcutMap::from_stored(&self.shortcut_key_map)
     }
 }
 
