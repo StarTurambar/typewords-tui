@@ -47,7 +47,7 @@ impl App {
             Action::Back => self.back(),
             Action::QuitRequest => {
                 self.confirm = Some(ConfirmState {
-                    message: "确定退出 Type Words 吗？".to_string(),
+                    message: super::confirm_message(ConfirmAction::Quit),
                     action: ConfirmAction::Quit,
                 });
             }
@@ -187,6 +187,13 @@ impl App {
                     "已清空练习进度",
                 );
             }
+            ConfirmAction::ClearAllData => {
+                self.clear_all_data();
+                self.toast(
+                    crate::domain::flow::navigator::NoticeLevel::Success,
+                    crate::domain::i18n::tr("clear_success"),
+                );
+            }
         }
     }
 
@@ -309,10 +316,10 @@ impl App {
                     buffer: self.setting_number_value(target).to_string(),
                 });
             }
-            super::SettingKind::Action => {
+            super::SettingKind::Action(action) => {
                 self.confirm = Some(ConfirmState {
-                    message: "确定清空当前练习进度吗？".to_string(),
-                    action: ConfirmAction::ResetPractice,
+                    message: super::confirm_message(action),
+                    action,
                 });
             }
         }

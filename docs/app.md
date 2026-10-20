@@ -68,20 +68,20 @@
 ### 2.3 提示与弹层数据
 
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
-- `ConfirmAction`：`Quit`、`ResetPractice`；`ConfirmState` 为 `message` + `action`。
+- `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action`，文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。
 - `SummaryData`：`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`；后三项来自当前学习词典的总进度。
 - `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention` 十个取值；`PerDay` 没有设置行可打开，仅 `apply_number_value` 保留处理（每日词数由主页/词库页 `+`/`-` 修改）。
 
 ### 2.4 设置表与 `SettingKind`
 
-`SETTING_ROWS` 是设置页唯一数据源，共 23 项，数组顺序即渲染顺序。
+`SETTING_ROWS` 是设置页唯一数据源，共 24 项，数组顺序即渲染顺序。
 
 | `SettingKind` | `SETTING_ROWS` 中的 key（按出现顺序） |
 | --- | --- |
 | `Mode` / `Theme` / `SoundType` | `word_practice_mode` / `theme` / `sound_type` |
 | `Bool` | `big_word`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
 | `Number` | `word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
-| `Action` | `reset_practice_progress` |
+| `Action(ConfirmAction)` | `reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
 
 设置页按 key 归入「通用 / 复习 / 键入 / 显示 / FSRS / 其他」六个分区（起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
 
@@ -229,7 +229,7 @@ app.save_all()
 | `ActivateSetting(i)` | 设置光标置 `i` 并执行该项（见第 8 节） |
 | `StatsScroll(delta)` | 统计页滚动，上限为「最近 14 天」记录数减一 |
 | `SummaryContinue` / `SummaryRelearn` / `SummaryHome` | 结算弹层三种去向（见 7.5） |
-| `ConfirmAccept` / `ConfirmCancel` | 执行/关闭确认；`ConfirmAccept` 处理 Quit 与 ResetPractice |
+| `ConfirmAccept` / `ConfirmCancel` | 执行/关闭确认；`ConfirmAccept` 处理 Quit、ResetPractice 与 ClearAllData |
 | `EditSave` / `EditCancel` | 解析输入并写回 / 关闭输入弹层 |
 | `EditChar(c)` / `EditBackspace` | 追加 ASCII 数字（最多 6 位）/ 删除一位 |
 | `HelpScroll(delta)` | 帮助页滚动，`max(0)` 后上限 80 |
@@ -338,7 +338,7 @@ app.save_all()
 | `SoundType` | `us` ⇄ `uk`，影响练习页音标取哪个字段，保存设置 |
 | `Bool` | `toggle_setting_bool(key)` 翻转对应字段，保存设置 |
 | `Number(target)` | 打开 `EditState`，`buffer` 预填当前值的十进制字符串（尚未落盘） |
-| `Action` | 打开确认弹层「确定清空当前练习进度吗？」（`ResetPractice`） |
+| `Action(action)` | 打开确认弹层，文案取 `confirm_message(action)`：`ResetPractice` 为「确定清空当前练习进度吗？」，`ClearAllData` 为「该操作将会清除所有数据，确认继续？」 |
 
 分派结束后统一执行 `save_settings_now()` 与 `refresh_task_preview()`；`Bool`/`SoundType` 靠这一步落盘。
 
@@ -374,6 +374,7 @@ app.save_all()
 | `schedule_practice_save` | 只设 `pending_practice_save = now + 500ms`，落盘由 `on_tick` 完成 |
 | `save_all` | 依次保存词典、设置；若仍有未结算会话则保存练习缓存 |
 | `clear_practice_cache` | 删除 `practice-word.json` 并清除防抖 deadline |
+| `clear_all_data` | 见 9.3；把两份存档恢复默认并删掉练习缓存 |
 
 保存失败不会 panic：统一转成 `Error` Toast（如「保存词典失败: ...」）。
 
@@ -394,6 +395,18 @@ app.save_all()
 | 窗口缩放 | 不保存 |
 
 `readonly_dict` / `readonly_settings` 分别阻止词典与设置写回，两者都来自「存档版本过高」；练习缓存不受影响，仍可按需保存/删除。
+
+### 9.3 `clear_all_data`
+
+设置页「清除所有数据」（`ConfirmAction::ClearAllData`）走 `App::clear_all_data`，对齐上游 `dataSyncPersistence.clear()`——上游把 base store 与 setting store 一起 `setState(getDefault*())` 并清空练习缓存，TUI 照此实现：
+
+1. `readonly_dict` 或 `readonly_settings` 为真时**直接返回**，只弹 `Error` Toast「存档版本高于当前程序，只读模式无法清除」；否则会出现界面报成功、重启后数据原样回来的假象。
+2. `clear_practice_cache()`，并把会话 / 键入 / `stat` / 结算 / 自测选择 / 统计滚动 / 词库光标全部复位。
+3. `boot.base = BaseState::default()` 且 `load = true`（上游 `clear()` 同样先置 `load`），`boot.settings = SettingState::default()`。
+4. `ensure_study_dict()`：默认状态的 `study_index = -1`，按全新安装的路径重新选一本词典（有 `cet4` 用它，否则第一本词库），失败写 `fatal`。
+5. `save_dict_now()` + `save_settings_now()` + `refresh_stats()` + `refresh_task_preview()`；Toast 取 i18n 的 `clear_success`（「清除成功」）。
+
+清完仍停留在设置页。`tests/end_to_end.rs` 的 `clear_all_data_resets_dict_settings_and_cache` 覆盖了「练完一轮 → 清除 → 内存与落盘都回到默认」。
 
 ## 10. 确定性与测试接口
 

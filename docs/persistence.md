@@ -333,6 +333,7 @@ article.bookList 中 system == false 的词典                        → articl
 | 退出程序（事件循环结束/确认退出） | `save_all`：若仍有未结算会话则立即保存 |
 | 结算 `finish_session` | 删除缓存（结算弹层出现后不再有断点） |
 | 结算后回主页、设置页「清空当前练习进度」 | 删除缓存 |
+| 设置页「清除所有数据」 | 删除缓存，并把 `dict.json` 与 `setting.json` 一起恢复默认（见第 9 节） |
 | 启动参数 `--reset-practice` | 启动恢复前删除缓存并 Toast「已清空练习进度」 |
 
 删除即 `fs::remove_file`；删除后 `practice_exists()` 为 false。文件写入失败会弹 Error Toast（`保存练习进度失败: ...`），不会中断练习。
@@ -464,6 +465,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 - **完整备份**：关闭程序后复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`themes/`、导入的 `dicts/` 与 `list/word.json`）。只拷 `dict.json` 会丢设置、断点与导入词库。
 - **恢复**：关闭程序 → 用备份覆盖 `<home>` → 启动；建议先跑 `tw doctor` 确认路径与词库数量，再打开设置页检查主题是否加载。
 - **只重置练习**：`tw --reset-practice`（启动时删除缓存）或设置页「清空当前练习进度」（确认弹层后删除）。两者都只删 `practice-word.json`，不影响 `dict.json` 里的统计、FSRS 卡片和收藏/错词/已掌握。
+- **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
 - **彻底重置**：关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢）；下次启动会重建目录并按默认值运行。
 - **删除/隔离坏档**：启动 Toast 会给出隔离后的文件名（`*.corrupt-<时间戳>.json`）；确认不需要后可删除隔离文件与坏档本身。版本过高时**不要**为了启动而降级程序或手改 `version`，优先备份后升级程序。
 - **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` 版本不符 → 忽略并在下次练习时覆盖。三类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。

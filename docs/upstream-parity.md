@@ -68,7 +68,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | `(articles)/book-list.vue` | 书籍目录 | 无 |
 | `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无 |
 | `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 无 |
-| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（6 分区 23 行） |
+| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（6 分区 24 行） |
 | `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
 | `doc.vue` | 英语学习资源分享 | 无 |
 | `about.vue` | 关于 | 无 |
@@ -112,7 +112,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 无（统计页展示最近 14 天） | 部分 | 无日历、无按词典拆分的当日明细、无学习记录弹窗 |
 | 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
 | 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 部分 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
-| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（6 分区 23 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
+| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（6 分区 24 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 固定键位 | 缺失 | 帮助页只读展示 |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
 | 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
@@ -191,11 +191,11 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 ### 4.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 28 个具名字段：27 个与上游同名（`theme`、`repeatCount`、`fsrsParameters` 等）+ TUI 专有的 `tuiBigWord`；其余 31 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 22 个配置项 + 1 个「清空练习进度」动作，共 23 行。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 28 个具名字段：27 个与上游同名（`theme`、`repeatCount`、`fsrsParameters` 等）+ TUI 专有的 `tuiBigWord`；其余 31 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 22 个配置项 + 2 个动作项（清空练习进度、清除所有数据），共 24 行。
 
 | 类别 | 项 |
 | --- | --- |
-| 有 UI 且生效 | 练习模式、主题、音标、大字单词、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、重复次数(自定义)、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度 |
+| 有 UI 且生效 | 练习模式、主题、音标、大字单词、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、重复次数(自定义)、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据 |
 | 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch` |
 | 无 UI 但生效 | `maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`（手工编辑 `setting.json` 后 `Scheduler` 会读取） |
 | 建模但不生效 | `enable_short_term`、`learning_steps`、`relearning_steps`（学习步进固定 1/6/10 分钟） |
@@ -231,6 +231,8 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 上游用 `idb-keyval` 把 4 类数据存进 IndexedDB，老版本 localStorage 会自动迁移；Pinia `$subscribe` 防抖 1 秒自动保存，并叠加 Supabase 推送/拉取与冲突检测，解析失败时用 hash 快照兜底。TUI 用 3 个 JSON 文件：同目录临时文件 + fsync + rename 原子写，解析失败重命名为 `*.corrupt-<时间戳>.json` 并回退默认值，版本过高时 `dict.json` 与 `setting.json` 都只读不覆盖，练习缓存版本不受支持时忽略（详见 [存档与数据格式](persistence.md)）。
 
 TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::shake_common_dict`，对应上游 `shakeCommonDict`），因此 `dict.json` 不会把 4.5 MB 的 CET-4 词表写进去；官方词库在启动时按 `url` 从 `assets/` 重新加载。上游的保存是「整份 store 状态」，TUI 是「显式调用 + 延迟保存」。
+
+重置数据两端都只有整体入口：上游「设置 → 数据 → 清除所有数据」（`PopConfirm` + `dataSyncPersistence.clear()`）把 base store 与 setting store 一起 `setState(getDefault*())` 并清空 practice 缓存；TUI 的设置页「其他 → 清除所有数据」走 `App::clear_all_data`，同样是 `BaseState::default()` + `SettingState::default()` + 删除 `practice-word.json`，文案沿用上游的「该操作将会清除所有数据，确认继续？」与「清除成功」。差异只在位置（上游在「数据」tab，TUI 在设置页「其他」分区）与后续动作：上游清完让用户重新选词典（`studyIndex = -1`），TUI 按全新安装的路径自动选一本（有 `cet4` 用它）。上游没有「只清学习记录」或「只清统计」的入口，TUI 同样没有；TUI 额外的「清空当前练习进度」只删断点缓存，对应上游切词典 / 改练习设置时的 `resetCacheData` 副作用，上游没有把它做成按钮。
 
 ## 5. 数据互通
 
@@ -401,6 +403,6 @@ Web 备份 data.json                       TUI 数据目录
 
 - [文档索引](README.md)
 - [数据文件与互通](persistence.md)（存档格式、版本策略、手工迁移细节）
-- [设置项参考](settings.md)（23 行设置与透传字段的逐项说明）
+- [设置项参考](settings.md)（24 行设置与透传字段的逐项说明）
 - [领域算法](domain.md)（FSRS、流程、会话与统计的实现）
 - [应用状态机](app.md)（键位分发、保存时机与扩展点）

@@ -253,7 +253,7 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
             number_text(target, app.setting_number_value(target)),
             theme.fg,
         ),
-        SettingKind::Action => ("按 Enter 重置".to_string(), theme.dim),
+        SettingKind::Action(_) => ("按 Enter 重置".to_string(), theme.dim),
     }
 }
 

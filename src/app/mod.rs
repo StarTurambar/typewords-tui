@@ -75,7 +75,8 @@ pub enum SettingKind {
     SoundType,
     Bool,
     Number(EditTarget),
-    Action,
+    /// 动作行：按下后弹确认框，确认即执行携带的 `ConfirmAction`。
+    Action(ConfirmAction),
 }
 
 pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
@@ -119,7 +120,14 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         "request_retention",
         SettingKind::Number(EditTarget::Retention),
     ),
-    ("reset_practice_progress", SettingKind::Action),
+    (
+        "reset_practice_progress",
+        SettingKind::Action(ConfirmAction::ResetPractice),
+    ),
+    (
+        "clear_all_data",
+        SettingKind::Action(ConfirmAction::ClearAllData),
+    ),
 ];
 
 #[derive(Clone, Debug)]
@@ -134,10 +142,22 @@ pub struct SummaryData {
     pub complete: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmAction {
     Quit,
+    /// 只删断点缓存，学习记录与设置不变。
     ResetPractice,
+    /// 存档恢复默认：`dict.json` + `setting.json` + 断点缓存，对齐上游「清除所有数据」。
+    ClearAllData,
+}
+
+/// 确认框文案：与动作一一对应，供键盘与鼠标路径共用。
+pub fn confirm_message(action: ConfirmAction) -> String {
+    match action {
+        ConfirmAction::Quit => "确定退出 Type Words 吗？".to_string(),
+        ConfirmAction::ResetPractice => "确定清空当前练习进度吗？".to_string(),
+        ConfirmAction::ClearAllData => crate::domain::i18n::tr("clear_all_data_confirm"),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -348,6 +368,43 @@ impl App {
     pub fn clear_practice_cache(&mut self) {
         let _ = self.store.remove_practice();
         self.pending_practice_save = None;
+    }
+
+    /// 清除所有数据：`dict.json` 与 `setting.json` 都回到默认值，并删掉断点缓存。
+    ///
+    /// 对齐上游 `dataSyncPersistence.clear()`——它把 base store 与 setting store 一起
+    /// `setState(getDefault*())` 并清空练习缓存，即「恢复出厂」。因此学习记录、统计、
+    /// FSRS 卡片、错词/收藏/已掌握、词典选择、主题与全部设置都会归零。
+    ///
+    /// 存档版本高于程序支持版本时是只读的（`readonly_*`），此时不清也不落盘，
+    /// 否则会在界面上报「清除成功」而重启后数据原样回来。
+    pub fn clear_all_data(&mut self) {
+        if self.boot.readonly_dict || self.boot.readonly_settings {
+            self.toast(NoticeLevel::Error, "存档版本高于当前程序，只读模式无法清除");
+            return;
+        }
+        self.clear_practice_cache();
+        self.session = None;
+        self.typing = TypingEngine::new();
+        self.stat = PracticeState::default();
+        self.summary = None;
+        self.identify_select = None;
+        self.stats_scroll = 0;
+        self.dict_cursor = 0;
+
+        self.boot.base = BaseState::default();
+        // 上游 clear() 会把 load 置 true 再落盘，这里保持一致。
+        self.boot.base.load = true;
+        self.boot.settings = SettingState::default();
+
+        // 默认状态没有学习词典（study_index = -1），按全新安装的路径重新选一本。
+        if let Err(err) = self.boot.ensure_study_dict() {
+            self.fatal = Some(format!("加载词库失败: {err}"));
+        }
+        self.save_dict_now();
+        self.save_settings_now();
+        self.refresh_stats();
+        self.refresh_task_preview();
     }
 
     fn schedule_practice_save(&mut self) {

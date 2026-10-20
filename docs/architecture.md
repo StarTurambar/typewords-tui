@@ -282,7 +282,7 @@ Catalog(assets) ───────┘                                      �
 | --- | --- |
 | app ↔ ui 耦合 | `App` 直接调用 `ui::render`，各页面直接读 `App`；未来拆视图层需要先引入只读 ViewState。 |
 | 界面文案硬编码 | `domain/i18n.rs` 是一张中文映射表，键名对齐上游 i18n，但没有语言切换；新增文案需同时改代码。 |
-| 设置项只建模一部分 | `SettingState` 建模 28 个具名字段，设置页覆盖其中 22 个配置项 + 1 个动作（23 行）；其余上游字段原样透传保存。`enable_short_term` / `learning_steps` / `relearning_steps` 仍不生效（学习步进固定 1/6/10 分钟），详见 [settings.md](settings.md)。 |
+| 设置项只建模一部分 | `SettingState` 建模 28 个具名字段，设置页覆盖其中 22 个配置项 + 2 个动作（24 行）；其余上游字段原样透传保存。`enable_short_term` / `learning_steps` / `relearning_steps` 仍不生效（学习步进固定 1/6/10 分钟），详见 [settings.md](settings.md)。 |
 | 键位不可配置 | 固定键位；`Ctrl+P` 从上游的发音改为暂停计时。 |
 | 练习缓存只支持 v2 | v1 缓存直接丢弃（上游有 v1→v2 升级）。 |
 | FSRS 间隔为近似对齐 | 评级一致，但学习步进固定 1/6/10 分钟、复习间隔由 fsrs crate 计算，具体天数可能与 Web 不同；`enable_fuzz` 为 ±5% 近似实现。 |

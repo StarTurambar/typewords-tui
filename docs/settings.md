@@ -1,10 +1,10 @@
 # 设置项参考
 
-本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、23 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
+本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、24 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
 
 设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。本文所有数值都以这两处与 `src/domain/constants.rs` 为准。
 
-> 适用范围：设置页全部 23 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
+> 适用范围：设置页全部 24 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
 
 ## 设置文件与保存时机
 
@@ -18,10 +18,10 @@
 ## 设置页操作
 
 - **进入与选择**：主页 `s` / `4` 或侧栏「设置」；`↑` / `↓`（别名 `j` / `k`）移动，右侧 `↑` / `↓` 指示还有内容。练习中不能进入。
-- **修改与返回**：`Enter` / 空格修改——开关类直接切换；模式 / 主题 / 音标循环；数字类弹输入框（只接受 ASCII 数字与 `Backspace`，最多 6 位，留空按 0 解析后按范围收敛，`Enter` 保存、`Esc` 取消）；「清空当前练习进度」弹确认；`Esc` / `q` 保存并回主页。
+- **修改与返回**：`Enter` / 空格修改——开关类直接切换；模式 / 主题 / 音标循环；数字类弹输入框（只接受 ASCII 数字与 `Backspace`，最多 6 位，留空按 0 解析后按范围收敛，`Enter` 保存、`Esc` 取消）；「清空当前练习进度」与「清除所有数据」弹确认；`Esc` / `q` 保存并回主页。
 
-- **没有「恢复默认」入口**：设置页不提供单项重置或全部重置；恢复默认只能删除或手工编辑 `setting.json`（删除后下次启动使用 `SettingState::default`）。
-- **分区与顺序**：通用（4 行）→ 复习（3 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（1 行），共 23 行 = 22 个配置项 + 1 个动作项。
+- **恢复默认只有整体入口**：设置页没有单项重置；「清除所有数据」会把全部设置连同学习记录一起恢复默认（见下文「清除所有数据」）。想只重置某一项，只能删除或手工编辑 `setting.json`（删除后下次启动使用 `SettingState::default`）。
+- **分区与顺序**：通用（4 行）→ 复习（3 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 24 行 = 22 个配置项 + 2 个动作项。
 
 ## 分区总表
 
@@ -52,6 +52,7 @@
 | FSRS | `fsrs_hard_limit` | FSRS Hard 阈值 | 整数 | 6 | 0~20 | 超过 Good 阈值且 ≤ 本阈值 → Hard，更大 → Again；结算时生效 |
 | FSRS | `fsrsParameters.request_retention`（`request_retention` 行） | 目标留存率 | 整数 % | 90 | 50~99 | 传给 FSRS 的期望留存率（文件内为小数）；结算时生效 |
 | 其他 | `reset_practice_progress` | 清空当前练习进度 | 动作 | — | — | 确认后删除 `practice-word.json`；立即生效 |
+| 其他 | `clear_all_data` | 清除所有数据 | 动作 | — | — | 确认后 `dict.json` 与 `setting.json` 一起恢复默认并删除 `practice-word.json`；立即生效 |
 
 ## 重点项详解
 
@@ -92,6 +93,14 @@
 
 - 确认后只删除 `practice-word.json`（断点缓存），不修改 `dict.json` 的学习进度、统计、FSRS 卡片与三本系统词典。
 - 与启动参数 `--reset-practice` 等价；下次进入练习会重新生成任务。
+
+### 清除所有数据
+
+- 确认文案为「该操作将会清除所有数据，确认继续？」，确认后提示「清除成功」。**不可撤销**。
+- 清掉的内容 = `BaseState::default()` + `SettingState::default()` + 删除 `practice-word.json`：统计记录、FSRS 卡片、笔记、错词 / 收藏 / 已掌握三本系统词典、当前学习词典的选择、练习进度，以及**全部设置**（主题、练习模式、FSRS 阈值、复习比例……）都回到默认值。
+- 与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）一致：两端都是把 dict 与 setting 两份状态整体 `setState(getDefault*())` 并清空练习缓存，即「恢复出厂」。上游把该按钮放在「数据」分区，TUI 放在设置页「其他」分区。
+- 清完会按全新安装的路径重新选一本学习词典（`catalog` 里有 `cet4` 就用它，否则用词库列表第一本），所以清完能直接开练，不需要再手选词典。
+- `dict.json` 或 `setting.json` 的 `version` 高于程序支持版本时本次运行是只读的，此时**不清也不落盘**，只提示「存档版本高于当前程序，只读模式无法清除」，避免界面报成功而重启后数据原样回来。
 
 ## FSRS 参数
 
@@ -178,7 +187,7 @@
 | 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch`、`fsrsParameters.enable_short_term`、`learning_steps`、`relearning_steps` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段都原样保存在这里，保存时写回 |
 
-`SettingState` 共建模 28 个具名字段 + `extra`，设置页只覆盖其中 22 个配置项（外加 1 个清空进度动作）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
+`SettingState` 共建模 28 个具名字段 + `extra`，设置页只覆盖其中 22 个配置项（外加 2 个动作项：清空练习进度、清除所有数据）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
 
 ## 未生效 / 半生效设置项清单
 
@@ -204,7 +213,7 @@
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 改了设置本轮没变化 | 词库相关项只在下次生成任务时生效（复习比例、随机填充、忽略简单词等） | 正常；见总表「生效」列，回主页或结算后继续即可 |
-| 想恢复默认设置 | 设置页没有恢复默认入口 | 退出程序后删除或编辑 `setting.json`；删除即全部回默认 |
+| 想恢复默认设置 | 单项重置没有入口，全部重置有 | 设置页「其他 → 清除所有数据」把设置与学习记录一起恢复默认（不可撤销）；只想重置某一项则退出程序后编辑 `setting.json` |
 | 手工改完设置，重启丢失 | 修改时程序仍在运行，退出时被内存状态覆盖 | 退出程序 → 改文件 → 再启动 |
 | 启动提示设置损坏 | JSON 语法错误、类型不匹配或枚举值非法 | 修复或删除 `setting.json`；坏文件已隔离为 `*.corrupt-*.json` |
 | 手工改了 FSRS 参数没效果 | 字段名拼错（落进 `extra`）、`w` 不是 21 个、或程序运行中被覆盖；`enable_short_term` / `learning_steps` / `relearning_steps` 本就不生效 | 退出后修改；核对 snake_case 字段名与 `w` 长度；学习步进固定为 1/6/10 分钟 |

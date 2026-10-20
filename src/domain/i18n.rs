@@ -132,6 +132,9 @@ pub fn tr(key: &str) -> String {
         "theme_light" => "浅色",
         "theme_high_contrast" => "高对比",
         "reset_practice_progress" => "清空当前练习进度",
+        "clear_all_data" => "清除所有数据",
+        "clear_all_data_confirm" => "该操作将会清除所有数据，确认继续？",
+        "clear_success" => "清除成功",
 
         // 词库
         "import_dict" => "导入词库",
