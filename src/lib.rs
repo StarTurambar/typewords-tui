@@ -5,9 +5,11 @@
 //! - `store`：本地存档读写
 //! - `app`：消息驱动的应用状态机
 //! - `ui`：ratatui 渲染
+//! - `audio`：终端响铃、系统 TTS 与外部播放器
 //! - `cli` / `paths`：进程入口与路径解析
 
 pub mod app;
+pub mod audio;
 pub mod bootstrap;
 pub mod cli;
 pub mod domain;

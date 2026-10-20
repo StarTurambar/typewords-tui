@@ -53,6 +53,7 @@ main.rs
 | 主题配置层 | `src/theme/` | 颜色/主题模型、内置主题、`<home>/themes/*.json` 加载与校验 | 不依赖 ratatui，也不依赖 `ui` |
 | 应用层 | `src/app/` | `App` 状态机、Action、键鼠映射、事件循环、保存时机 | 依赖 `domain`/`store`/`bootstrap`/`cli`/`paths`，渲染入口调用 `ui` |
 | 渲染层 | `src/ui/` | ratatui 布局与绘制、主题→颜色映射、鼠标命中区域 | 读 `app::App` 与 `domain` 数据，**不修改**状态 |
+| 音频层 | `src/audio/` | 终端响铃、系统 TTS、外部播放器 | 只依赖 `domain` 的设置；子进程即发即忘，不阻塞事件循环 |
 | 入口/装配 | `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs` | 解析参数、解析路径、装载初始状态、分发子命令 | 最外层，可依赖所有层 |
 
 有两条值得明确的实际约束：
@@ -316,6 +317,7 @@ Catalog(assets) ───────┘                                      �
 | `src/ui/` | [ui.md](ui.md) |
 | `src/store/`、三份存档、资源 JSON | [persistence.md](persistence.md) |
 | `src/theme/`、`ui/theme.rs` | [themes.md](themes.md) |
+| `src/audio/` | [usage.md · 音频](usage.md#音频) |
 | 交叉能力（分层、生命周期、主循环） | 本文 |
 | 构建/测试/CI/发布 | [development.md](development.md) |
 | 与上游功能差异 | [upstream-parity.md](upstream-parity.md) |

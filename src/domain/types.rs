@@ -465,6 +465,35 @@ pub struct SettingState {
     pub fsrs_parameters: FsrsParameters,
     /// 快捷键表：动作名 → 键位（上游 `shortcutKeyMap`，同样式 `Record<string,string>`）
     pub shortcut_key_map: BTreeMap<String, String>,
+    // ── 音频（上游同名字段，终端里由系统 TTS / 响铃实现）──────────────
+    /// 是否朗读单词
+    pub word_sound: bool,
+    /// 单词发音音量（百分比）
+    pub word_sound_volume: i64,
+    /// 单词发音倍速
+    pub word_sound_speed: f64,
+    /// 是否播放键音
+    pub keyboard_sound: bool,
+    /// 键音音量（百分比）
+    pub keyboard_sound_volume: i64,
+    /// 键音包名称（上游可选机械键盘 / 笔记本键盘等；终端统一用响铃）
+    pub keyboard_sound_file: String,
+    /// 是否播放对错提示音
+    pub effect_sound: bool,
+    /// 提示音音量（百分比）
+    pub effect_sound_volume: i64,
+    /// 是否朗读文章句子
+    pub article_sound: bool,
+    /// 文章朗读音量（百分比）
+    pub article_sound_volume: i64,
+    /// 文章朗读倍速
+    pub article_sound_speed: f64,
+    /// 例句朗读音量（百分比）
+    pub sentence_sound_volume: i64,
+    /// 例句朗读倍速
+    pub sentence_sound_speed: f64,
+    /// 发音来源：`system`（系统 TTS）或 `youdao`（有道接口）
+    pub tts_source: String,
     /// TUI 专属：练习页是否使用 2 倍大字（空间足够时）
     #[serde(rename = "tuiBigWord")]
     pub tui_big_word: bool,
@@ -504,6 +533,20 @@ impl Default for SettingState {
             fsrs_hard_limit: 6,
             fsrs_parameters: FsrsParameters::default(),
             shortcut_key_map: BTreeMap::new(),
+            word_sound: true,
+            word_sound_volume: 100,
+            word_sound_speed: 1.0,
+            keyboard_sound: true,
+            keyboard_sound_volume: 100,
+            keyboard_sound_file: "笔记本键盘".to_string(),
+            effect_sound: true,
+            effect_sound_volume: 100,
+            article_sound: true,
+            article_sound_volume: 100,
+            article_sound_speed: 1.0,
+            sentence_sound_volume: 100,
+            sentence_sound_speed: 1.0,
+            tts_source: "system".to_string(),
             tui_big_word: true,
             ignore_watch: false,
             extra: serde_json::Map::new(),
@@ -533,6 +576,24 @@ impl SettingState {
     /// 解析后的快捷键表（缺失或非法条目回退默认绑定）。
     pub fn shortcut_map(&self) -> crate::domain::shortcut::ShortcutMap {
         crate::domain::shortcut::ShortcutMap::from_stored(&self.shortcut_key_map)
+    }
+
+    /// 按「英式 / 美式」选择系统 TTS 的音色。
+    ///
+    /// Windows 上 `Microsoft Zira Desktop` 是英文音色；macOS 用 `Samantha`；
+    /// Linux 的 espeak 用 `en`。
+    pub fn tts_voice(&self, sound_type: &str) -> &'static str {
+        if cfg!(target_os = "windows") {
+            "Microsoft Zira Desktop"
+        } else if cfg!(target_os = "macos") {
+            if sound_type == "uk" {
+                "Daniel"
+            } else {
+                "Samantha"
+            }
+        } else {
+            "en"
+        }
     }
 }
 

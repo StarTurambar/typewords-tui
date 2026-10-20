@@ -524,6 +524,7 @@ fn edit_label(edit: &EditState) -> String {
         crate::app::EditTarget::HardLimit => tr("fsrs_hard_limit"),
         crate::app::EditTarget::Retention => tr("request_retention"),
         crate::app::EditTarget::Note => "单词笔记".to_string(),
+        crate::app::EditTarget::WordSoundSpeed => "发音倍速".to_string(),
     }
 }
 

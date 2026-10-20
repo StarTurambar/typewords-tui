@@ -19,6 +19,7 @@ use crate::ui::widgets::{self, display_width, fit_text};
 /// 分区起点：设置项 key -> 分区标题。顺序即展示顺序。
 const SECTIONS: &[(&str, &str)] = &[
     ("word_practice_mode", "通用"),
+    ("keyboard_sound", "音频"),
     ("word_review_ratio", "复习"),
     ("auto_next_word", "键入"),
     ("show_word_question", "显示"),
@@ -255,6 +256,14 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
         ),
         SettingKind::Action(_) => ("按 Enter 重置".to_string(), theme.dim),
         SettingKind::Shortcuts => ("按 Enter 打开".to_string(), theme.dim),
+        SettingKind::AudioSource => (
+            if app.boot.settings.tts_source == "youdao" {
+                "有道发音（需网络）".to_string()
+            } else {
+                "系统 TTS".to_string()
+            },
+            theme.accent_alt,
+        ),
     }
 }
 
@@ -271,6 +280,9 @@ fn setting_bool(app: &App, key: &str) -> bool {
         "show_near_word" => settings.show_near_word,
         "show_usage_tips" => settings.show_usage_tips,
         "big_word" => settings.tui_big_word,
+        "keyboard_sound" => settings.keyboard_sound,
+        "effect_sound" => settings.effect_sound,
+        "word_sound" => settings.word_sound,
         _ => false,
     }
 }
@@ -285,5 +297,6 @@ fn number_text(target: EditTarget, value: i64) -> String {
         EditTarget::Retention => format!("{value}%"),
         EditTarget::PerDay => format!("{value} 词"),
         EditTarget::Note => String::new(),
+        EditTarget::WordSoundSpeed => format!("{value}%"),
     }
 }

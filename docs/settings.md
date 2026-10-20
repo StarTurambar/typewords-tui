@@ -34,6 +34,11 @@
 | 通用 | `sound_type` | 音标 | 枚举 | 美式 (us) | 美式 / 英式 | 练习页显示英式（`phonetic0`）或美式（`phonetic1`）音标；立即生效 |
 | 通用 | `tui_big_word`（`big_word` 行） | 大字单词 | 布尔 | 开启 | 开启 / 关闭 | 关闭后练习页点阵不再 2 倍放大；立即生效 |
 | 通用 | `shortcutKeyMap`（`shortcut_settings` 行） | 快捷键 | 入口 | — | — | 进入快捷键编辑页改绑键位；详见 [快捷键](shortcuts.md)；立即生效 |
+| 音频 | `keyboardSound`（`keyboard_sound` 行） | 键音 | 布尔 | 开启 | 开启 / 关闭 | 每次敲键响一声（终端响铃）；立即生效 |
+| 音频 | `effectSound`（`effect_sound` 行） | 对错提示音 | 布尔 | 开启 | 开启 / 关闭 | 答对 / 答错各响一声；立即生效 |
+| 音频 | `wordSound`（`word_sound` 行） | 单词发音 | 布尔 | 开启 | 开启 / 关闭 | 用系统 TTS 朗读当前词；立即生效 |
+| 音频 | `ttsSource`（`tts_source` 行） | 发音来源 | 枚举 | 系统 TTS | 系统 TTS / 有道发音 | 有道发音需要网络，失败自动降级回系统 TTS；立即生效 |
+| 音频 | `wordSoundSpeed`（`word_sound_speed` 行） | 发音倍速 | 整数 % | 100 | 50~300 | 朗读语速；立即生效 |
 | 复习 | `word_review_ratio` | 复习比例 | 整数 | 3 | 0~10 | 复习上限 = 每日词数 × 比例；0 表示平时不抽到期复习（词库学完或末组时仍按 1 处理）；下次生成任务生效 |
 | 复习 | `auto_add_random_review_when_no_due`（`auto_random_review` 行） | 无到期复习时随机填充 | 布尔 | 关闭 | 开启 / 关闭 | 无到期复习时随机补足「每日词数 × 比例」个已学词；下次生成任务生效 |
 | 复习 | `ignore_simple_word` | 忽略简单词 | 布尔 | 关闭 | 开启 / 关闭 | 额外忽略 `SIMPLE_WORDS` 的 42 个常见词；影响今日任务与随机复习；下次生成任务生效 |

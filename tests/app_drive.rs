@@ -833,8 +833,8 @@ fn manual_pause_is_not_resumed_by_typing() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     press(&mut app, KeyCode::Enter);
-    app.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    assert!(app.stat.timer_paused, "Ctrl+P 应暂停计时");
+    app.on_key(KeyEvent::new(KeyCode::Char(','), KeyModifiers::CONTROL));
+    assert!(app.stat.timer_paused, "Ctrl+, 应暂停计时");
     assert_eq!(app.stat.timer_pause_reason.as_deref(), Some("manual"));
 
     app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
@@ -978,4 +978,30 @@ fn stats_page_switches_views_and_navigates_the_calendar() {
     assert!(app.stats_by_dict, "v 应切换到按词典视图");
     press(&mut app, KeyCode::Char('v'));
     assert!(!app.stats_by_dict, "再按一次应切回日历视图");
+}
+
+#[test]
+fn audio_settings_toggle_and_persist() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+
+    goto_setting(&mut app, "keyboard_sound");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.boot.settings.keyboard_sound, "键音应被关闭");
+
+    goto_setting(&mut app, "word_sound");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.boot.settings.word_sound, "单词发音应被关闭");
+
+    goto_setting(&mut app, "tts_source");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.boot.settings.tts_source, "youdao", "应切到有道发音");
+
+    press(&mut app, KeyCode::Esc);
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert!(!reloaded.boot.settings.keyboard_sound);
+    assert!(!reloaded.boot.settings.word_sound);
+    assert_eq!(reloaded.boot.settings.tts_source, "youdao");
 }

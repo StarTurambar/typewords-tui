@@ -105,6 +105,8 @@ pub enum EditTarget {
     Retention,
     /// 单词笔记（自由文本，不是数字）
     Note,
+    /// 发音倍速
+    WordSoundSpeed,
 }
 
 #[derive(Clone, Debug)]
@@ -124,11 +126,21 @@ pub enum SettingKind {
     Action(ConfirmAction),
     /// 入口行：按下后进入快捷键编辑页。
     Shortcuts,
+    /// 音频来源：系统 TTS / 有道发音
+    AudioSource,
 }
 
 pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ("word_practice_mode", SettingKind::Mode),
     ("shortcut_settings", SettingKind::Shortcuts),
+    ("keyboard_sound", SettingKind::Bool),
+    ("effect_sound", SettingKind::Bool),
+    ("word_sound", SettingKind::Bool),
+    ("tts_source", SettingKind::AudioSource),
+    (
+        "word_sound_speed",
+        SettingKind::Number(EditTarget::WordSoundSpeed),
+    ),
     ("theme", SettingKind::Theme),
     ("sound_type", SettingKind::SoundType),
     ("big_word", SettingKind::Bool),
@@ -805,8 +817,12 @@ impl App {
     fn handle_typing_events(&mut self, events: Vec<TypingEvent>) {
         for event in events {
             match event {
-                TypingEvent::Completed => self.advance_word(true),
+                TypingEvent::Completed => {
+                    crate::audio::play_correct(&self.boot.settings);
+                    self.advance_word(true);
+                }
                 TypingEvent::Wrong => {
+                    crate::audio::play_wrong(&self.boot.settings);
                     if let Some(session) = self.session.as_mut() {
                         session.on_type_wrong(&mut self.boot.base, &mut self.stat);
                     }
@@ -1516,6 +1532,7 @@ impl App {
             return;
         }
         if let Some(input) = key_to_input(&key) {
+            crate::audio::play_key(&self.boot.settings);
             self.handle_typing_key(input);
         }
     }
@@ -1636,8 +1653,20 @@ impl App {
                 self.screen = Screen::Help;
                 true
             }
-            // 暂停计时：上游该键位是「播放单词发音」，发音功能落地后移交
+            // 播放单词发音（上游语义）
             KeyCode::Char('p') if ctrl => {
+                if let Some(word) = self
+                    .session
+                    .as_ref()
+                    .map(|session| session.current_word().word)
+                    .filter(|word| !word.is_empty())
+                {
+                    crate::audio::pronounce(&self.boot.settings, &word);
+                }
+                true
+            }
+            // 暂停计时：上游没有手动暂停，这是 TUI 专有键位
+            KeyCode::Char(',') if ctrl => {
                 if self.stat.timer_paused {
                     timer::resume(&mut self.stat, timer::now_ms());
                     self.toast(
@@ -1697,6 +1726,9 @@ impl App {
             "show_near_word" => settings.show_near_word = !settings.show_near_word,
             "show_usage_tips" => settings.show_usage_tips = !settings.show_usage_tips,
             "big_word" => settings.tui_big_word = !settings.tui_big_word,
+            "keyboard_sound" => settings.keyboard_sound = !settings.keyboard_sound,
+            "effect_sound" => settings.effect_sound = !settings.effect_sound,
+            "word_sound" => settings.word_sound = !settings.word_sound,
             _ => {}
         }
     }
@@ -1722,6 +1754,7 @@ impl App {
                 (settings.fsrs_parameters.request_retention * 100.0).round() as i64
             }
             EditTarget::Note => 0,
+            EditTarget::WordSoundSpeed => (settings.word_sound_speed * 100.0).round() as i64,
         }
     }
 
@@ -1757,6 +1790,9 @@ impl App {
                     }
                     EditTarget::PerDay => {}
                     EditTarget::Note => {}
+                    EditTarget::WordSoundSpeed => {
+                        settings.word_sound_speed = (value.clamp(50, 300) as f64) / 100.0
+                    }
                 }
                 self.save_settings_now();
             }

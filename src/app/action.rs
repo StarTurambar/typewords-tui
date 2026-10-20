@@ -460,6 +460,13 @@ impl App {
                 self.open_shortcuts();
                 return;
             }
+            super::SettingKind::AudioSource => {
+                self.boot.settings.tts_source = if self.boot.settings.tts_source == "youdao" {
+                    "system".to_string()
+                } else {
+                    "youdao".to_string()
+                };
+            }
         }
         self.save_settings_now();
         self.refresh_task_preview();
