@@ -12,6 +12,8 @@ use ratatui::crossterm::execute;
 
 use crate::bootstrap::{self, Bootstrapped};
 use crate::cli::{self, Cli};
+use chrono::Datelike;
+
 use crate::domain::flow::get_flow_config;
 use crate::domain::flow::navigator::{Notice, NoticeLevel};
 use crate::domain::rng::{self, Rng, shuffle};
@@ -234,6 +236,12 @@ pub struct App {
     pub summary: Option<SummaryData>,
     pub identify_select: Option<usize>,
     pub stats_scroll: u16,
+    /// 统计页视图：false = 日历，true = 按词典
+    pub stats_by_dict: bool,
+    /// 统计页日历显示的月份（年, 月）
+    pub stats_month: (i32, u32),
+    /// 统计页日历选中的日期
+    pub stats_day: chrono::NaiveDate,
     pub help_scroll: u16,
     pub show_toolbar: bool,
     pub show_panel: bool,
@@ -335,6 +343,12 @@ impl App {
             summary: None,
             identify_select: None,
             stats_scroll: 0,
+            stats_by_dict: false,
+            stats_month: {
+                let today = chrono::Local::now().date_naive();
+                (today.year(), today.month())
+            },
+            stats_day: chrono::Local::now().date_naive(),
             help_scroll: 0,
             show_toolbar: true,
             show_panel: false,

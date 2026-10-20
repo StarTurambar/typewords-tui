@@ -955,3 +955,27 @@ fn word_test_finishes_with_a_summary() {
     assert!(app.word_test.is_none(), "答完后应结束测试");
     assert!(app.summary.is_some(), "应给出结算");
 }
+
+#[test]
+fn stats_page_switches_views_and_navigates_the_calendar() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('t'));
+    assert_eq!(app.screen, app::Screen::Stats);
+
+    let day = app.stats_day;
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.stats_day, day + chrono::Duration::days(1));
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.stats_day, day);
+
+    let (year, month) = app.stats_month;
+    press(&mut app, KeyCode::Char('.'));
+    assert_eq!(app.stats_month, (year, month + 1), "应翻到下个月");
+
+    assert!(!app.stats_by_dict);
+    press(&mut app, KeyCode::Char('v'));
+    assert!(app.stats_by_dict, "v 应切换到按词典视图");
+    press(&mut app, KeyCode::Char('v'));
+    assert!(!app.stats_by_dict, "再按一次应切回日历视图");
+}

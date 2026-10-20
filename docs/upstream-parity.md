@@ -109,9 +109,9 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 调度 | 高级 FSRS 参数 | `components/setting/FsrsSetting.vue` | 仅留存率有 UI | 部分 | `maximum_interval`/`w`/`enable_fuzz` 改文件后生效但无 UI；fuzz 为 ±5% 近似实现（见 4.3） |
 | 调度 | 无到期时随机填充复习 | `study-task.ts` 的 `addRandomReviewWhenNoDue` | `src/domain/study_task.rs` | 已对齐 | 数量、排除集合、随机来源一致 |
 | 统计 | 主页三项统计与本周记录 | `(words)/words.vue` | `src/ui/home.rs`、`src/ui/insights.rs` | 已对齐 | 今日时长 / 学习天数 / 累计时长 + 周一至周日 |
-| 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 无（统计页展示最近 14 天） | 部分 | 无日历、无按词典拆分的当日明细、无学习记录弹窗 |
+| 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 统计页有月历 + 选中日按词典明细 | 已对齐 | 日历以周一为首；有记录的日子打点；`v` 可切到按词典视图 |
 | 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
-| 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 部分 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
+| 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 已对齐 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
 | 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（6 分区 24 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |

@@ -27,14 +27,12 @@ struct StatsLayout {
     tiles: Rect,
     section: Rect,
     list: Rect,
-    hint: Option<Rect>,
     tile_columns: usize,
     tile_height: u16,
-    offset: usize,
     visible: usize,
 }
 
-fn layout(app: &App, content: Rect) -> StatsLayout {
+fn layout(_app: &App, content: Rect) -> StatsLayout {
     let header = Rect::new(content.x, content.y, content.width, content.height.min(1));
     let tile_columns = if content.width >= WIDE_TILE_WIDTH {
         6
@@ -58,52 +56,216 @@ fn layout(app: &App, content: Rect) -> StatsLayout {
         1,
     );
 
-    let total = insights::recent_days(&app.boot.base, RECENT_DAYS).len();
     let mut list_height = content.bottom().saturating_sub(section.bottom());
-    if total > list_height as usize {
-        list_height = list_height.saturating_sub(1);
+    // 底部留一行放滚动提示
+    if list_height > 1 {
+        list_height -= 1;
     }
     let list = Rect::new(content.x, section.bottom(), content.width, list_height);
-    let hint = (total > list_height as usize)
-        .then(|| Rect::new(content.x, list.bottom(), content.width, 1));
-    let visible = list_height as usize;
-    let offset = (app.stats_scroll as usize).min(total.saturating_sub(visible));
 
     StatsLayout {
         header,
         tiles,
         section,
         list,
-        hint,
         tile_columns,
         tile_height,
-        offset,
-        visible,
+        visible: list_height as usize,
     }
+}
+
+/// 下方内容区的行数（滚动边界用）。
+pub fn body_line_count(app: &App) -> usize {
+    body_lines(app, 80, &app.theme()).len()
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Stats, |frame, content| {
         let layout = layout(app, content);
-        render_header(frame, layout.header, theme);
+        render_header(app, frame, layout.header, theme);
         render_tiles(app, frame, &layout, theme);
-        render_recent(app, frame, &layout, theme);
+        render_body(app, frame, &layout, theme);
     });
 }
 
-fn render_header(frame: &mut Frame, rect: Rect, theme: &Theme) {
+fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     if rect.height == 0 || rect.width == 0 {
         return;
     }
+    let view = if app.stats_by_dict {
+        "按词典"
+    } else {
+        "日历"
+    };
     frame.render_widget(
         Paragraph::new(widgets::section_header(
             "统计",
-            "总览",
+            &format!("{view} · v 切换"),
             rect.width as usize,
             theme,
         )),
         rect,
     );
+}
+
+/// 日历块：一个月的网格，标出有记录的日子与选中的日子。
+fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let (year, month) = app.stats_month;
+    let today = insights::today();
+    let studied = insights::studied_days(&app.boot.base);
+    let first = match chrono::NaiveDate::from_ymd_opt(year, month, 1) {
+        Some(date) => date,
+        None => return Vec::new(),
+    };
+    // 周一为一周的第一天
+    let leading = first.weekday().num_days_from_monday() as usize;
+    let days_in_month = (first + chrono::Duration::days(31)).day();
+    let last_day = if month == 12 {
+        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
+    }
+    .and_then(|d| d.pred_opt())
+    .map(|d| d.day())
+    .unwrap_or(days_in_month);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  {year} 年 {month} 月"),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("    ", Style::default().fg(theme.dim)),
+        Span::styled("← → 选日期   , . 翻月", Style::default().fg(theme.dim)),
+    ]));
+
+    // 表头与日期列同宽（5 列），按显示宽度右对齐，避免中文表头错位
+    let mut header_spans = vec![Span::raw("  ")];
+    for label in ["一", "二", "三", "四", "五", "六", "日"] {
+        let pad = 3usize.saturating_sub(display_width(label));
+        header_spans.push(Span::styled(
+            format!("{}{label}  ", " ".repeat(pad)),
+            Style::default().fg(theme.dim),
+        ));
+    }
+    lines.push(Line::from(header_spans));
+
+    let mut cells: Vec<Option<u32>> = vec![None; leading];
+    for day in 1..=last_day {
+        cells.push(Some(day));
+    }
+    while !cells.len().is_multiple_of(7) {
+        cells.push(None);
+    }
+
+    for week in cells.chunks(7) {
+        let mut spans = vec![Span::raw("  ")];
+        for cell in week {
+            match cell {
+                None => spans.push(Span::raw("     ")),
+                Some(day) => {
+                    let date = first.with_day(*day).unwrap_or(first);
+                    let has_record = studied.contains(&date);
+                    let selected = date == app.stats_day;
+                    let is_today = date == today;
+                    let text = format!("{day:>3}");
+                    let color = if selected {
+                        theme.bg
+                    } else if is_today {
+                        theme.accent
+                    } else if has_record {
+                        theme.good
+                    } else {
+                        theme.dim
+                    };
+                    let style = if selected {
+                        Style::default().fg(color).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(color)
+                    };
+                    spans.push(Span::styled(text, style));
+                    spans.push(Span::styled(
+                        if has_record { "● " } else { "  " },
+                        Style::default().fg(if has_record { theme.good } else { theme.dim }),
+                    ));
+                }
+            }
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+/// 选中日的各词典明细。
+fn day_detail_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let day = app.stats_day;
+    let breakdown = insights::day_breakdown(&app.boot.base, day);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("  {}", day.format("%Y-%m-%d")),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if breakdown.is_empty() {
+                "  这一天没有学习记录".to_string()
+            } else {
+                format!("  {} 本词典有记录", breakdown.len())
+            },
+            Style::default().fg(theme.dim),
+        ),
+    ])];
+    for (name, totals) in breakdown.iter().take(6) {
+        lines.push(Line::from(vec![
+            Span::styled(format!("    {name}"), Style::default().fg(theme.fg)),
+            Span::styled(
+                format!(
+                    "  {}  新 {}  复习 {}  错 {}",
+                    format_duration(totals.spend),
+                    totals.new_words,
+                    totals.review,
+                    totals.wrong
+                ),
+                Style::default().fg(theme.muted),
+            ),
+        ]));
+    }
+    lines
+}
+
+/// 各词典累计。
+fn dict_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let totals = insights::dict_totals(&app.boot.base);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (name, value) in totals.iter() {
+        if value.days == 0 && value.total == 0 {
+            continue;
+        }
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {name}"), Style::default().fg(theme.fg)),
+            Span::styled(
+                format!(
+                    "  {}  天 {}  新 {}  复习 {}  错 {}",
+                    format_duration(value.spend),
+                    value.days,
+                    value.new_words,
+                    value.review,
+                    value.wrong
+                ),
+                Style::default().fg(theme.muted),
+            ),
+        ]));
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  暂无学习记录",
+            Style::default().fg(theme.dim),
+        )));
+    }
+    lines
 }
 
 fn render_tiles(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme) {
@@ -208,13 +370,20 @@ fn render_tile(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_recent(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme) {
-    let days = insights::recent_days(&app.boot.base, RECENT_DAYS);
+/// 下方内容区：日历视图渲染「日历 + 选中日明细 + 最近 14 天」，
+/// 词典视图渲染各词典累计。整体按行滚动。
+fn render_body(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme) {
+    let lines = body_lines(app, layout.list.width as usize, theme);
     if layout.section.height > 0 {
+        let title = if app.stats_by_dict {
+            "按词典统计"
+        } else {
+            "学习日历"
+        };
         frame.render_widget(
             Paragraph::new(widgets::section_header(
-                "最近 14 天",
-                &format!("{} 天有记录", days.len()),
+                title,
+                "",
                 layout.section.width as usize,
                 theme,
             )),
@@ -224,64 +393,89 @@ fn render_recent(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &The
     if layout.list.height == 0 {
         return;
     }
-    if days.is_empty() {
+    let total = lines.len();
+    let offset = (app.stats_scroll as usize).min(total.saturating_sub(1));
+    let end = (offset + layout.visible).min(total);
+    for (row, line) in lines[offset..end].iter().enumerate() {
         frame.render_widget(
-            Paragraph::new(Span::styled("暂无学习记录", Style::default().fg(theme.dim))),
+            Paragraph::new(line.clone()),
             Rect::new(
                 layout.list.x,
-                layout.list.y,
+                layout.list.y + row as u16,
                 layout.list.width,
-                layout.list.height.min(1),
+                1,
             ),
         );
-        return;
     }
-
-    let max_spend = days.iter().map(|(_, day)| day.spend).max().unwrap_or(0);
-    let today = insights::today();
-    let end = (layout.offset + layout.visible).min(days.len());
-    for (row, (date, day)) in days[layout.offset..end].iter().enumerate() {
-        let rect = Rect::new(
-            layout.list.x,
-            layout.list.y + row as u16,
-            layout.list.width,
-            1,
+    if total > layout.visible {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!(
+                    "↓ 还有 {} 行",
+                    total.saturating_sub(offset + layout.visible)
+                ),
+                Style::default().fg(theme.dim),
+            )),
+            Rect::new(
+                layout.list.x,
+                layout.list.bottom().saturating_sub(1),
+                layout.list.width,
+                1,
+            ),
         );
-        render_day(frame, rect, *date, day, max_spend, *date == today, theme);
-    }
-
-    if let Some(hint) = layout.hint {
-        let more = layout.offset + layout.visible < days.len();
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        if layout.offset > 0 {
-            spans.push(Span::styled("↑ 向上滚动  ", Style::default().fg(theme.dim)));
-        }
-        if more {
-            spans.push(Span::styled("↓ 继续滚动", Style::default().fg(theme.dim)));
-        } else if layout.offset > 0 {
-            spans.push(Span::styled("↓ 已到底部", Style::default().fg(theme.dim)));
-        }
-        frame.render_widget(Paragraph::new(Line::from(spans)), hint);
     }
 }
 
-fn render_day(
-    frame: &mut Frame,
-    rect: Rect,
+/// 下方内容区的全部行。
+fn body_lines(app: &App, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if app.stats_by_dict {
+        lines.extend(dict_lines(app, theme));
+        return lines;
+    }
+    lines.extend(calendar_lines(app, theme));
+    lines.push(Line::from(""));
+    lines.extend(day_detail_lines(app, theme));
+    lines.push(Line::from(""));
+
+    let days = insights::recent_days(&app.boot.base, RECENT_DAYS);
+    lines.push(Line::from(Span::styled(
+        format!("  最近 {RECENT_DAYS} 天（{} 天有记录）", days.len()),
+        Style::default().fg(theme.muted),
+    )));
+    if days.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  暂无学习记录",
+            Style::default().fg(theme.dim),
+        )));
+        return lines;
+    }
+    let max_spend = days.iter().map(|(_, day)| day.spend).max().unwrap_or(0);
+    let today = insights::today();
+    for (date, day) in days.iter() {
+        lines.push(day_line(
+            *date,
+            day,
+            max_spend,
+            *date == today,
+            width,
+            theme,
+        ));
+    }
+    lines
+}
+
+fn day_line(
     date: chrono::NaiveDate,
     day: &DayTotals,
     max_spend: i64,
     is_today: bool,
+    width: usize,
     theme: &Theme,
-) {
-    if rect.width < 28 || rect.height == 0 {
-        return;
+) -> Line<'static> {
+    if width < 28 {
+        return Line::from("");
     }
-    let width = rect.width as usize;
-    if is_today {
-        widgets::paint_rect(frame, rect, theme.selection);
-    }
-
     let weekday = format!(
         "周{}",
         insights::weekday_label(date.weekday().num_days_from_monday() as usize)
@@ -346,8 +540,5 @@ fn render_day(
         Style::default().fg(if day.wrong > 0 { theme.bad } else { theme.dim }),
     ));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)),
-        Rect::new(rect.x, rect.y, rect.width, 1),
-    );
+    Line::from(spans)
 }

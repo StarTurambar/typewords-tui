@@ -1,5 +1,7 @@
 //! 应用级 Action：键盘、鼠标、测试共用的唯一状态变更入口。
 
+use chrono::Datelike;
+
 use super::{App, ConfirmAction, ConfirmState, Screen};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +24,9 @@ pub enum Action {
     ActivateSetting(usize),
     // 统计
     StatsScroll(i32),
+    StatsToggleView,
+    StatsDayMove(i32),
+    StatsMonthMove(i32),
     // 收藏到指定词典
     OpenCollectPicker,
     CollectMove(i32),
@@ -101,6 +106,9 @@ impl App {
                 }
             }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
+            Action::StatsToggleView => self.toggle_stats_view(),
+            Action::StatsDayMove(delta) => self.move_stats_day(delta),
+            Action::StatsMonthMove(delta) => self.move_stats_month(delta),
             Action::OpenCollectPicker => self.open_collect_picker(),
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
@@ -346,10 +354,52 @@ impl App {
     }
 
     fn scroll_stats(&mut self, delta: i32) {
-        let count = crate::ui::insights::recent_days(&self.boot.base, 14).len();
+        let count = crate::ui::stats::body_line_count(self);
         let max = count.saturating_sub(1) as i32;
         let next = (self.stats_scroll as i32 + delta).clamp(0, max.max(0));
         self.stats_scroll = next as u16;
+    }
+
+    /// 切换统计页的视图：日历 / 按词典。
+    fn toggle_stats_view(&mut self) {
+        self.stats_by_dict = !self.stats_by_dict;
+        self.stats_scroll = 0;
+    }
+
+    /// 移动日历选中的日期。
+    fn move_stats_day(&mut self, delta: i32) {
+        let Some(next) = self
+            .stats_day
+            .checked_add_signed(chrono::Duration::days(delta as i64))
+        else {
+            return;
+        };
+        self.stats_day = next;
+        self.stats_month = (next.year(), next.month());
+    }
+
+    /// 翻到上 / 下一个月。
+    fn move_stats_month(&mut self, delta: i32) {
+        let (year, month) = self.stats_month;
+        let total = year as i64 * 12 + (month as i64 - 1) + delta as i64;
+        let year = total.div_euclid(12) as i32;
+        let month = total.rem_euclid(12) as u32 + 1;
+        self.stats_month = (year, month);
+        // 选中的日期跟着落到新月份的同一天，越界则取该月最后一天
+        let day_number = self.stats_day.day();
+        let Some(first) = chrono::NaiveDate::from_ymd_opt(year, month, 1) else {
+            return;
+        };
+        let next_month = if month == 12 {
+            chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
+        } else {
+            chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
+        };
+        let last_day = next_month
+            .and_then(|d| d.pred_opt())
+            .map(|d| d.day())
+            .unwrap_or(day_number);
+        self.stats_day = first.with_day(day_number.min(last_day)).unwrap_or(first);
     }
 
     pub fn activate_dict(&mut self, index: usize) {

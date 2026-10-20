@@ -64,6 +64,57 @@ pub fn week_days_for_dict(dict: &Dict, today: NaiveDate) -> [Option<DayTotals>; 
     week
 }
 
+/// 一本词典的累计数据。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DictTotals {
+    pub spend: i64,
+    pub total: usize,
+    pub new_words: usize,
+    pub review: usize,
+    pub wrong: usize,
+    pub days: usize,
+}
+
+/// 每本词典的累计数据（按 `book_list` 顺序，含系统词典）。
+pub fn dict_totals(base: &BaseState) -> Vec<(String, DictTotals)> {
+    base.word
+        .book_list
+        .iter()
+        .map(|dict| {
+            let map = daily_totals_for_dict(dict);
+            let mut totals = DictTotals {
+                days: map.len(),
+                ..DictTotals::default()
+            };
+            for day in map.values() {
+                totals.spend += day.spend;
+                totals.total += day.total;
+                totals.new_words += day.new_words;
+                totals.review += day.review;
+                totals.wrong += day.wrong;
+            }
+            (dict.name.clone(), totals)
+        })
+        .collect()
+}
+
+/// 某一天里各词典的学习记录（只列出当天有记录的词典）。
+pub fn day_breakdown(base: &BaseState, day: NaiveDate) -> Vec<(String, DayTotals)> {
+    base.word
+        .book_list
+        .iter()
+        .filter_map(|dict| {
+            let map = daily_totals_for_dict(dict);
+            map.get(&day).map(|totals| (dict.name.clone(), *totals))
+        })
+        .collect()
+}
+
+/// 有学习记录的日期集合。
+pub fn studied_days(base: &BaseState) -> std::collections::BTreeSet<NaiveDate> {
+    daily_totals(base).into_keys().collect()
+}
+
 /// 最近有记录的日子，按时间倒序。
 pub fn recent_days(base: &BaseState, count: usize) -> Vec<(NaiveDate, DayTotals)> {
     let mut days: Vec<(NaiveDate, DayTotals)> = daily_totals(base).into_iter().collect();

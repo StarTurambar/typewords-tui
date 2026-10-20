@@ -173,6 +173,11 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Down | KeyCode::Char('j') => Some(Action::StatsScroll(1)),
             KeyCode::PageUp => Some(Action::StatsScroll(-5)),
             KeyCode::PageDown => Some(Action::StatsScroll(5)),
+            KeyCode::Left => Some(Action::StatsDayMove(-1)),
+            KeyCode::Right => Some(Action::StatsDayMove(1)),
+            KeyCode::Char(',') => Some(Action::StatsMonthMove(-1)),
+            KeyCode::Char('.') => Some(Action::StatsMonthMove(1)),
+            KeyCode::Char('v') => Some(Action::StatsToggleView),
             _ => None,
         },
         Screen::Settings => match key.code {
