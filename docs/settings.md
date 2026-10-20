@@ -153,10 +153,10 @@
 | `request_retention` | `0.9` | 生效（有 UI） | 见上节 |
 | `maximum_interval` | `36500.0` | 生效 | 复习间隔上限（天），实际按 `clamp(1, maximum_interval)` 截断；小于 1 时回退 36500 |
 | `w` | 21 个默认权重 | 生效 | 必须恰好 21 个有限数，否则整组回退默认权重 |
-| `enable_fuzz` | `false` | 生效（近似） | 对 ≥ 2.5 天的复习间隔做 ±5% 随机抖动（每次结算用当前随机源，`--seed` 可复现）；不逐项复刻 ts-fsrs 的离散规则 |
-| `enable_short_term` | `true` | 不生效 | 学习步进写死，不读取该字段 |
-| `learning_steps` | `["1m", "10m"]` | 不生效 | 同上 |
-| `relearning_steps` | `["10m"]` | 不生效 | 同上 |
+| `enable_fuzz` | `false` | 生效 | 对 ≥ 2.5 天的复习间隔按上游的分段区间抖动（2.5–7 天 ±15%、7–20 天 ±10%、≥20 天 ±5%）；随机源与上游一致，同一张卡结果可复现 |
+| `enable_short_term` | `true` | 生效 | 关闭后改用长期调度器（不经过学习步进，直接按间隔毕业） |
+| `learning_steps` | `["1m", "10m"]` | 生效 | 新卡与学习态的学习步进；单位支持 `m` / `h` / `d` |
+| `relearning_steps` | `["10m"]` | 生效 | 复习卡评 Again 后的重学步进 |
 
 默认权重（`DEFAULT_FSRS_W`）：
 
@@ -179,20 +179,20 @@
 - 字段名拼错不会被发现：未知字段会进入 `extra` 原样保存，但不会生效。
 - `w` 长度不是 21 或含非有限数时**静默**回退默认权重，不会提示。
 - `maximum_interval` 设得过大（如默认 36500 天）等于不再截断；设得过小会让所有词很快反复到期。
-- `enable_short_term`、`learning_steps`、`relearning_steps` 写了也不会改变行为（学习步进固定 1 / 6 / 10 分钟）。
+- `learning_steps` / `relearning_steps` 的单位写错（如 `"10x"`）会被忽略，该动作退回「无步进」即直接毕业；`enable_short_term` 关闭会跳过学习步进，学习节奏明显变快。
 - `version` 改成大于 23 的值会导致下次启动回退默认值，并且本次运行不会写回（只读保护）。
 
 ## 有 UI 的设置 vs 仅透传字段
 
 | 类别 | 字段 |
 | --- | --- |
-| 有 UI 且生效（21 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`fsrs_easy_limit`、`fsrs_good_limit`、`fsrs_hard_limit`、`fsrsParameters.request_retention` |
+| 有 UI 且生效（22 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`shortcut_key_map`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`fsrs_easy_limit`、`fsrs_good_limit`、`fsrs_hard_limit`、`fsrsParameters.request_retention` |
 | 有 UI、条件生效 | `repeat_custom_count`（仅 `repeat_count == 100` 时参与计算） |
-| 无 UI、但内部会读取 | `fsrsParameters.maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz` |
-| 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch`、`fsrsParameters.enable_short_term`、`learning_steps`、`relearning_steps` |
+| 无 UI、但内部会读取 | `fsrsParameters.maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`、`fsrsParameters.enable_short_term`、`fsrsParameters.learning_steps`、`fsrsParameters.relearning_steps` |
+| 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段都原样保存在这里，保存时写回 |
 
-`SettingState` 共建模 28 个具名字段 + `extra`，设置页只覆盖其中 22 个配置项（外加 2 个动作项：清空练习进度、清除所有数据）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
+`SettingState` 共建模 29 个具名字段 + `extra`，设置页只覆盖其中 23 个配置项（外加 3 个动作项：快捷键、清空练习进度、清除所有数据）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
 
 ## 未生效 / 半生效设置项清单
 
@@ -201,7 +201,6 @@
 | `show_etymology_and_rel_words` 显示词源/相关词 | 半生效 | 还受练习页 `Ctrl+E` 总开关（`app.show_meta`）控制；重启后 `Ctrl+E` 状态恢复为显示 |
 | `repeat_custom_count` | 条件生效 | 只有 `repeat_count == 100` 时才参与计算；默认文件里为 `null`，UI 显示 1 |
 | `word_practice_type`、`dictation`、`translate`、`ignore_symbol` | 不生效（透传） | Web 端的同名设置字段，TUI 不读取；键入方式由流程模板决定，显隐由 `Ctrl+I` / `Ctrl+Z` 在会话内控制 |
-| `fsrsParameters.enable_short_term`、`learning_steps`、`relearning_steps` | 不生效（透传） | 学习步进固定 1 / 6 / 10 分钟；`Scheduler` 读取 `request_retention`、`maximum_interval`、`w`、`enable_fuzz` |
 | `always_show_note` | 不生效（透传） | 笔记只有存储（`noteData`），TUI 没有展示或编辑 UI |
 | `_ignoreWatch` | 不生效 | 与 Web 存档同名的兼容字段，不参与逻辑 |
 

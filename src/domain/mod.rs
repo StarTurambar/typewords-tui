@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod constants;
 pub mod flow;
+pub mod fsrs;
 pub mod i18n;
 pub mod question;
 pub mod rng;

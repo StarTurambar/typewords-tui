@@ -578,7 +578,6 @@ impl App {
             &self.boot.settings,
             &mut self.stat,
             now,
-            &mut self.rng,
         );
         let total = self.stat.total;
         let wrong = self.stat.wrong;

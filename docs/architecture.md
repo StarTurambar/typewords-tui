@@ -18,7 +18,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 | --- | --- | --- |
 | Rust（edition 2024，MSRV 1.90） | — | 程序与测试语言；release 配置 `opt-level = 3`、`lto = "thin"`、`strip = true` |
 | [ratatui](https://ratatui.rs/) | 0.30.2 | 终端 UI：布局、组件、缓冲渲染；事件层复用其转出的 `ratatui::crossterm` |
-| [fsrs](https://crates.io/crates/fsrs) | 6.6.2 | FSRS-6 间隔重复算法（同上游 ts-fsrs 的 21 个默认权重） |
+| （无） | — | FSRS-6 间隔重复算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs 5.4.1），不引入外部 crate |
 | serde / serde_json | 1 | 存档、词库、主题 JSON 的序列化；未知字段保留 |
 | chrono | 0.4 | 本地时间、自然日、跨天时间片（带 serde） |
 | rand | 0.10 | 可注入种子的随机源（`StdRng`）与洗牌 |
@@ -285,7 +285,7 @@ Catalog(assets) ───────┘                                      �
 | 设置项只建模一部分 | `SettingState` 建模 28 个具名字段，设置页覆盖其中 22 个配置项 + 2 个动作（24 行）；其余上游字段原样透传保存。`enable_short_term` / `learning_steps` / `relearning_steps` 仍不生效（学习步进固定 1/6/10 分钟），详见 [settings.md](settings.md)。 |
 | 键位不可配置 | 固定键位；`Ctrl+P` 从上游的发音改为暂停计时。 |
 | 练习缓存只支持 v2 | v1 缓存直接丢弃（上游有 v1→v2 升级）。 |
-| FSRS 间隔为近似对齐 | 评级一致，但学习步进固定 1/6/10 分钟、复习间隔由 fsrs crate 计算，具体天数可能与 Web 不同；`enable_fuzz` 为 ±5% 近似实现。 |
+| （已消除） | FSRS 已改为逐条移植上游 ts-fsrs 5.4.1，同一张卡在两端得到相同的下次复习时间；`tests/fsrs_parity.rs` 用上游生成的黄金样本锁定。 |
 | 无运行日志 | 程序不写日志文件；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤（panic 回溯走 stderr）。 |
 | 无存档迁移框架 | 旧版本缺失字段靠 `#[serde(default)]` 兼容；不提供像 Web 那样的逐版本升级代码（当前版本号 4 / 23 / 2）。 |
 | 未覆盖 macOS CI | 代码未用平台特定 API，但未在 macOS 上持续验证。 |

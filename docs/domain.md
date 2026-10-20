@@ -24,7 +24,8 @@
 | `src/domain/constants.rs` | 与 Web 对齐的常量与默认值 | `GROUP_SIZE`、`CURRENT_FLOW_VERSION`、系统词典 id、`SIMPLE_WORDS`、`DEFAULT_FSRS_W`、三个存档版本 |
 | `src/domain/catalog.rs` | 词库目录、词条文件、导入 | `Catalog`、`DictResource`、`import_dict` |
 | `src/domain/study_task.rs` | 今日任务生成 | `create_study_task`、`create_shuffle_task`、`get_current_study_word`、`StudyTaskResult` |
-| `src/domain/scheduler.rs` | FSRS 评级与间隔 | `Scheduler`、`Scheduler::grade_by_wrong_times`、`next_card` |
+| `src/domain/fsrs.rs` | FSRS-6 算法（ts-fsrs 移植） | `Fsrs`、`Fsrs::next_card`、`clip_parameters`、`step_to_minutes` |
+| `src/domain/scheduler.rs` | FSRS 评级与到期判定 | `Scheduler`、`Scheduler::grade_by_wrong_times`、`next_card`、`is_due_today` |
 | `src/domain/timer.rs` | 计时片段、空闲暂停、跨天拆分 | `tick`、`pause`、`resume`、`normalize_practice_timer`、`format_duration` |
 | `src/domain/typing.rs` | 键入状态机 | `TypingEngine`、`TypingSettings`、`TypingEvent`、`KeyInput` |
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
@@ -179,7 +180,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `learning_steps` | `["1m", "10m"]` |
 | `relearning_steps` | `["10m"]` |
 
-TUI 的调度器消费 `w`、`request_retention`、`maximum_interval` 与 `enable_fuzz`；`enable_short_term`、`learning_steps`、`relearning_steps` 会被读入存档但不影响计算（学习步进固定为 1/6/10 分钟，见第 6 节）。
+调度器消费全部七个参数：`w`、`request_retention`、`maximum_interval`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps` 都已生效（见第 6 节）。
 
 ## 4. 词库目录（catalog.rs）
 
@@ -251,9 +252,14 @@ TUI 的调度器消费 `w`、`request_retention`、`maximum_interval` 与 `enabl
 | 无到期复习且随机填充开启、`review_ratio = 0` | 填充数量为 0，复习仍为空 |
 | 复习候选不足 | 只返回实际候选数，不补齐 |
 
-## 6. FSRS 调度（scheduler.rs）
+## 6. FSRS 调度（fsrs.rs + scheduler.rs）
 
-`Scheduler::new(settings)` 从设置构造：权重取 `fsrs_parameters.effective_w()`（长度必须为 21 且全部有限，否则回退 `DEFAULT_FSRS_W`），留存率取 `effective_retention()`（`(0,1)` 之外回退 0.9），最大间隔取 `effective_maximum_interval()`（小于 1 回退 36500），三个评级阈值直接读取设置。
+调度分两层：
+
+- `src/domain/fsrs.rs` 的 `Fsrs` 是**算法本体**：逐条移植上游 ts-fsrs 5.4.1 的算法层、状态机、学习步进策略、fuzz 区间与随机源，因此「同一张卡」在 TUI 与 Web 上算出的间隔完全一致。
+- `src/domain/scheduler.rs` 的 `Scheduler` 是**应用层包装**：只保留两块与用户设置直接相关的逻辑——按错误次数映射评级、按自然日判断到期。
+
+`Scheduler::new(settings)` 用 `fsrs_parameters` 构造 `Fsrs`；三个评级阈值（`fsrs_easy_limit` / `fsrs_good_limit` / `fsrs_hard_limit`）直接读取设置。
 
 ### 6.1 错误次数 → 评级
 
@@ -265,46 +271,76 @@ TUI 的调度器消费 `w`、`request_retention`、`maximum_interval` 与 `enabl
 | `<= fsrs_hard_limit` | Hard (2) | 4–6 次 |
 | 其余 | Again (1) | 7 次及以上 |
 
-阈值是**上界**语义且按 Easy → Good → Hard 顺序判断；默认值 0/3/6 与 Web 一致。若用户手工把阈值写成倒序，先命中的分支生效。结算时若 `rating_map` 中存在该词的显式评级（自测“认识”或选择题答对写入 Good），优先于错误次数。
+阈值是**上界**语义且按 Easy → Good → Hard 顺序判断；默认值 0/3/6 与 Web 一致。若用户手工把阈值写成倒序，先命中的分支生效。结算时若 `rating_map` 中存在该词的显式评级（自测「认识」或选择题答对写入 Good），优先于错误次数。
 
-### 6.2 状态迁移与间隔
+### 6.2 状态机
 
-`next_card(previous, rating, now)` 按 `previous.state`（缺省 New）分派：
+`Fsrs::next_card(previous, rating, now)` 是唯一入口，`previous` 为 `None` 表示该词的第一张卡（等价上游的 `createEmptyCard`）。流程与上游 `AbstractScheduler` + `BasicScheduler` 一致：
 
-| 当前状态 | 评级 | 结果 |
-| --- | --- | --- |
-| New | Easy | 毕业到 Review：间隔由 `fsrs` crate 计算，clamp 到 `[1, maximum_interval]` 后四舍五入 |
-| New | Good / Hard / Again | Learning：due = now + 10 / 6 / 1 分钟；`state = Learning`，`learning_steps = 1` |
-| Learning | Easy / Good | 毕业到 Review（同上） |
-| Learning | Hard / Again | Learning：due = now + 6 / 1 分钟，`learning_steps += 1` |
-| Review | Easy / Good / Hard | 毕业到 Review：FSRS 间隔，clamp 后取整 |
-| Review | Again | `lapses += 1`；Relearning：due = now + 10 分钟，`scheduled_days = 10/1440` |
-| Relearning | Easy / Good | 毕业到 Review |
-| Relearning | Hard / Again | Relearning：due = now + 6 / 1 分钟 |
+1. **初始化**：`elapsed_days` = `last_review` 到 `now` 的 **UTC 日期差**（上游 `dateDiffInDays` 用 `Date.UTC`）；`last_review = now`；`reps += 1`。
+2. **按状态分派**：`New` → 走学习步进；`Learning` / `Relearning` → 走学习步进；`Review` → 四个评级同时算出，Again 转入 Relearning。
+3. **学习步进**（`learning_steps` / `relearning_steps`，默认 `["1m","10m"]` / `["10m"]`）：
+   - `Again` → 首步分钟数，步号归 0；
+   - `Hard` → `steps.len() == 1 ? round(首步 × 1.5) : round((首步 + 次步) / 2)`，步号不变；
+   - `Good` → 仅当存在下一步时给次步分钟数，步号 +1；
+   - `Easy` → 无步进项，直接毕业。
+4. **毕业判定**：`0 < 分钟 < 1440` 留在学习态（`scheduled_days = 0`）；`分钟 >= 1440` 进 Review（`scheduled_days = floor(分钟 / 1440)`）；`分钟 == 0` 进 Review，间隔由 FSRS 公式算出。
 
-学习步进固定为 1/6/10 分钟（`STEP_AGAIN_MINUTES`、`STEP_HARD_MINUTES`、`STEP_GOOD_MINUTES`），不读取设置中的 `learning_steps`/`relearning_steps`。毕业间隔来自 `fsrs::FSRS::next_states(memory, retention, elapsed_days)`：只有 `stability > 0 && difficulty > 0` 的卡片才构造 `MemoryState`；crate 报错时回退为 `(stability.max(1), difficulty.max(1), 1 天)`。
+`enable_short_term` 决定调度器：开启（默认）用 BasicScheduler（走学习步进），关闭用 LongTermScheduler（直接按间隔毕业，不走学习步进）。
 
-`enable_fuzz` 开启时（默认关闭），毕业间隔在 clamp 与取整前先乘以 `[0.95, 1.05]` 的随机系数；仅对 ≥ 2.5 天的间隔生效，短间隔与学习步进不受影响。随机数来自结算时传入的 `Rng`（应用层为 `--seed` 控制的那一个），因此结果可复现；该实现是 ts-fsrs fuzz 的近似，不逐项复刻其离散随机规则。
+### 6.3 FSRS-6 公式
 
-### 6.3 Card 字段更新
+对应上游 `algorithm.ts`，全部按同一套权重 `w[0..20]` 计算：
+
+| 量 | 公式 |
+| --- | --- |
+| 衰减 | `decay = -w[20]`，`factor = round(e^(ln0.9/decay) - 1, 8)` |
+| 记忆保持率 | `R(t, S) = round((1 + factor·t/S)^decay, 8)` |
+| 初始稳定性 | `S₀(G) = max(w[G-1], 0.1)` |
+| 初始难度 | `D₀(G) = round(w[4] - e^((G-1)·w[5]) + 1, 8)` |
+| 难度推进 | `Δd = -w[6]·(G-3)`；`next = D + Δd·(10-D)/9`；`D' = clamp(w[7]·D₀(4) + (1-w[7])·next, 1, 10)` |
+| 记住时稳定性 | `S' = clamp(S·(1 + e^{w[8]}·(11-D)·S^{-w[9]}·(e^{(1-R)w[10]}-1)·hard·easy), 0.001, 36500)` |
+| 忘记时稳定性 | `S'_f = clamp(w[11]·D^{-w[12]}·((S+1)^{w[13]}-1)·e^{(1-R)w[14]}, 0.001, 36500)` |
+| 短期稳定性 | `S' = S·sinc`，`sinc = S^{-w[19]}·e^{w[17]·(G-3+w[18])}`，`G >= Hard` 时 `sinc = max(sinc, 1)` |
+| 间隔 | `I = clamp(round(S·interval_modifier), 1, maximum_interval)`，再叠加 fuzz |
+
+`interval_modifier = (request_retention^(1/decay) - 1) / factor`。参数按上游 `CLAMP_PARAMETERS` 的 21 段区间夹取；`relearning_steps` 超过 1 步时会额外收紧 `w[17]`/`w[18]` 的上限。
+
+### 6.4 fuzz
+
+`enable_fuzz` 开启时（默认关闭），间隔按上游 `get_fuzz_range` 的分段区间抖动：
+
+| 间隔区间 | 抖动幅度 |
+| --- | --- |
+| 2.5 – 7 天 | ±15% |
+| 7 – 20 天 | ±10% |
+| ≥ 20 天 | ±5% |
+
+`delta = 1 + Σ factor·max(min(ivl, end) - start, 0)`；`min_ivl = max(2, round(ivl - delta))`，`max_ivl = min(round(ivl + delta), maximum_interval)`；间隔大于已过天数时 `min_ivl` 至少为「已过天数 + 1」。间隔小于 2.5 天不抖动。
+
+随机源是 Alea PRNG（移植自 ts-fsrs 的 `alea.ts`），种子取自卡片状态 `"{时间戳}_{reps}_{难度×稳定性}"`，因此**同一次复习里四个评级得到同一个随机因子**，且同一张卡的结果可复现。
+
+### 6.5 Card 字段更新
 
 | 字段 | 更新规则 |
 | --- | --- |
 | `due` | 学习/重学为 `now + 分钟`；毕业为 `now + interval 天` |
-| `stability` / `difficulty` | 学习阶段沿用上一张卡（新卡为 0），毕业时取 `fsrs` 计算结果 |
-| `elapsed_days` | 由 `last_review` 到 `now` 的整天数（`num_days().max(0)`，按 24 小时周期取整）；无 `last_review` 为 0 |
-| `scheduled_days` | 复习为间隔天数；学习为分钟数 / 1440；Review+Again 固定 `10/1440` |
-| `learning_steps` | 每次进入学习/重学 +1；毕业清零 |
+| `stability` / `difficulty` | 由 FSRS-6 公式推进（学习阶段也照常计算，只是步进优先于间隔） |
+| `elapsed_days` | `last_review` 到 `now` 的 **UTC 日期差**；无 `last_review` 为 0 |
+| `scheduled_days` | 复习为间隔天数；学习阶段为 0（分钟 >= 1440 时为整天数） |
+| `learning_steps` | 按学习步进策略推进；毕业清零 |
 | `reps` | 上一张卡 `reps + 1` |
 | `lapses` | 仅在 Review 状态评 Again 时 +1 |
-| `state` | 按上表切换到 Learning/Review/Relearning |
+| `state` | New/Learning/Review/Relearning 之间按 6.2 切换 |
 | `last_review` | 设为 `now` |
 
 `is_due_today(card, today)` 按 `Local` 自然日比较，与今日任务筛选规则相同。
 
-### 6.4 与 Web 的差异（概述）
+### 6.6 与 Web 的一致性
 
-评级映射、到期按自然日筛选、`fsrs_data` 的键与 Card 序列化格式与 Web 一致；间隔改用 Rust `fsrs` crate（FSRS-6，同一组 21 个默认权重）计算，并且学习步进固定。因此在“哪些词今天到期”上基本一致，但同一张卡在 TUI 与 Web 上算出的间隔天数与重学到达时间不保证相同。逐项对比与补齐建议见 [与上游 TypeWords 的差异](upstream-parity.md)。
+评级映射、到期按自然日筛选、`fsrs_data` 的键与 Card 序列化格式、FSRS-6 的公式、学习步进、fuzz 区间与随机种子**全部与上游一致**；同一张卡在两端得到相同的下次复习时间。
+
+一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 在上游仓库里用 ts-fsrs 5.4.1 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度六类路径，共 21 步逐步逐字段比对。重新生成样本需要在上游执行 `pnpm install`，命令见 [开发指南 · 词库同步与上游对齐](development.md)。
 
 ## 7. 计时（timer.rs）
 

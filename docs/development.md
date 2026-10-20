@@ -152,6 +152,19 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 - 用户侧导入词库走 `tw import-dict`（写入用户数据目录），不要把用户数据提交进仓库。
 - 许可证：词库数据来自上游 TypeWords，遵循 GPL-3.0，与代码一起分发。
 
+### 7.1 重新生成 FSRS 黄金样本
+
+`tests/fixtures/fsrs_golden.json` 是 `tests/fsrs_parity.rs` 的比对基准，由上游 ts-fsrs 生成。上游升级或改动 FSRS 行为后需要重新生成：
+
+```bash
+# 上游仓库先装好依赖（在 ../TypeWords 或 TYPEWORDS_UPSTREAM 指向的目录里）
+pnpm install
+# 回到本仓库
+node tools/fsrs_golden.mjs > tests/fixtures/fsrs_golden.json
+```
+
+脚本只读取上游的 `node_modules/ts-fsrs`，不修改上游仓库；上游目录可用 `TYPEWORDS_UPSTREAM` 环境变量指定。生成后必须让 `cargo test --locked --test fsrs_parity` 通过，否则说明 FSRS 实现与上游产生了偏差。
+
 ## 8. CI 与发布
 
 ### 8.1 持续集成（`.github/workflows/ci.yml`）

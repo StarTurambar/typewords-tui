@@ -12,7 +12,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 上游 TypeWords 是 Nuxt 4 + Vue 3 + Pinia + UnoCSS + vue-i18n 的 Web 应用，`app/` 下共 15 个页面、208 个文件、约 3.1 万行；同一份前端产物装进 Tauri v2 壳即为 Windows 桌面端（`package.json` 的 `desktop:*` 脚本、`docs/DESKTOP.md`）。数据存在浏览器 IndexedDB（`idb-keyval`），练习调度用 `ts-fsrs`，声音、在线查词、翻译、云同步都依赖网络能力。
 
-本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层 + `fsrs` crate，`src/` 下 43 个文件、约 1.2 万行；界面为 6 个屏幕（主页 / 练习 / 词库 / 统计 / 设置 / 帮助）加 3 类弹层（结算 / 输入 / 确认），数据是本地 JSON，无网络、无音频、无 WebView。
+本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 44 个文件、约 1.4 万行；界面为 7 个屏幕（主页 / 练习 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 3 类弹层（结算 / 输入 / 确认），数据是本地 JSON，无网络、无音频、无 WebView。
 
 ### 1.2 对照基线记录
 
@@ -103,8 +103,8 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 练习 | 跳阶段 / 上一词 / 下一词 / 跳过 | `usePracticeWordNavigator` + 快捷键 | `domain/flow/navigator.rs` + 键位 | 已对齐 | 键位有差异，语义一致（见 4.2） |
 | 练习 | 自测选择题 | `components/word/WordIdentifyPanel.vue`、`utils/word-test.ts` | `src/domain/question.rs` | 已对齐 | 4 选 1、相似度排序、随机扰动 |
 | 调度 | 评级阈值 | `core/hooks/fsrs.ts` 的 `getGradeByWrongTimes` | `src/domain/scheduler.rs` | 已对齐 | 默认 0 / 3 / 6 次错误分档 |
-| 调度 | 学习步进 | ts-fsrs 的 `learning_steps` / `relearning_steps` | 固定 1 / 6 / 10 分钟 | 行为不同 | 详见 4.1 |
-| 调度 | 复习间隔 | ts-fsrs（FSRS-6，21 权重） | `fsrs` crate（FSRS-6） | 行为不同 | 默认权重相同，具体天数会有差异 |
+| 调度 | 学习步进 | ts-fsrs 的 `learning_steps` / `relearning_steps` | 读设置，同上游 | 已对齐 | 详见 4.1 |
+| 调度 | 复习间隔 | ts-fsrs（FSRS-6，21 权重） | `src/domain/fsrs.rs` 逐条移植 ts-fsrs | 已对齐 | 同一张卡的下次复习时间相同；黄金样本见 `tests/fsrs_parity.rs` |
 | 调度 | 到期复习筛选 | `core/hooks/dict.ts` 的 `getCurrentStudyWord` | `src/domain/study_task.rs` | 部分 | 都按本地自然日；上游会顺手删除已掌握词的 FSRS 记录，TUI 只忽略不删 |
 | 调度 | 高级 FSRS 参数 | `components/setting/FsrsSetting.vue` | 仅留存率有 UI | 部分 | `maximum_interval`/`w`/`enable_fuzz` 改文件后生效但无 UI；fuzz 为 ±5% 近似实现（见 4.3） |
 | 调度 | 无到期时随机填充复习 | `study-task.ts` 的 `addRandomReviewWhenNoDue` | `src/domain/study_task.rs` | 已对齐 | 数量、排除集合、随机来源一致 |
@@ -138,26 +138,29 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 ### 4.1 FSRS
 
-评级映射、到期筛选、统计字段两端一致，差异集中在「间隔怎么算」：
+**已对齐。** 评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：同一张卡在 TUI 与 Web 上算出的下次复习时间相同。
 
-| 维度 | 上游（ts-fsrs） | TUI（`fsrs` crate） |
+| 维度 | 上游（ts-fsrs 5.4.1） | TUI（`src/domain/fsrs.rs`） |
 | --- | --- | --- |
 | 评级阈值 | `getGradeByWrongTimes`，默认 0/3/6 | 同左（`Scheduler::grade_by_wrong_times`） |
-| 新词 Again | 进入学习步骤 1（1 分钟） | 1 分钟后到期 |
-| 新词 Hard | ts-fsrs 短期调度计算的间隔 | 固定 6 分钟 |
-| 新词 Good | 学习步骤 2（10 分钟） | 10 分钟后到期 |
-| 新词 Easy | 按 FSRS 计算后毕业 | 同左（`fsrs.next_states` + `maximum_interval` 截断） |
-| 学习卡 Good | 走完学习步骤后毕业 | 状态非 New 时毕业 |
-| 复习卡 Again | 进入重学步骤（默认 10 分钟） | 状态置 Relearning，10 分钟后到期 |
-| 复习卡 Hard/Good/Easy | FSRS 间隔（≥ 1 天） | 同左，取整后 clamp 到 `[1, maximum_interval]` |
-| `maximum_interval` | 生效 | 生效（默认 36500，越界回退默认） |
-| 21 个权重 `w` | 生效 | 生效（长度或数值非法时回退 21 个默认权重） |
-| `enable_fuzz` | 生效（ts-fsrs 离散 fuzz） | 生效（≥ 2.5 天间隔乘以 ±5% 随机系数，近似实现） |
-| `enable_short_term` | 生效 | 未使用（新词/学习卡总是走固定步进） |
+| 新词 Again | 进入学习步骤 1（1 分钟） | 同左 |
+| 新词 Hard | 学习步骤的中间值（默认 6 分钟） | 同左 |
+| 新词 Good | 学习步骤 2（10 分钟） | 同左 |
+| 新词 Easy | 按 FSRS 计算后毕业 | 同左 |
+| 学习步进 | `learning_steps` / `relearning_steps` 可配 | 同左（读设置） |
+| 复习卡 Again | 进入重学步骤（默认 10 分钟） | 同左 |
+| 复习卡 Hard/Good/Easy | FSRS 间隔（≥ 1 天，且 hard < good < easy） | 同左 |
+| `maximum_interval` | 生效 | 生效 |
+| 21 个权重 `w` | 生效 | 生效（按上游 `CLAMP_PARAMETERS` 夹取） |
+| `enable_fuzz` | 生效（分段区间 ±15% / ±10% / ±5%） | 同左（区间与随机源一致） |
+| `enable_short_term` | 生效（切换 Basic / LongTerm 调度器） | 同左 |
+| 随机种子 | 卡片状态派生（`{时间戳}_{reps}_{难度×稳定性}`） | 同左（移植上游 Alea PRNG） |
 | 到期判断 | `dayjs(due).isSameOrBefore(now, 'day')` | `due` 换算本地日期后 `<= today` |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 
-结论：TUI 能复现「今天哪些词到期」的大头，但跨端来回使用时具体到期日会漂移；学习卡在 TUI 里 `stability` / `difficulty` 可能写为 0，Web 端 ts-fsrs 如何解释这种卡片未实测，迁移前应先在临时目录验证。
+一致性由 `tests/fsrs_parity.rs` 锁定：比对样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 在上游仓库里用 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度六类路径。
+
+**仍存在的差异**：已掌握词在 TUI 里只被排除、不从 `fsrsData` 删除（上游会删），因此两端存档里的卡片集合可能不同——但卡片本身的调度结果一致。
 
 ### 4.2 键位
 

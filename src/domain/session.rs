@@ -1,5 +1,6 @@
 //! 单词练习会话控制器（对应 Web 的 usePracticeWordSession）。
 
+use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::flow::navigator::{NavState, Navigator, Notice};
@@ -652,7 +653,6 @@ impl PracticeSession {
         settings: &SettingState,
         stat: &mut PracticeState,
         now: i64,
-        rng: &mut Rng,
     ) {
         stat.wrong = self.data.all_wrong_words.len();
         if self.mode != WordPracticeMode::Shuffle {
@@ -682,7 +682,8 @@ impl PracticeSession {
                 .copied()
                 .unwrap_or_else(|| scheduler.grade_by_wrong_times(Some(wrong_times)));
             let previous = base.fsrs_data.get(&word).cloned();
-            let card = scheduler.next_card(previous.as_ref(), rating, chrono::Utc::now(), rng);
+            let reviewed_at = DateTime::from_timestamp_millis(now).unwrap_or_else(Utc::now);
+            let card = scheduler.next_card(previous.as_ref(), rating, reviewed_at);
             base.fsrs_data.insert(word, card);
         }
     }
