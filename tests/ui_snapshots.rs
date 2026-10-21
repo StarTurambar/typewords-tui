@@ -292,3 +292,79 @@ fn help_scrolls_at_min_size() {
     assert!(scrolled.contains("导航/查看"));
     assert!(scrolled.contains("↓") || scrolled.contains("↑"));
 }
+
+/// 词条编辑弹层打开时，鼠标点击不能穿透到下层页面。
+///
+/// `hit.rs` 三处弹层判定都漏了 `word_edit`，点击会落到词条列表和侧栏上，
+/// 把弹层的编辑对象与下层光标搅乱。
+#[test]
+fn the_word_edit_overlay_blocks_mouse_clicks() {
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+    assert_eq!(app.screen, app::Screen::Words);
+
+    app.open_word_edit(Some(0));
+    assert!(app.word_edit.is_some());
+
+    let area = Rect::new(0, 0, 120, 40);
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    assert!(
+        !targets
+            .iter()
+            .any(|target| matches!(target.action, Action::WordsMove(_))),
+        "弹层打开时不应有词条列表的命中目标"
+    );
+    assert!(
+        !targets
+            .iter()
+            .any(|target| matches!(target.action, Action::Navigate(_))),
+        "弹层打开时不应有侧栏导航的命中目标"
+    );
+}
+
+/// 模式选择弹层的命中区域必须落在它实际渲染的位置上。
+///
+/// 早期实现用整屏 `area` 的坐标构造命中矩形，与居中弹层的实际位置完全错位：
+/// 点真正显示模式名的那一行没反应，点屏幕左上角反而会误触发。
+#[test]
+fn mode_picker_targets_match_the_rendered_rows() {
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.open_mode_picker();
+    let area = Rect::new(0, 0, 120, 40);
+    let text = render_text(&app, 120, 40);
+    let lines: Vec<&str> = text.lines().collect();
+
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    assert!(!targets.is_empty(), "模式弹层应有命中目标");
+    for target in &targets {
+        assert!(
+            matches!(target.action, Action::ModeMove(_)),
+            "模式弹层的目标应是 ModeMove，实际 {:?}",
+            target.action
+        );
+        let row = lines.get(target.rect.y as usize).copied().unwrap_or("");
+        // 命中行必须真的显示着模式名，而不是弹层背景或空行。
+        assert!(
+            row.contains("学习")
+                || row.contains("自由练习")
+                || row.contains("自测")
+                || row.contains("默写")
+                || row.contains("听写")
+                || row.contains("随机复习")
+                || row.contains("复习")
+                || row.contains("单词测试")
+                || row.contains("自定义流程"),
+            "命中行 {} 应显示模式名: {row:?}",
+            target.rect.y
+        );
+    }
+}

@@ -102,6 +102,38 @@ pub struct GroupPickerLayout {
 }
 
 /// 练习模式选择弹层：列出全部练习模式。
+/// 模式选择弹层的布局。
+///
+/// 绘制与命中必须共用同一份布局——否则鼠标点到的位置和看到的模式名
+/// 会对不上。
+pub struct ModePickerLayout {
+    pub rect: Rect,
+    pub inner: Rect,
+    /// 每个模式一行，与 `PRACTICE_MODE_NAMES` 的顺序一致。
+    pub rows: Vec<Rect>,
+}
+
+pub fn mode_picker_layout(modes_len: usize, area: Rect) -> ModePickerLayout {
+    let rect = widgets::centered_rect(40, 4 + modes_len as u16, area);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height.saturating_sub(2),
+    );
+    // 顶部一行标题，底部一行提示，中间是模式列表
+    let list = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    let rows = (0..modes_len)
+        .map(|index| Rect::new(list.x, list.y + index as u16, list.width, 1))
+        .collect();
+    ModePickerLayout { rect, inner, rows }
+}
+
 pub fn render_mode_picker(
     frame: &mut Frame,
     area: Rect,
@@ -110,15 +142,10 @@ pub fn render_mode_picker(
     cursor: usize,
     current: crate::domain::types::WordPracticeMode,
 ) {
-    let rect = widgets::centered_rect(40, 4 + modes.len() as u16, area);
-    let inner = Rect::new(
-        rect.x + 2,
-        rect.y + 1,
-        rect.width.saturating_sub(4),
-        rect.height.saturating_sub(2),
-    );
-    clear_modal_backdrop(frame, area, rect, theme);
-    widgets::paint_rect(frame, rect, theme.panel);
+    let layout = mode_picker_layout(modes.len(), area);
+    let inner = layout.inner;
+    clear_modal_backdrop(frame, area, layout.rect, theme);
+    widgets::paint_rect(frame, layout.rect, theme.panel);
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -131,8 +158,10 @@ pub fn render_mode_picker(
     );
 
     for (offset, (mode, name)) in modes.iter().enumerate() {
-        let row_y = inner.y + 1 + offset as u16;
-        if row_y >= inner.bottom().saturating_sub(1) {
+        let Some(row) = layout.rows.get(offset).copied() else {
+            break;
+        };
+        if row.y >= inner.bottom().saturating_sub(1) {
             break;
         }
         let selected = offset == cursor;
@@ -154,10 +183,7 @@ pub fn render_mode_picker(
         if is_current {
             spans.push(Span::styled("  当前", Style::default().fg(theme.dim)));
         }
-        frame.render_widget(
-            Paragraph::new(Line::from(spans)),
-            Rect::new(inner.x, row_y, inner.width, 1),
-        );
+        frame.render_widget(Paragraph::new(Line::from(spans)), row);
     }
 
     let hint_y = inner.bottom().saturating_sub(1);
@@ -601,14 +627,13 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
     }
     if let Some(picker) = &app.mode_picker {
         let modes = crate::domain::constants::PRACTICE_MODE_NAMES;
-        return modes
+        let layout = mode_picker_layout(modes.len(), area);
+        return layout
+            .rows
             .iter()
             .enumerate()
-            .map(|(index, _)| {
-                Target::new(
-                    Rect::new(area.x, area.y + index as u16, area.width, 1),
-                    Action::ModeMove(index as i32 - picker.cursor as i32),
-                )
+            .map(|(index, rect)| {
+                Target::new(*rect, Action::ModeMove(index as i32 - picker.cursor as i32))
             })
             .collect();
     }

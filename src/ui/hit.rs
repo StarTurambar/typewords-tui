@@ -7,14 +7,22 @@ use crate::ui::shell::{self, Nav};
 
 pub use super::target::Target;
 
-pub fn targets(app: &App, area: Rect) -> Vec<Target> {
-    if app.confirm.is_some()
+/// 是否有弹层打开。
+///
+/// 必须与 `ui::mod` 的 `modal_open` 判定保持一致——漏掉一个弹层，鼠标点击
+/// 就会穿透到下层页面，把弹层里的编辑对象和下层光标搅乱。
+fn modal_open(app: &App) -> bool {
+    app.confirm.is_some()
         || app.edit.is_some()
         || app.summary.is_some()
+        || app.word_edit.is_some()
         || app.mode_picker.is_some()
         || app.group_picker.is_some()
         || app.collect_picker.is_some()
-    {
+}
+
+pub fn targets(app: &App, area: Rect) -> Vec<Target> {
+    if modal_open(app) {
         return super::overlays::targets(app, area);
     }
 
@@ -46,13 +54,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
 }
 
 pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action> {
-    if app.confirm.is_some()
-        || app.edit.is_some()
-        || app.summary.is_some()
-        || app.mode_picker.is_some()
-        || app.group_picker.is_some()
-        || app.collect_picker.is_some()
-    {
+    if modal_open(app) {
         return super::overlays::target_action(app, area, column, row);
     }
     targets(app, area)
@@ -62,13 +64,7 @@ pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action>
 }
 
 pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32) -> Option<Action> {
-    if app.confirm.is_some()
-        || app.edit.is_some()
-        || app.summary.is_some()
-        || app.mode_picker.is_some()
-        || app.group_picker.is_some()
-        || app.collect_picker.is_some()
-    {
+    if modal_open(app) {
         return None;
     }
     match app.screen {

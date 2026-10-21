@@ -171,8 +171,11 @@ fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
                     let selected = date == app.stats_day;
                     let is_today = date == today;
                     let text = format!("{day:>3}");
+                    // 选中日用高亮底色 + 前景色区分。早期实现把号码画成
+                    // `theme.bg` 前景，压在同为 `theme.bg` 的背景上，选中的
+                    // 日期完全看不见。
                     let color = if selected {
-                        theme.bg
+                        theme.fg
                     } else if is_today {
                         theme.accent
                     } else if has_record {
@@ -181,14 +184,22 @@ fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
                         theme.dim
                     };
                     let style = if selected {
-                        Style::default().fg(color).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(color)
+                            .bg(theme.selection)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(color)
                     };
                     spans.push(Span::styled(text, style));
+                    let mut dot_style =
+                        Style::default().fg(if has_record { theme.good } else { theme.dim });
+                    if selected {
+                        dot_style = dot_style.bg(theme.selection);
+                    }
                     spans.push(Span::styled(
                         if has_record { "● " } else { "  " },
-                        Style::default().fg(if has_record { theme.good } else { theme.dim }),
+                        dot_style,
                     ));
                 }
             }

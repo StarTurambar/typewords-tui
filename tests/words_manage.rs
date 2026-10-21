@@ -274,3 +274,80 @@ fn deleting_a_word_remaps_the_marked_indices() {
         "已掌握的应是原来勾选的两个词"
     );
 }
+
+/// 勾选行点一下是取消勾选，不是移动光标。
+///
+/// 早期实现只比较 `words_marked.first()`，第二个及之后的勾选行点不动，
+/// 而渲染层却把它们画成勾选态——显示与点击行为矛盾。
+#[test]
+fn clicking_any_marked_row_toggles_it_off() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+
+    // 勾选第 2 行和第 5 行
+    app.words_cursor = 1;
+    press(&mut app, KeyCode::Char(' '));
+    app.words_cursor = 4;
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.words_marked.len(), 2, "应勾选两个词条");
+
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    let toggle_rows: Vec<u16> = targets
+        .iter()
+        .filter(|target| target.action == typewords_tui::app::Action::WordsToggleMark)
+        .map(|target| target.rect.y)
+        .collect();
+    assert_eq!(
+        toggle_rows.len(),
+        2,
+        "两个勾选行都应是切换勾选，实际 {toggle_rows:?}"
+    );
+}
+
+/// 搜索过滤后，点击某一行要选中**那一行显示的词条**。
+///
+/// 早期实现用原始词表下标算位移，过滤后每行点击都会偏移。
+#[test]
+fn clicking_a_filtered_row_selects_that_row() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+
+    // 搜索 "1" 命中 word01 / word10 / word11——原始下标不连续，
+    // 才能暴露「用原始下标算位移」的错误。
+    press(&mut app, KeyCode::Char('/'));
+    type_str(&mut app, "1");
+    press(&mut app, KeyCode::Esc);
+    let indices = app.filtered_word_indices();
+    assert_eq!(indices.len(), 3, "应过滤出三行");
+    assert_ne!(indices[1], indices[0] + 1, "过滤后的原始下标应不连续");
+
+    // 点击第 2 个可见行（可见位置 1）
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    // 词条列表的目标按可见顺序排列，取第 2 个
+    let visible_row = 1usize;
+    let target = targets
+        .iter()
+        .filter(|target| matches!(target.action, typewords_tui::app::Action::WordsMove(_)))
+        .nth(visible_row)
+        .expect("应有移动目标的行");
+    let expected_index = indices[visible_row];
+    let expected_word = app.boot.base.study_dict().expect("当前词库").words[expected_index]
+        .word
+        .clone();
+
+    // 执行该动作
+    if let typewords_tui::app::Action::WordsMove(delta) = target.action {
+        app.apply_action(typewords_tui::app::Action::WordsMove(delta));
+    }
+    assert_eq!(app.words_cursor, visible_row, "光标应落在被点的行上");
+    let selected = app.boot.base.study_dict().expect("当前词库").words[indices[app.words_cursor]]
+        .word
+        .clone();
+    assert_eq!(selected, expected_word, "选中的应是那一行显示的词条");
+}

@@ -52,10 +52,13 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
         if y >= layout.list.bottom() {
             break;
         }
-        let action = if *index == app.words_marked.first().copied().unwrap_or(usize::MAX) {
+        // 勾选行点一下是取消勾选，其余行是移动光标。
+        // 早期实现只比较 `words_marked.first()`，第二个及之后的勾选行点不动。
+        let action = if app.words_marked.contains(index) {
             crate::app::Action::WordsToggleMark
         } else {
-            crate::app::Action::WordsMove(*index as i32 - app.words_cursor as i32)
+            // 光标在**过滤后**的位置，位移也要按过滤后的行号算。
+            crate::app::Action::WordsMove(row as i32 - app.words_cursor as i32)
         };
         result.push(Target::new(
             Rect::new(layout.list.x, y, layout.list.width, 1),
