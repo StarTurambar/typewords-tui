@@ -10,9 +10,9 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 ### 1.1 两端定位
 
-上游 TypeWords 是 Nuxt 4 + Vue 3 + Pinia + UnoCSS + vue-i18n 的 Web 应用，`app/` 下共 15 个页面、208 个文件、约 3.1 万行；同一份前端产物装进 Tauri v2 壳即为 Windows 桌面端（`package.json` 的 `desktop:*` 脚本、`docs/DESKTOP.md`）。数据存在浏览器 IndexedDB（`idb-keyval`），练习调度用 `ts-fsrs`，声音、在线查词、翻译、云同步都依赖网络能力。
+上游 TypeWords 是 Nuxt 4 + Vue 3 + Pinia + UnoCSS + vue-i18n 的 Web 应用，`app/` 下共 15 个页面、约 210 个文件、约 3.5 万行；同一份前端产物装进 Tauri v2 壳即为 Windows 桌面端（`package.json` 的 `desktop:*` 脚本、`docs/DESKTOP.md`）。数据存在浏览器 IndexedDB（`idb-keyval`），练习调度用 `ts-fsrs`，声音、在线查词、翻译、云同步都依赖网络能力。
 
-本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 44 个文件、约 1.4 万行；界面为 7 个屏幕（主页 / 练习 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 3 类弹层（结算 / 输入 / 确认），数据是本地 JSON，默认无网络、无 WebView。
+本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 58 个文件、约 2.1 万行；界面为 12 个屏幕（主页 / 练习 / 单词测试 / 词条管理 / 文章 / 文章跟打 / 流程 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 7 类弹层（结算 / 输入 / 确认 / 模式 / 跳组 / 收藏目标 / 词条编辑），数据是本地 JSON，默认不联网、无 WebView。
 
 ### 1.2 对照基线记录
 
