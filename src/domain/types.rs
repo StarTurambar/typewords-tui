@@ -415,27 +415,14 @@ impl Default for FsrsParameters {
 
 impl FsrsParameters {
     /// 有效权重（长度不为 21 时回退到默认权重）。
+    ///
+    /// 参数兜底由 [`crate::domain::fsrs::Fsrs::new`] 统一负责（留存率必须落在
+    /// `(0, 1)`、最大间隔至少一天），这里只保留权重长度的兜底。
     pub fn effective_w(&self) -> Vec<f32> {
         if self.w.len() == DEFAULT_FSRS_W.len() && self.w.iter().all(|value| value.is_finite()) {
             self.w.iter().map(|value| *value as f32).collect()
         } else {
             DEFAULT_FSRS_W.iter().map(|value| *value as f32).collect()
-        }
-    }
-
-    pub fn effective_retention(&self) -> f32 {
-        if self.request_retention > 0.0 && self.request_retention < 1.0 {
-            self.request_retention as f32
-        } else {
-            0.9
-        }
-    }
-
-    pub fn effective_maximum_interval(&self) -> f64 {
-        if self.maximum_interval >= 1.0 {
-            self.maximum_interval
-        } else {
-            36500.0
         }
     }
 }

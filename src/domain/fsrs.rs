@@ -257,17 +257,19 @@ pub fn default_w() -> [f64; 21] {
 /// 步长单位转分钟（对应上游 `ConvertStepUnitToMinutes`）。
 ///
 /// 支持 `m` / `h` / `d`；无法解析时返回 `None`。
+///
+/// 单位按**字符**切分而不是字节——步进串来自用户可编辑的 `setting.json`，
+/// `"1分"` 之类的非 ASCII 写法按字节切会落在 UTF-8 边界中间而 panic。
 pub fn step_to_minutes(step: &str) -> Option<f64> {
-    let split = step.len().checked_sub(1)?;
-    let (value, unit) = step.split_at(split);
-    let value: f64 = value.parse().ok()?;
+    let unit = step.chars().last()?;
+    let value: f64 = step[..step.len() - unit.len_utf8()].parse().ok()?;
     if value < 0.0 {
         return None;
     }
     match unit {
-        "m" => Some(value),
-        "h" => Some(value * 60.0),
-        "d" => Some(value * 1440.0),
+        'm' => Some(value),
+        'h' => Some(value * 60.0),
+        'd' => Some(value * 1440.0),
         _ => None,
     }
 }
@@ -388,12 +390,15 @@ impl Fsrs {
             parameters.enable_short_term,
         );
         let (decay, factor) = compute_decay_factor(&w);
-        let request_retention = if parameters.request_retention > 0.0 {
-            parameters.request_retention
-        } else {
-            0.9
-        };
-        let maximum_interval = if parameters.maximum_interval > 0.0 {
+        // 留存率必须落在 (0, 1)：取 1 时 interval_modifier 恒为 0，所有复习卡
+        // 都会被排到次日；最大间隔至少一天，否则卡片当天反复到期。
+        let request_retention =
+            if parameters.request_retention > 0.0 && parameters.request_retention < 1.0 {
+                parameters.request_retention
+            } else {
+                0.9
+            };
+        let maximum_interval = if parameters.maximum_interval >= 1.0 {
             parameters.maximum_interval
         } else {
             36500.0
@@ -652,8 +657,12 @@ impl Fsrs {
     }
 
     /// 初始稳定性 `S_0(G) = max(w[G-1], 0.1)`。
+    ///
+    /// `grade` 可能是 0（存档里的 `ratingMap` 是裸 `u8`，没有取值校验），
+    /// 此时按上游 `Rating.Again` 处理，避免 `grade - 1` 下溢。
     fn init_stability(&self, grade: Rating) -> f64 {
-        self.w[(grade as usize - 1).min(self.w.len() - 1)].max(0.1)
+        let index = (grade.max(1) as usize - 1).min(self.w.len() - 1);
+        self.w[index].max(0.1)
     }
 
     /// 初始难度 `D_0(G) = w[4] - e^((G-1)·w[5]) + 1`。
@@ -663,10 +672,17 @@ impl Fsrs {
     }
 
     /// 难度推进（含均值回归）。
+    ///
+    /// 对应上游的 `linear_damping` + `mean_reversion`，两处都要做 8 位
+    /// 四舍五入——少了它难度会带着 ~1e-9 的误差逐次累积，长复习史下会
+    /// 反馈到间隔计算，破坏「同一张卡两端结果相同」的不变量。
     fn next_difficulty(&self, difficulty: f64, grade: Rating) -> f64 {
         let delta = -self.w[6] * (grade as f64 - 3.0);
-        let next = difficulty + (delta * (10.0 - difficulty)) / 9.0;
-        let reverted = self.w[7] * self.init_difficulty(RATING_EASY) + (1.0 - self.w[7]) * next;
+        let next = difficulty + round_to((delta * (10.0 - difficulty)) / 9.0, 8);
+        let reverted = round_to(
+            self.w[7] * self.init_difficulty(RATING_EASY) + (1.0 - self.w[7]) * next,
+            8,
+        );
         clamp(reverted, 1.0, 10.0)
     }
 
@@ -991,6 +1007,60 @@ mod tests {
         assert_eq!(step_to_minutes("2h"), Some(120.0));
         assert_eq!(step_to_minutes("1d"), Some(1440.0));
         assert_eq!(step_to_minutes("x"), None);
+    }
+
+    /// 非 ASCII 的步进串不能按字节切分。
+    ///
+    /// 步进串来自用户可编辑的 `setting.json`，`"1分"` 按字节切会落在
+    /// UTF-8 边界中间直接 panic。
+    #[test]
+    fn non_ascii_step_units_do_not_panic() {
+        assert_eq!(step_to_minutes("1分"), None);
+        assert_eq!(step_to_minutes("10 m"), None);
+        assert_eq!(step_to_minutes(""), None);
+        // 单位是 ASCII、值含非 ASCII 时应正常解析
+        assert_eq!(step_to_minutes("10m"), Some(10.0));
+    }
+
+    /// 存档里的评级可能是 0，不能让它把下标算成 usize::MAX。
+    #[test]
+    fn zero_rating_does_not_underflow() {
+        let scheduler = fsrs();
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, 0, now);
+        assert!(card.stability.is_finite());
+        assert!(card.difficulty.is_finite());
+        assert!(card.difficulty >= 1.0 && card.difficulty <= 10.0);
+    }
+
+    /// 难度推进必须与上游的 `roundTo(_, 8)` 一致。
+    ///
+    /// 少了这两处四舍五入，难度会带着 ~1e-9 的误差逐次累积，长复习史下
+    /// 会反馈到间隔计算，破坏「同一张卡两端结果相同」的不变量。
+    #[test]
+    fn difficulty_matches_upstream_rounding() {
+        let scheduler = fsrs();
+        let mut difficulty = 7.0f64;
+        let mut expected = 7.0f64;
+        for _ in 0..16 {
+            let actual = scheduler.next_difficulty(difficulty, RATING_GOOD);
+            // 上游：linear_damping 与 mean_reversion 各做一次 roundTo(_, 8)
+            let init = {
+                let d = scheduler.w[4] - ((4.0f64 - 1.0) * scheduler.w[5]).exp() + 1.0;
+                round_to(d, 8)
+            };
+            let damping = round_to((0.0 * (10.0 - expected)) / 9.0, 8);
+            let reverted = round_to(
+                scheduler.w[7] * init + (1.0 - scheduler.w[7]) * (expected + damping),
+                8,
+            );
+            expected = clamp(reverted, 1.0, 10.0);
+            assert_eq!(
+                actual, expected,
+                "难度推进应与上游逐位相同（difficulty={difficulty}）"
+            );
+            difficulty = actual;
+        }
     }
 
     #[test]
