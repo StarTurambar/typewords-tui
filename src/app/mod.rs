@@ -29,7 +29,7 @@ use crate::domain::types::{
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
 use crate::paths::Paths;
-use crate::store::FileStore;
+use crate::store::{FileStore, LoadStatus};
 
 pub mod action;
 pub mod keymap;
@@ -516,8 +516,15 @@ impl App {
         };
 
         app.refresh_shortcuts();
-        if let Some(home) = app.paths.as_ref().map(|paths| paths.home.clone()) {
-            app.flow_store = crate::domain::flow::store::FlowStore::load(&home);
+        {
+            let loaded = app.store.load_flows();
+            app.flow_store = loaded.value;
+            if let LoadStatus::Corrupt(reason) = loaded.status {
+                app.toast(
+                    NoticeLevel::Warning,
+                    format!("流程存档已损坏，已隔离并恢复默认值: {reason}"),
+                );
+            }
         }
         for notice in notices {
             app.toast(NoticeLevel::Warning, notice);
@@ -1745,7 +1752,7 @@ impl App {
                 }
                 _ => crate::domain::flow::WordAdvance::WordLoop {
                     group_size: crate::domain::constants::GROUP_SIZE,
-                    sub_steps: vec![PracticeStepTemplateId::Spell],
+                    sub_steps: vec![PracticeStepTemplateId::Spell.into()],
                 },
             };
         }
@@ -1763,10 +1770,7 @@ impl App {
 
     /// 写回流程存档。
     fn save_flow_store(&mut self) {
-        let Some(home) = self.paths.as_ref().map(|paths| paths.home.clone()) else {
-            return;
-        };
-        if let Err(err) = self.flow_store.save(&home) {
+        if let Err(err) = self.store.save_flows(&self.flow_store) {
             self.toast(NoticeLevel::Error, format!("保存流程失败: {err}"));
         }
     }

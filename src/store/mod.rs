@@ -4,6 +4,7 @@
 //! - dict.json           ↔ typing-word-dict（版本 4）
 //! - setting.json        ↔ typing-word-setting（版本 23）
 //! - practice-word.json  ↔ PracticeSaveWord（版本 2）
+//! - flows.json          ↔ localStorage['PracticeFlowV2']（无版本号）
 
 use std::fs;
 use std::io::Write;
@@ -14,6 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::constants::{DICT_STATE_VERSION, PRACTICE_CACHE_VERSION, SETTING_VERSION};
+use crate::domain::flow::store::{FILE_NAME as FLOW_FILE_NAME, FlowStore};
 use crate::domain::types::{BaseState, PracticeCacheCompact, SettingState};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -283,15 +285,80 @@ impl FileStore {
         self.file_path("practice-word.json").is_file()
     }
 
+    /// 读取自建流程存档（`flows.json`）。
+    ///
+    /// 这份存档没有版本号（结构与上游 localStorage 的 `PracticeFlowV2`
+    /// 一致），损坏时隔离成 `*.corrupt-<时间戳>.json` 并回退到空集合。
+    pub fn load_flows(&self) -> Loaded<FlowStore> {
+        let path = self.file_path(FLOW_FILE_NAME);
+        if !path.is_file() {
+            return Loaded {
+                value: FlowStore::default(),
+                status: LoadStatus::Missing,
+                updated_at: None,
+            };
+        }
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) => {
+                let reason = match self.quarantine(&path) {
+                    Ok(target) => format!("{err}（已移动到 {}）", target.display()),
+                    Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
+                };
+                return Loaded {
+                    value: FlowStore::default(),
+                    status: LoadStatus::Corrupt(reason),
+                    updated_at: None,
+                };
+            }
+        };
+        if text.trim().is_empty() {
+            return Loaded {
+                value: FlowStore::default(),
+                status: LoadStatus::Missing,
+                updated_at: None,
+            };
+        }
+        match serde_json::from_str::<FlowStore>(&text) {
+            Ok(value) => Loaded {
+                value,
+                status: LoadStatus::Loaded,
+                updated_at: None,
+            },
+            Err(err) => {
+                let reason = match self.quarantine(&path) {
+                    Ok(target) => format!("{err}（已移动到 {}）", target.display()),
+                    Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
+                };
+                Loaded {
+                    value: FlowStore::default(),
+                    status: LoadStatus::Corrupt(reason),
+                    updated_at: None,
+                }
+            }
+        }
+    }
+
+    /// 写回自建流程存档。
+    pub fn save_flows(&self, flows: &FlowStore) -> Result<()> {
+        let text = serde_json::to_string_pretty(flows)?;
+        write_atomic(&self.file_path(FLOW_FILE_NAME), &text)
+    }
+
     /// 供 doctor 展示：列出已知存档文件与大小。
     pub fn describe_files(&self) -> Vec<(String, Option<u64>)> {
-        ["dict.json", "setting.json", "practice-word.json"]
-            .iter()
-            .map(|name| {
-                let path = self.file_path(name);
-                let size = fs::metadata(&path).ok().map(|meta| meta.len());
-                ((*name).to_string(), size)
-            })
-            .collect()
+        [
+            "dict.json",
+            "setting.json",
+            "practice-word.json",
+            FLOW_FILE_NAME,
+        ]
+        .iter()
+        .map(|name| {
+            let path = self.file_path(name);
+            let size = fs::metadata(&path).ok().map(|meta| meta.len());
+            ((*name).to_string(), size)
+        })
+        .collect()
     }
 }

@@ -1,6 +1,6 @@
 # 存档与数据格式
 
-typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本地 JSON 文件，词库则是只读 JSON 资源。程序启动时把这些文件读进内存，运行中按固定时机原子写回。本文是这些文件的权威说明：目录与路径解析、存档信封与写入协议、三份存档的字段、资源词库格式、`import-dict`、与上游 Web 端的数据互通，以及备份/恢复与隐私注意事项。
+typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本地 JSON 文件，词库则是只读 JSON 资源。程序启动时把这些文件读进内存，运行中按固定时机原子写回。本文是这些文件的权威说明：目录与路径解析、存档信封与写入协议、三份带版本号的存档与一份无版本号的流程存档的字段、资源词库格式、`import-dict`、与上游 Web 端的数据互通，以及备份/恢复与隐私注意事项。
 
 > 适用范围：`src/store/`、`src/paths.rs`、`src/bootstrap.rs`、`src/domain/catalog.rs`、`src/cli.rs` 的 `doctor`/`import-dict`、`src/domain/types.rs` 的存档模型；对应版本：typewords-tui 0.1.0。
 
@@ -15,6 +15,7 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 | `<home>/dict.json` | 读写 | 词典状态 `BaseState`，版本 4 |
 | `<home>/setting.json` | 读写 | 设置 `SettingState`，版本 23 |
 | `<home>/practice-word.json` | 读写/删除 | 断点练习缓存 `PracticeCacheCompact`，版本 2 |
+| `<home>/flows.json` | 读写 | 自建练习流程 `FlowStore`（无版本号，见 [领域逻辑 · 流程](domain.md)） |
 | `<home>/themes/*.json` | 启动时只读 | 自定义主题（格式见 [主题系统](themes.md)） |
 | `<home>/dicts/<language>/word/<url>` | 导入时写、运行时读 | `import-dict` 导入的用户词库 |
 | `<home>/list/word.json` | 导入时写、启动时读 | 用户词库目录，与内置目录合并 |
@@ -358,6 +359,29 @@ article.bookList 中 system == false 的词典                        → articl
 - 只有 `version == 2` 被接受，其余（包括 Web 的 v1）一律视为不支持：`load_practice` 返回 `LoadStatus::UnsupportedVersion { found, expected: 2 }`，启动弹 Warning「存档版本不受支持（…），已忽略；下次保存会覆盖」并忽略缓存；文件**不会**被移动或删除，下一次保存练习缓存时被覆盖。TUI 不提供 v1→v2 升级（上游 Web 有，见 `checkAndUpgradePracticeWordCache`）。
 - `val` 为 `null` 的信封被当作「没有缓存」（`Loaded(null)`），不算损坏。
 - JSON 解析失败时文件被隔离为 `practice-word.json.corrupt-<时间戳>.json`，启动提示「练习缓存损坏，已丢弃」，随后按无缓存启动。
+
+## 5bis. `flows.json`（`FlowStore`，无版本号）
+
+自建练习流程的存档，对应上游浏览器 localStorage 的 `PracticeFlowV2` 键。结构与上游一致：
+
+```json
+{
+  "activeId": "custom-1",
+  "flows": {
+    "custom-1": {
+      "name": "我的流程",
+      "config": { "id": "custom-1", "version": 6, "mode": 7, "label": "...", "nodes": [] },
+      "createdAt": 1735689600000,
+      "updatedAt": 1735689600000
+    }
+  }
+}
+```
+
+- **没有版本号**：上游用 localStorage 存这份数据，本来就没有版本概念；`config.version` 是流程配置自身的版本（与上游 `CURRENT_FLOW_VERSION` 一致，当前 6）。
+- 流程配置里的字段名与上游 `PracticeFlowConfig` 逐字一致（`templateId`、`wordAdvance`、`groupSize`、`subSteps`、`onEnd`、`shuffleOnEnter`），因此 `flows.json` 与上游的 localStorage 内容可以互换。
+- `subSteps` 是 `{ templateId }` 对象数组（上游 `PracticeLoopSubStep`），不是裸的模板 id 数组。
+- 损坏时文件被隔离为 `flows.json.corrupt-<时间戳>.json`，启动提示「流程存档已损坏，已隔离并恢复默认值」，随后按空集合启动。
 
 ## 6. 资源词库格式
 

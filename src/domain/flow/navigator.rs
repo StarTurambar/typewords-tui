@@ -331,7 +331,7 @@ impl Navigator {
                     }
                 )));
             }
-            PracticeEndAction::GenerateReport => {}
+            PracticeEndAction::GenerateReport { .. } => {}
             _ => {}
         }
     }
@@ -359,11 +359,15 @@ impl Navigator {
                     }
                     action_index += 1;
                 }
-                PracticeEndAction::NavigateComplete => {
+                PracticeEndAction::Navigate {
+                    target: crate::domain::flow::NavigateTarget::Complete,
+                } => {
                     *state.completed = true;
                     return true;
                 }
-                PracticeEndAction::NavigateNextStep => break,
+                PracticeEndAction::Navigate {
+                    target: crate::domain::flow::NavigateTarget::NextStep,
+                } => break,
                 other => {
                     self.execute_instant_action(state, &other);
                     action_index += 1;

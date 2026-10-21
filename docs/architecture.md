@@ -207,7 +207,7 @@ Catalog(assets) ───────┘                                      �
 
 ## 7. 持久化与数据完整性
 
-- 三份存档对应上游 IndexedDB 的三个 key：`dict.json`（v4）、`setting.json`（v23）、`practice-word.json`（v2），外层都是 `SaveEnvelope { val, version, updated_at }`。
+- 三份存档对应上游 IndexedDB 的三个 key：`dict.json`（v4）、`setting.json`（v23）、`practice-word.json`（v2），外层都是 `SaveEnvelope { val, version, updated_at }`；自建流程另存 `flows.json`（无版本号，对应上游 localStorage 的 `PracticeFlowV2`）。
 - 写入采用**同目录临时文件 + fsync + rename**；解析失败的文件会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；`dict.json` 与 `setting.json` 版本高于程序支持版本时都**只读不覆盖**；练习缓存版本不受支持时忽略（不移动文件），详见 [persistence.md](persistence.md)。
 - 练习缓存在练习页内按 500ms 防抖保存、练习时长累计到 30 秒整数倍时触发保存、退出/切页时保存；结算后删除。恢复失败（词库不匹配、版本不符）时丢弃缓存并提示。
 - 存档字段与上游同名，序列化使用 camelCase（`Card` 沿用 ts-fsrs 的 snake_case），因此可以做手工迁移，但**不读写浏览器 IndexedDB**。

@@ -86,14 +86,22 @@ pub enum PracticeWordsSource {
     WrongWords,
 }
 
+/// 词内推进配置。
+///
+/// 字段名与上游 `PracticeWordAdvanceConfig` 一致（`groupSize` / `subSteps`），
+/// 否则 `flows.json` 与上游的 `PracticeFlowV2` 互相读不了。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum WordAdvance {
     #[default]
     Increment,
     WordLoop {
         group_size: usize,
-        sub_steps: Vec<PracticeStepTemplateId>,
+        sub_steps: Vec<PracticeLoopSubStep>,
     },
 }
 
@@ -105,10 +113,33 @@ impl WordAdvance {
         }
     }
 
-    pub fn sub_steps(&self) -> &[PracticeStepTemplateId] {
+    pub fn sub_steps(&self) -> &[PracticeLoopSubStep] {
         match self {
             Self::Increment => &[],
             Self::WordLoop { sub_steps, .. } => sub_steps,
+        }
+    }
+}
+
+/// wordLoop 每组完成后的子练习步骤（上游 `PracticeLoopSubStep`）。
+///
+/// 上游是 `{ templateId, label? }` 对象，不是裸的模板 id——序列化必须按
+/// 对象写，否则上游的 `isValidSubStep` 校验通不过。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PracticeLoopSubStep {
+    /// 子步骤用的模板
+    pub template_id: PracticeStepTemplateId,
+    /// 展示名（可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl From<PracticeStepTemplateId> for PracticeLoopSubStep {
+    fn from(template_id: PracticeStepTemplateId) -> Self {
+        Self {
+            template_id,
+            label: None,
         }
     }
 }
@@ -120,20 +151,46 @@ pub enum CollectTarget {
     WrongBook,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+/// 阶段结束后的动作队列（上游 `PracticeEndAction`）。
+///
+/// 上游把「跳转」并成一种类型、用 `target` 区分目标（`nextStep` / `complete`），
+/// 「生成报告」也带一个 `reportType`。这里保持同样的结构，两端才能互读。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PracticeEndAction {
     WrongWordClear {
         template_id: PracticeStepTemplateId,
-        word_advance: WordAdvance,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        word_advance: Option<WordAdvance>,
     },
     CollectWrongWords {
         target: CollectTarget,
     },
+    GenerateReport {
+        #[serde(default = "default_report_type")]
+        report_type: String,
+    },
+    Navigate {
+        target: NavigateTarget,
+    },
+}
+
+/// 报告类型（上游 `stepSummary` / `sessionSummary`）。
+fn default_report_type() -> String {
+    "stepSummary".to_string()
+}
+
+/// 跳转目标（上游 `nextStep` / `complete`）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NavigateTarget {
     #[default]
-    GenerateReport,
-    NavigateNextStep,
-    NavigateComplete,
+    NextStep,
+    Complete,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -198,14 +255,14 @@ fn step(
 fn word_loop_with_spell() -> WordAdvance {
     WordAdvance::WordLoop {
         group_size: GROUP_SIZE,
-        sub_steps: vec![PracticeStepTemplateId::Spell],
+        sub_steps: vec![PracticeStepTemplateId::Spell.into()],
     }
 }
 
 fn default_on_end() -> Vec<PracticeEndAction> {
     vec![PracticeEndAction::WrongWordClear {
         template_id: PracticeStepTemplateId::FollowWrite,
-        word_advance: word_loop_with_spell(),
+        word_advance: Some(word_loop_with_spell()),
     }]
 }
 
@@ -530,7 +587,7 @@ pub fn resolve_phase_by_cursor(
         {
             phase = PracticePhase {
                 practice_type: template_id.practice_type(),
-                word_advance: word_advance.clone(),
+                word_advance: word_advance.clone().unwrap_or_default(),
                 on_end: Vec::new(),
             };
         }
@@ -543,7 +600,7 @@ pub fn resolve_phase_by_cursor(
             .get(loop_range.sub_step_index)
     {
         let mut next = PracticePhase {
-            practice_type: sub_step.practice_type(),
+            practice_type: sub_step.template_id.practice_type(),
             word_advance: phase.word_advance.clone(),
             on_end: Vec::new(),
         };
@@ -571,7 +628,7 @@ fn effective_template(
     if let Some(loop_range) = &cursor.loop_range
         && let Some(sub_step) = step.word_advance.sub_steps().get(loop_range.sub_step_index)
     {
-        return *sub_step;
+        return sub_step.template_id;
     }
     step.template_id
 }

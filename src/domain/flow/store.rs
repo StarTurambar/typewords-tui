@@ -3,11 +3,12 @@
 //! 上游把自建流程放在浏览器 localStorage 里，键是 `PracticeFlowV2`，值是
 //! `{ activeId, flows: { [id]: { config, name, createdAt, updatedAt } } }`。
 //! 本程序改存数据目录下的 `flows.json`，结构保持一致。
+//!
+//! 文件读写由 `store` 层负责（`FileStore::load_flows` / `save_flows`），
+//! 领域层只管数据结构——损坏文件的隔离也在 store 层做。
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::flow::PracticeFlowConfig;
@@ -40,26 +41,6 @@ pub struct FlowStore {
 }
 
 impl FlowStore {
-    /// 读取数据目录里的流程存档；文件不存在或损坏时返回空集合。
-    pub fn load(home: &Path) -> Self {
-        let path = home.join(FILE_NAME);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        serde_json::from_str(&text).unwrap_or_default()
-    }
-
-    /// 写回数据目录。
-    pub fn save(&self, home: &Path) -> Result<()> {
-        let path = home.join(FILE_NAME);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("创建目录失败: {}", parent.display()))?;
-        }
-        let text = serde_json::to_string_pretty(self)?;
-        crate::store::write_atomic(&path, &text)
-    }
-
     /// 当前启用的自建流程。
     pub fn active(&self) -> Option<&StoredFlow> {
         if self.active_id.is_empty() {

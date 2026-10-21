@@ -29,7 +29,7 @@
 | `src/domain/timer.rs` | 计时片段、空闲暂停、跨天拆分 | `tick`、`pause`、`resume`、`normalize_practice_timer`、`format_duration` |
 | `src/domain/typing.rs` | 键入状态机 | `TypingEngine`、`TypingSettings`、`TypingEvent`、`KeyInput` |
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
-| `src/domain/flow/store.rs` | 自建练习流程的存档（`flows.json`） | `FlowStore`、`StoredFlow` |
+| `src/domain/flow/store.rs` | 自建练习流程的数据结构（`flows.json` 的读写在 `store` 层） | `FlowStore`、`StoredFlow` |
 | `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态 | `Article`、`parse_sentence`、`gen_sections`、`SentenceTyping` |
 | `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`mark_know`、`sort_words` |
 | `src/domain/flow/mod.rs` | 流程配置、游标、相位、展示模型 | `PracticeFlowConfig`、`PracticeFlowCursor`、`builtin_flow`、`resolve_phase_by_cursor`、`display_state` |
@@ -39,7 +39,7 @@
 | `src/domain/i18n.rs` | 中文文案表 | `tr(key)` |
 | `src/domain/rng.rs` | 可注入随机源 | `Rng`、`seeded`、`random_seed`、`shuffle`、`pick_index` |
 
-边界规则：domain 不引用 `ratatui`、`crossterm`、`src/app`、`src/ui`；唯一做文件 I/O 的模块是 `catalog.rs`（依赖 `Paths` 与 `store::write_atomic`），其余模块只处理内存数据与时间。应用层通过 `NavState` 按字段借用 `PracticeData`/`PracticeState` 调用推进器，从而避免领域层反向依赖应用层。
+边界规则：domain 不引用 `ratatui`、`crossterm`、`src/app`、`src/ui`；唯一做文件 I/O 的模块是 `catalog.rs`（依赖 `Paths` 与 `store::write_atomic`），其余模块只处理内存数据与时间——自建流程的 `flows.json` 也由 `store` 层读写（`FileStore::load_flows` / `save_flows`），领域层只留数据结构。应用层通过 `NavState` 按字段借用 `PracticeData`/`PracticeState` 调用推进器，从而避免领域层反向依赖应用层。
 
 ## 2. 数据模型（types.rs）
 
@@ -421,8 +421,9 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `PracticeFlowStep` | `template_id`、`word_advance`、`on_end`、`shuffle_on_enter` | 一个练习步骤 |
 | `PracticeStepTemplateId` | `FollowWrite`、`Spell`、`Listen`、`Dictation`、`Identify` | 步骤模板，映射到 `WordPracticeType` |
 | `PracticeWordsSource` | `TaskNew`、`TaskReview`、`Current`、`WrongWords` | 步骤的初始词源 |
-| `WordAdvance` | `Increment`；`WordLoop { group_size, sub_steps }` | 单词推进方式 |
-| `PracticeEndAction` | `WrongWordClear`、`CollectWrongWords`、`GenerateReport`、`NavigateNextStep`、`NavigateComplete` | 收尾队列 |
+| `WordAdvance` | `Increment`；`WordLoop { group_size, sub_steps }` | 单词推进方式；序列化字段名与上游一致（`groupSize` / `subSteps`） |
+| `PracticeLoopSubStep` | `template_id`、`label?` | wordLoop 的子步骤（上游 `PracticeLoopSubStep`，序列化为 `{ templateId }` 对象） |
+| `PracticeEndAction` | `WrongWordClear { template_id, word_advance? }`、`CollectWrongWords { target }`、`GenerateReport { report_type }`、`Navigate { target }` | 收尾队列；上游把跳转并成一种类型、用 `target` 区分 `nextStep` / `complete` |
 | `PracticePhase` | `practice_type`、`word_advance`、`on_end` | 由游标解析出的当前相位 |
 
 游标 `PracticeFlowCursor` 是唯一位置指针：`node_index`、`step_index`、`in_wrong_word_clear`、`loop_range: Option<PracticeLoopRange>`（序列化为 `loop`）、`end_action_index`；`PracticeLoopRange` 为 `start_index`/`end_index`/`sub_step_index`。`at_start()` 用四个字段共同判断是否在起点。

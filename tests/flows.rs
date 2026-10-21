@@ -217,3 +217,108 @@ fn a_custom_flow_practice_resumes_after_a_restart() {
     let session = app2.session.as_ref().expect("重启后应恢复会话");
     assert_eq!(session.flow().id, flow_id, "恢复的应是自建流程");
 }
+
+/// `flows.json` 的字段名必须与上游 `PracticeFlowV2` 一致。
+///
+/// 上游把自建流程存在浏览器 localStorage 的 `PracticeFlowV2` 键下，结构是
+/// `{ activeId, flows: { [id]: { config, name, createdAt, updatedAt } } }`，
+/// 流程配置里的字段是 `groupSize` / `subSteps` / `templateId`。字段名对不上，
+/// 两端就互相读不了存档。
+#[test]
+fn the_flow_archive_uses_the_upstream_field_names() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    press(&mut app, KeyCode::Char('n'));
+
+    let file = fixture.home().join("flows.json");
+    let text = std::fs::read_to_string(&file).expect("流程存档");
+    let value: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+
+    assert!(value.get("activeId").is_some(), "顶层应有 activeId");
+    let flows = value.get("flows").expect("顶层应有 flows");
+    let entry = flows
+        .as_object()
+        .and_then(|map| map.values().next())
+        .expect("应有一条流程");
+    assert!(entry.get("config").is_some(), "流程条目应有 config");
+    assert!(entry.get("name").is_some(), "流程条目应有 name");
+    assert!(entry.get("createdAt").is_some(), "流程条目应有 createdAt");
+    assert!(entry.get("updatedAt").is_some(), "流程条目应有 updatedAt");
+
+    // 步骤里的字段名
+    let step = entry
+        .get("config")
+        .and_then(|config| config.get("nodes"))
+        .and_then(|nodes| nodes.get(0))
+        .and_then(|node| node.get("steps"))
+        .and_then(|steps| steps.get(0))
+        .expect("应至少有一个步骤");
+    assert!(
+        step.get("templateId").is_some(),
+        "步骤应有 templateId，实际：{step}"
+    );
+    assert!(
+        step.get("wordAdvance").is_some(),
+        "步骤应有 wordAdvance，实际：{step}"
+    );
+
+    // wordLoop 的字段名与上游一致
+    let word_advance = step.get("wordAdvance").expect("wordAdvance");
+    assert_eq!(
+        word_advance.get("type").and_then(|value| value.as_str()),
+        Some("wordLoop")
+    );
+    assert!(
+        word_advance.get("groupSize").is_some(),
+        "wordLoop 应有 groupSize，实际：{word_advance}"
+    );
+    assert!(
+        word_advance.get("subSteps").is_some(),
+        "wordLoop 应有 subSteps，实际：{word_advance}"
+    );
+    // 上游的 subSteps 是 `{ templateId }` 对象数组，不是裸模板 id
+    let sub_step = word_advance
+        .get("subSteps")
+        .and_then(|value| value.get(0))
+        .expect("应有子步骤");
+    assert!(
+        sub_step.get("templateId").is_some(),
+        "子步骤应是 {{ templateId }} 对象，实际：{sub_step}"
+    );
+
+    // 错词清空动作的字段名
+    let on_end = step
+        .get("onEnd")
+        .and_then(|value| value.get(0))
+        .expect("应有 onEnd");
+    assert_eq!(
+        on_end.get("type").and_then(|value| value.as_str()),
+        Some("wrongWordClear")
+    );
+    assert!(
+        on_end.get("templateId").is_some(),
+        "wrongWordClear 应有 templateId，实际：{on_end}"
+    );
+}
+
+/// 损坏的流程存档要被隔离，不能静默吞掉。
+///
+/// `flows.json` 是用户可编辑的文件；早期实现直接 `unwrap_or_default()`，
+/// 解析失败时文件原样留着，用户看不出存档已经坏了。
+#[test]
+fn a_corrupt_flow_archive_is_quarantined() {
+    let fixture = common::Fixture::new();
+    let file = fixture.home().join("flows.json");
+    std::fs::write(&file, "{ not json").unwrap();
+
+    let app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert!(app.flow_store.flows.is_empty(), "损坏的存档应回退到空集合");
+
+    let quarantined: Vec<_> = std::fs::read_dir(fixture.home())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
+        .collect();
+    assert_eq!(quarantined.len(), 1, "损坏文件应被隔离保留");
+}
