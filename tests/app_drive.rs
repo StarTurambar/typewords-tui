@@ -1005,3 +1005,68 @@ fn audio_settings_toggle_and_persist() {
     assert!(!reloaded.boot.settings.word_sound);
     assert_eq!(reloaded.boot.settings.tts_source, "youdao");
 }
+
+/// 单词测试结算后要回到可用的页面。
+///
+/// 早期实现把 `screen` 设成 `Screen::Practice`，但单词测试没有练习会话，
+/// 结算弹层一关就落到一个空白页——没有任何提示，也没有退路（Esc 在练习页
+/// 是「显示单词」）。
+#[test]
+fn word_test_summary_lands_on_a_usable_screen() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot.settings.word_practice_mode =
+        typewords_tui::domain::types::WordPracticeMode::ShuffleWordsTest;
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::WordTest);
+
+    for _ in 0..200 {
+        let Some(state) = app.word_test.as_ref() else {
+            break;
+        };
+        if state.selected.is_none() {
+            let question = state.question.as_ref().expect("题目");
+            app.apply_action(app::Action::WordTestChoose(question.correct_index));
+        }
+        app.apply_action(app::Action::WordTestNext);
+    }
+    assert!(app.summary.is_some(), "应给出结算");
+
+    // 关掉结算弹层（Esc → 回主页）
+    app.apply_action(app::Action::SummaryHome);
+    assert_eq!(
+        app.screen,
+        app::Screen::Home,
+        "结算后应回到主页，而不是没有会话的空白练习页"
+    );
+    assert!(app.session.is_none(), "单词测试不应留下练习会话");
+}
+
+/// 单词测试的用时不应沿用上一轮练习的残留值。
+#[test]
+fn word_test_tracks_its_own_elapsed_time() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 先跑一轮普通练习，把 stat.spend 弄脏
+    app.boot.settings.word_practice_mode = typewords_tui::domain::types::WordPracticeMode::System;
+    press(&mut app, KeyCode::Enter);
+    let base = typewords_tui::domain::timer::now_ms();
+    app.on_tick(base);
+    app.on_tick(base + 3_000);
+    assert!(app.stat.spend > 0, "普通练习应累计用时");
+
+    // 离开练习后再开单词测试
+    app.leave_practice();
+    app.boot.settings.word_practice_mode =
+        typewords_tui::domain::types::WordPracticeMode::ShuffleWordsTest;
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::WordTest);
+    assert_eq!(app.word_test_spend, 0, "单词测试应从零开始计时");
+
+    // 计时器按秒推进：每个满 1000ms 的 tick 记 1000ms。
+    let base = typewords_tui::domain::timer::now_ms();
+    app.on_tick(base);
+    app.on_tick(base + 1_000);
+    app.on_tick(base + 2_000);
+    assert_eq!(app.word_test_spend, 2000, "单词测试应累计自己的用时");
+}

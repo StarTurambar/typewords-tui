@@ -336,6 +336,8 @@ pub struct App {
     pub mode_picker: Option<ModePickerState>,
     /// 单词测试（一题 4 选 1）
     pub word_test: Option<WordTestState>,
+    /// 单词测试本轮的用时（毫秒）
+    pub word_test_spend: i64,
     /// 词条管理页的光标（过滤后的下标）
     pub words_cursor: usize,
     /// 词条管理页的搜索词
@@ -471,6 +473,7 @@ impl App {
             shortcut_capturing: false,
             mode_picker: None,
             word_test: None,
+            word_test_spend: 0,
             words_cursor: 0,
             words_filter: String::new(),
             words_search_focus: false,
@@ -676,6 +679,15 @@ impl App {
             result.task_words.review.len(),
             result.due_review_count,
         ));
+    }
+
+    /// 今日任务的词表（不建会话）。
+    ///
+    /// 单词测试模式要用它取复习词——它不经过练习会话，所以不能从
+    /// `self.session` 里拿。
+    fn today_task_words(&mut self) -> Option<TaskWords> {
+        self.boot.base.study_dict()?;
+        Some(create_study_task(&self.boot.base, &self.boot.settings, &mut self.rng).task_words)
     }
 
     pub fn study_progress(&self) -> u32 {
@@ -1313,10 +1325,13 @@ impl App {
         }
         let mut words = match mode {
             WordPracticeMode::ReviewWordsTest => {
+                // 用**今日任务**的复习词出题（对齐上游 `routeData.taskWords.review`）。
+                // 早期实现从 `self.session` 取，而单词测试模式在任何会话创建
+                // 之前就调用了它，`session` 必然是 `None`，于是永远退化成整本
+                // 词库随机出题。
                 let review = self
-                    .session
-                    .as_ref()
-                    .map(|session| session.task_words.review.clone())
+                    .today_task_words()
+                    .map(|task| task.review)
                     .unwrap_or_default();
                 if review.is_empty() {
                     let mut all = pool.clone();
@@ -1345,6 +1360,9 @@ impl App {
             correct: 0,
             wrong: 0,
         });
+        // 单词测试有自己的计时起点，不复用上一轮练习的 `stat.spend`。
+        self.word_test_spend = 0;
+        self.last_timer_tick = timer::now_ms();
         self.screen = Screen::WordTest;
         self.summary = None;
     }
@@ -1415,8 +1433,10 @@ impl App {
         } else {
             ((state.correct as f64 / total as f64) * 100.0).round() as u32
         };
+        // 单词测试有自己的用时统计，不复用上一轮练习残留的 `stat.spend`。
+        let spend = self.word_test_spend;
         self.summary = Some(SummaryData {
-            spend_ms: self.stat.spend,
+            spend_ms: spend,
             accuracy,
             new_words: 0,
             review: total,
@@ -1427,7 +1447,9 @@ impl App {
             wrong_top: Vec::new(),
             week_days: [None; 7],
         });
-        self.screen = Screen::Practice;
+        // 单词测试没有练习会话，结算后要回主页——停在 `Screen::Practice`
+        // 会渲染成一个没有会话的空白页，且没有任何退路。
+        self.screen = Screen::Home;
     }
 
     /// 退出单词测试，回主页。
@@ -2873,6 +2895,25 @@ impl App {
     pub fn on_tick(&mut self, now: i64) {
         if self.toasts.iter().all(|toast| toast.until <= now) {
             self.toasts.clear();
+        }
+
+        // 文章跟打页也要计时：早期实现的计时分支只在 `Screen::Practice` 下
+        // 运行，文章页的 `spend` 从未被写入，用时与统计恒为 0。
+        if self.screen == Screen::ArticlePractice
+            && let Some(practice) = self.article_practice.as_mut()
+            && now - self.last_timer_tick >= 1000
+        {
+            self.last_timer_tick = now;
+            practice.spend += 1000;
+        }
+
+        // 单词测试页同理：它没有练习会话，用时单独记。
+        if self.screen == Screen::WordTest
+            && self.word_test.is_some()
+            && now - self.last_timer_tick >= 1000
+        {
+            self.last_timer_tick = now;
+            self.word_test_spend += 1000;
         }
 
         if self.screen == Screen::Practice && self.session.is_some() {
