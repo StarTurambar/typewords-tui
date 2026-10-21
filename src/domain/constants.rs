@@ -51,10 +51,14 @@ pub const PRACTICE_MODE_NAMES: &[(WordPracticeMode, &str)] = &[
     (WordPracticeMode::Review, "复习"),
     (WordPracticeMode::ShuffleWordsTest, "随机单词测试"),
     (WordPracticeMode::ReviewWordsTest, "单词测试"),
+    (WordPracticeMode::Custom, "自定义流程"),
 ];
 
 /// 全部可选的练习模式（顺序与上游 `WordPracticeMode` 一致）。
-pub const PRACTICE_MODES: [WordPracticeMode; 9] = [
+///
+/// `Custom` 只在有已启用的自建流程时才有意义，但始终列在模式里——否则用户
+/// 无法显式切到自建流程，也无法在选内置模式时避开它。
+pub const PRACTICE_MODES: [WordPracticeMode; 10] = [
     WordPracticeMode::System,
     WordPracticeMode::Free,
     WordPracticeMode::IdentifyOnly,
@@ -64,6 +68,7 @@ pub const PRACTICE_MODES: [WordPracticeMode; 9] = [
     WordPracticeMode::Review,
     WordPracticeMode::ShuffleWordsTest,
     WordPracticeMode::ReviewWordsTest,
+    WordPracticeMode::Custom,
 ];
 
 /// 该模式是否走「单词测试」流程（4 选 1 答题），而不是键入练习。

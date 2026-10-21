@@ -698,6 +698,11 @@ impl App {
             self.toast(NoticeLevel::Warning, crate::domain::i18n::tr("no_assets"));
             return;
         }
+        // 自定义流程模式需要一个已启用的自建流程（对齐上游的同样提示）
+        if mode == WordPracticeMode::Custom && self.flow_store.active().is_none() {
+            self.toast(NoticeLevel::Warning, "请先在流程页创建并启用一个自定义流程");
+            return;
+        }
         // 单词测试模式走 4 选 1 的答题流程，不进入键入练习
         if crate::domain::constants::is_words_test_mode(mode) {
             self.start_word_test(mode);
@@ -1439,6 +1444,10 @@ impl App {
     pub fn flow_entries(&self) -> Vec<FlowEntry> {
         let mut entries: Vec<FlowEntry> = Vec::new();
         for mode in crate::domain::constants::PRACTICE_MODES {
+            // `Custom` 不是内置流程，它对应下面列出的已启用自建流程。
+            if mode == WordPracticeMode::Custom {
+                continue;
+            }
             let config = crate::domain::flow::flow_for_mode(mode);
             entries.push(FlowEntry {
                 id: config.id.clone(),
@@ -1505,7 +1514,7 @@ impl App {
         let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
             return;
         };
-        let id = format!("custom-{}", self.flow_store.flows.len() + 1);
+        let id = self.flow_store.unique_custom_id();
         let now = timer::now_ms();
         let mut config = entry.config.clone();
         config.id = id.clone();
@@ -2286,12 +2295,19 @@ impl App {
 
     // ── 练习模式选择 ─────────────────────────────────────────────────────
 
-    /// 当前练习要使用的流程：优先用已启用的自建流程。
+    /// 当前练习要使用的流程。
+    ///
+    /// 自建流程只在 `Custom` 模式下生效（对齐上游 `getFlowIdForMode`）：
+    /// `Custom` 用已启用的自建流程，没有可用流程时回退到内置 system 流程；
+    /// 其余模式一律用对应的内置流程。
     fn active_flow(&self, mode: WordPracticeMode) -> crate::domain::flow::PracticeFlowConfig {
-        match self.flow_store.active() {
-            Some(flow) => flow.config.clone(),
-            None => crate::domain::flow::flow_for_mode(mode),
+        if mode == WordPracticeMode::Custom {
+            return match self.flow_store.active() {
+                Some(flow) => crate::domain::flow::resolve_flow_config_or_system(&flow.config),
+                None => crate::domain::flow::get_flow_config("system"),
+            };
         }
+        crate::domain::flow::flow_for_mode(mode)
     }
 
     /// 打开练习模式选择弹层，光标停在当前模式。
@@ -2887,7 +2903,7 @@ impl App {
     }
 }
 
-fn practice_modes() -> [WordPracticeMode; 9] {
+fn practice_modes() -> [WordPracticeMode; 10] {
     crate::domain::constants::PRACTICE_MODES
 }
 

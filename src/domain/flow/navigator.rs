@@ -626,13 +626,20 @@ impl Navigator {
         self.source_for_cursor()
     }
 
+    /// 恢复上次练习的游标与流程。
+    ///
+    /// `self.flow` 是调用方已经解析好的流程配置（可能是自建流程）。只有当
+    /// 快照里的 `flow_id` 与它不同时才去查内置流程表——否则自建流程的 id
+    /// 在内置表里查不到，会被换成 system 流程，断点进度就丢了。
     pub fn restore_snapshot(
         &mut self,
         snapshot: &PracticeSessionSnapshot,
         task_words: &TaskWords,
         data: &PracticeData,
     ) -> bool {
-        self.flow = get_flow_config(&snapshot.flow_id);
+        if self.flow.id != snapshot.flow_id {
+            self.flow = get_flow_config(&snapshot.flow_id);
+        }
         let flow_matched = self.flow.id == snapshot.flow_id;
         let cursor_restored = flow_matched && self.restore_cursor(&snapshot.cursor, data);
         if !cursor_restored {

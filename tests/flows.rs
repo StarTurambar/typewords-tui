@@ -100,9 +100,120 @@ fn activating_a_custom_flow_changes_the_practice_session() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.flow_store.active_id, flow_id, "应启用新流程");
 
-    // 开始的练习使用自建流程
+    // 自建流程只在「自定义流程」模式下生效（对齐上游 getFlowIdForMode）
     press(&mut app, KeyCode::Esc);
     press(&mut app, KeyCode::Enter);
     let session = app.session.as_ref().expect("会话");
-    assert_eq!(session.flow().id, flow_id, "练习应使用自建流程");
+    assert_eq!(
+        session.flow().id,
+        "system",
+        "普通学习模式不应被自建流程顶替"
+    );
+
+    // 切到自定义流程模式后，练习使用自建流程
+    press(&mut app, KeyCode::Esc);
+    app.start_practice_with_mode(typewords_tui::domain::types::WordPracticeMode::Custom);
+    let session = app.session.as_ref().expect("会话");
+    assert_eq!(session.flow().id, flow_id, "自定义流程模式应使用自建流程");
+}
+
+/// 损坏的自建流程存档不能让程序崩溃。
+///
+/// `flows.json` 是用户可编辑的文件，节点被清空后取步骤与推进游标都会越界。
+#[test]
+fn a_flow_with_no_nodes_degrades_instead_of_panicking() {
+    use typewords_tui::domain::flow::{
+        PracticeFlowConfig, PracticeFlowCursor, advance_step_cursor, get_step,
+        is_valid_flow_config, resolve_flow_config_or_system,
+    };
+
+    let broken = PracticeFlowConfig {
+        id: "custom-1".to_string(),
+        version: 1,
+        mode: typewords_tui::domain::types::WordPracticeMode::Custom,
+        label: "broken".to_string(),
+        nodes: Vec::new(),
+    };
+    assert!(!is_valid_flow_config(&broken), "空节点列表应判定为非法");
+
+    // 取步骤不 panic
+    let step = get_step(&broken, &PracticeFlowCursor::default());
+    assert_eq!(
+        step.template_id,
+        typewords_tui::domain::flow::PracticeStepTemplateId::FollowWrite
+    );
+
+    // 推进游标不 panic（视为已完成）
+    let (cursor, complete) = advance_step_cursor(&broken, &PracticeFlowCursor::default());
+    assert!(complete, "空流程应视为已完成");
+    assert_eq!(cursor.node_index, 0);
+
+    // 非法配置回退到内置 system 流程
+    let resolved = resolve_flow_config_or_system(&broken);
+    assert_eq!(resolved.id, "system");
+    assert!(is_valid_flow_config(&resolved));
+}
+
+/// 节点存在但步骤为空时同样不能越界。
+#[test]
+fn a_flow_with_an_empty_step_list_degrades_instead_of_panicking() {
+    use typewords_tui::domain::flow::{
+        PracticeFlowConfig, PracticeFlowCursor, PracticeFlowNode, PracticeWordsSource,
+        advance_step_cursor, get_step, is_valid_flow_config,
+    };
+
+    let broken = PracticeFlowConfig {
+        id: "custom-2".to_string(),
+        version: 1,
+        mode: typewords_tui::domain::types::WordPracticeMode::Custom,
+        label: "broken".to_string(),
+        nodes: vec![PracticeFlowNode {
+            id: "n1".to_string(),
+            label: "n1".to_string(),
+            source: PracticeWordsSource::TaskNew,
+            steps: Vec::new(),
+        }],
+    };
+    assert!(!is_valid_flow_config(&broken));
+
+    let _ = get_step(&broken, &PracticeFlowCursor::default());
+    let (_, complete) = advance_step_cursor(&broken, &PracticeFlowCursor::default());
+    assert!(complete);
+}
+
+/// 自建流程的练习进度在重启后要能恢复。
+///
+/// 恢复时按 `flowId` 查流程配置，内置表里没有自建流程的 id——早期实现直接
+/// 用内置表覆盖，导致自建流程的断点进度每次重启都被静默丢弃。
+#[test]
+fn a_custom_flow_practice_resumes_after_a_restart() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    // 建一个自建流程并启用
+    ctrl(&mut app, 'f');
+    press(&mut app, KeyCode::Char('n'));
+    let flow_id = app.flow_entries().last().expect("新流程").id.clone();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.flow_store.active_id, flow_id);
+
+    // 用自定义流程模式开始一次练习并推进一个词
+    press(&mut app, KeyCode::Esc);
+    app.start_practice_with_mode(typewords_tui::domain::types::WordPracticeMode::Custom);
+    assert!(app.session.is_some(), "应进入练习");
+    press(&mut app, KeyCode::Tab); // 跳过当前词，产生进度
+    app.save_practice_now();
+
+    // 存档里的 flowId 应是自建流程的 id
+    let cache = fixture.home().join("practice-word.json");
+    let text = std::fs::read_to_string(&cache).expect("练习缓存应落盘");
+    assert!(
+        text.contains(&flow_id),
+        "缓存应记录自建流程 id，实际：{text}"
+    );
+
+    // 重启后应恢复会话
+    let app2 = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let session = app2.session.as_ref().expect("重启后应恢复会话");
+    assert_eq!(session.flow().id, flow_id, "恢复的应是自建流程");
 }

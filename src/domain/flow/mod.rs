@@ -434,6 +434,29 @@ pub fn get_flow_config(id: &str) -> PracticeFlowConfig {
     builtin_flow(id).unwrap_or_else(|| builtin_flow("system").expect("system flow must exist"))
 }
 
+/// 流程配置是否可用（对应上游 `isValidFlowConfig`）。
+///
+/// 至少要有一个节点，且每个节点至少有一个步骤——否则游标无处落脚，
+/// 取步骤与推进游标都会越界。自建流程来自 `flows.json`，可能被手工编辑、
+/// 截断或从上游导入，因此必须在使用前校验。
+pub fn is_valid_flow_config(config: &PracticeFlowConfig) -> bool {
+    if config.nodes.is_empty() {
+        return false;
+    }
+    config.nodes.iter().all(|node| !node.steps.is_empty())
+}
+
+/// 取一个保证可用的流程配置：非法配置回退到内置 system 流程。
+///
+/// 对应上游 `resolveFlowConfigOrSystem`。
+pub fn resolve_flow_config_or_system(config: &PracticeFlowConfig) -> PracticeFlowConfig {
+    if is_valid_flow_config(config) {
+        config.clone()
+    } else {
+        get_flow_config("system")
+    }
+}
+
 pub fn get_flow_id_for_mode(mode: WordPracticeMode) -> &'static str {
     match mode {
         WordPracticeMode::System => "system",
@@ -464,8 +487,24 @@ pub fn get_step<'a>(
         .nodes
         .get(cursor.node_index)
         .and_then(|node| node.steps.get(cursor.step_index))
-        .unwrap_or_else(|| &config.nodes[0].steps[0])
+        .or_else(|| {
+            // 游标越界时退回第一个节点的首个步骤。
+            config.nodes.first().and_then(|node| node.steps.first())
+        })
+        .unwrap_or(&EMPTY_STEP)
 }
+
+/// 流程配置不可用时的占位步骤。
+///
+/// `get_step` 的返回值不能为空引用，但配置本身可能已经损坏（自建流程来自
+/// 可编辑的 `flows.json`）。此时返回一个「跟写 + 单步推进」的安全占位步骤，
+/// 而不是越界 panic。
+static EMPTY_STEP: PracticeFlowStep = PracticeFlowStep {
+    template_id: PracticeStepTemplateId::FollowWrite,
+    word_advance: WordAdvance::Increment,
+    on_end: Vec::new(),
+    shuffle_on_enter: false,
+};
 
 pub fn materialize_step(step: &PracticeFlowStep) -> PracticePhase {
     PracticePhase {
@@ -588,6 +627,10 @@ pub fn advance_step_cursor(
     config: &PracticeFlowConfig,
     cursor: &PracticeFlowCursor,
 ) -> (PracticeFlowCursor, bool) {
+    // 空节点列表（配置损坏）没有可推进的步骤，直接视为已完成。
+    if config.nodes.is_empty() {
+        return (cursor.clone(), true);
+    }
     let node = &config.nodes[cursor.node_index.min(config.nodes.len() - 1)];
     let is_last_step = cursor.step_index >= node.steps.len().saturating_sub(1);
     let is_last_node = cursor.node_index >= config.nodes.len().saturating_sub(1);

@@ -78,6 +78,21 @@ impl FlowStore {
         self.flows.insert(id.to_string(), flow);
     }
 
+    /// 分配一个没被占用的自建流程 id。
+    ///
+    /// 流程数量会因删除而减少，直接用 `flows.len() + 1` 会在删除后与已有流程
+    /// 撞号，把别人的配置覆盖掉。这里逐个试探直到找到空位。
+    pub fn unique_custom_id(&self) -> String {
+        let mut index = 1usize;
+        loop {
+            let id = format!("custom-{index}");
+            if !self.flows.contains_key(&id) {
+                return id;
+            }
+            index += 1;
+        }
+    }
+
     /// 删除一条流程；被删的是当前启用流程时回到内置流程。
     pub fn remove(&mut self, id: &str) {
         self.flows.remove(id);
