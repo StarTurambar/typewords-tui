@@ -133,6 +133,46 @@ fn words_screen_creates_a_custom_dictionary() {
     assert!(words_file.is_file(), "新词典应有词条文件");
 }
 
+/// 自建词典的 `custom` 标记必须跟着存档走。
+///
+/// 存档落盘前会清掉「非自建、非系统」词典的词表
+/// （`BaseState::shake_common_dict`）。标记丢了，自建词典的词表在下一次
+/// 保存时就被清空，用户新建的词库内容全部消失。
+#[test]
+fn a_custom_dictionary_keeps_its_words_across_a_save() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    // 复制当前词典成自建词典（副本有词条，能看出词表有没有被清空）
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+    press(&mut app, KeyCode::Char('c'));
+
+    let dict = app.boot.base.study_dict().expect("当前词库");
+    assert!(dict.custom, "复制出来的词典应带 custom 标记");
+    assert!(!dict.words.is_empty(), "副本应带着词条");
+    let name = dict.name.clone();
+
+    // 存档 → 重载，词表不该被清空
+    app.save_dict_now();
+    let store = typewords_tui::store::FileStore::new(fixture.home()).unwrap();
+    let loaded = store.load_dict();
+    assert_eq!(loaded.status, typewords_tui::store::LoadStatus::Loaded);
+    let saved = loaded
+        .value
+        .word
+        .book_list
+        .iter()
+        .find(|dict| dict.name == name)
+        .expect("存档里应有自建词典");
+    assert!(saved.custom, "存档里的自建词典应保留 custom 标记");
+    assert!(
+        !saved.words.is_empty(),
+        "自建词典的词表不应被清空，实际长度 {}",
+        saved.words.len()
+    );
+}
+
 #[test]
 fn words_screen_marks_entries_in_bulk() {
     let fixture = common::Fixture::new();
@@ -152,6 +192,47 @@ fn words_screen_marks_entries_in_bulk() {
     let known = app.boot.base.known().expect("已掌握词典");
     assert_eq!(known.words.len(), 2, "两个词条应进入已掌握词典");
     assert!(app.words_marked.is_empty(), "标记后应清空勾选");
+}
+
+/// 批量标记「认识」要把词从错词本移除，并记一次 Good 评级。
+///
+/// 对齐上游 `onWordKnow`：用户已经认识这个词，它就不该继续留在错词本里；
+/// 评级写进 FSRS 卡片，决定这个词下次什么时候复习。
+#[test]
+fn marking_words_as_known_clears_the_wrong_list_and_rates_them() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+
+    // 先把第 0 个词条标成「不认识」，让它进错词本
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char('3'));
+    let wrong = app.boot.base.wrong().expect("错词词典");
+    assert_eq!(wrong.words.len(), 1, "应有一个错词");
+    let wrong_word = wrong.words[0].word.clone();
+
+    // 再勾选同一个词条并标记为「认识」
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char('1'));
+    let wrong = app.boot.base.wrong().expect("错词词典");
+    assert!(
+        wrong.words.is_empty(),
+        "标记「认识」后应从错词本移除，实际 {:?}",
+        wrong.words.iter().map(|w| &w.word).collect::<Vec<_>>()
+    );
+
+    // 评级写进 FSRS 卡片
+    let card = app
+        .boot
+        .base
+        .fsrs_data
+        .get(&wrong_word)
+        .expect("应有一张 FSRS 卡片");
+    assert!(card.reps > 0, "卡片应被评级过一次");
+    assert!(card.stability > 0.0, "卡片应算出初始稳定性");
 }
 
 /// 编辑词条不应清空未被编辑的内容。

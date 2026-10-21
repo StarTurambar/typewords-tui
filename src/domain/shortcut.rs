@@ -1,7 +1,7 @@
 //! 快捷键表：数据化的「动作 → 键位」映射。
 //!
 //! 对齐上游 `app/core/types/enum.ts` 的 `ShortcutKey`（42 个动作）与
-//! `app/core/config/env.ts` 的 `DefaultShortcutKeyMap`，键位字符串格式也���
+//! `app/core/config/env.ts` 的 `DefaultShortcutKeyMap`，键位字符串格式也和
 //! 上游 `getShortcutKey` 一致（`Ctrl+`、`Alt+`、`Shift+` 前缀，方向键用
 //! `➡⬅⬆⬇`，空格写作 `Space`）。
 //!

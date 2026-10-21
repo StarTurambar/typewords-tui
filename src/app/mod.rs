@@ -24,7 +24,7 @@ use crate::domain::statistics::DayTotals;
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
-    BaseState, Dict, PracticeState, SettingState, Statistics, TaskWords, WordPracticeMode,
+    BaseState, Dict, PracticeState, SettingState, Statistics, TaskWords, Word, WordPracticeMode,
     WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
@@ -2318,7 +2318,12 @@ impl App {
             crate::domain::wordbook::MarkKind::Unknown => {
                 crate::domain::wordbook::mark_unknown(&mut self.boot.base, &words);
             }
-            crate::domain::wordbook::MarkKind::Know => {}
+            crate::domain::wordbook::MarkKind::Know => {
+                // 「认识」= 记一次 Good 评级 + 从错词本移除（对齐上游
+                // `onWordKnow` 的 `resolveIdentifyCorrect`）。
+                crate::domain::wordbook::mark_know(&mut self.boot.base, &words);
+                self.rate_marked_words(&words);
+            }
         }
         self.words_marked.clear();
         self.save_dict_now();
@@ -2326,6 +2331,32 @@ impl App {
             NoticeLevel::Success,
             format!("已处理 {} 个词条", words.len()),
         );
+    }
+
+    /// 给一批词条记一次 Good 评级（写 FSRS 卡片）。
+    ///
+    /// 对齐上游批量标记的 `know` 分支：`ratingMap[word] = Rating.Good`。
+    /// 卡片按当前设置推进到下次复习时间；没有卡片的词从零开始建卡。
+    fn rate_marked_words(&mut self, words: &[Word]) {
+        if words.is_empty() {
+            return;
+        }
+        let scheduler = crate::domain::scheduler::Scheduler::new(&self.boot.settings);
+        let now = timer::now_ms();
+        let reviewed_at =
+            chrono::DateTime::from_timestamp_millis(now).unwrap_or_else(chrono::Utc::now);
+        for word in words {
+            if word.word.is_empty() {
+                continue;
+            }
+            let previous = self.boot.base.fsrs_data.get(&word.word).cloned();
+            let card = scheduler.next_card(
+                previous.as_ref(),
+                crate::domain::types::RATING_GOOD,
+                reviewed_at,
+            );
+            self.boot.base.fsrs_data.insert(word.word.clone(), card);
+        }
     }
 
     /// 把当前词典复制成自定义词典（副本落在数据目录里，可以随意编辑）。

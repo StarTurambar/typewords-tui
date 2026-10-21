@@ -91,6 +91,26 @@ pub fn mark_mastered(base: &mut BaseState, words: &[Word]) {
     known.length = known.words.len();
 }
 
+/// 把一批词条标记为「认识」。
+///
+/// 对齐上游 `onWordKnow` / 批量标记的 `know` 分支：记一次 Good 评级，
+/// 并把词从「错词」词典里去掉——用户已经认识它，就不该继续留在错词本里。
+pub fn mark_know(base: &mut BaseState, words: &[Word]) {
+    let Some(wrong) = base.wrong_mut() else {
+        return;
+    };
+    for word in words {
+        if let Some(index) = wrong
+            .words
+            .iter()
+            .position(|item| item.word.eq_ignore_ascii_case(&word.word))
+        {
+            wrong.words.remove(index);
+        }
+    }
+    wrong.length = wrong.words.len();
+}
+
 /// 把一批词条加入「错词」词典。
 pub fn mark_unknown(base: &mut BaseState, words: &[Word]) {
     let Some(wrong) = base.wrong_mut() else {

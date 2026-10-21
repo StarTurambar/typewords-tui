@@ -97,6 +97,10 @@ impl DictResource {
             language: self.language_or_default().to_string(),
             cover: self.cover.clone(),
             per_day_study_number: 20,
+            // `custom` 必须跟着走：存档落盘前会清掉非自建词典的词表
+            // （`BaseState::shake_common_dict`），标记丢了自建词典的词表
+            // 就被清空了。
+            custom: self.is_custom(),
             words,
             ..Default::default()
         }
@@ -178,6 +182,9 @@ impl Catalog {
     }
 
     /// 读取并解析词条数据。
+    ///
+    /// 词条文件存在但没有可用单词时不报错：新建的自建词典一开始就是空的，
+    /// 用户要往里加词——报错会让「新建词典」直接失败。
     pub fn load_words(&self, resource: &DictResource) -> Result<Vec<Word>> {
         let file = self.dict_file(resource).ok_or_else(|| {
             anyhow!(
@@ -191,9 +198,6 @@ impl Catalog {
         let mut words: Vec<Word> = serde_json::from_str(&text)
             .with_context(|| format!("解析词库文件失败: {}", file.display()))?;
         words.retain(Word::is_usable);
-        if words.is_empty() {
-            return Err(anyhow!("词库文件没有可用单词: {}", file.display()));
-        }
         Ok(words)
     }
 
@@ -267,7 +271,7 @@ pub fn create_custom_dict(paths: &Paths, name: &str, words: Vec<Word>) -> Result
     crate::store::write_atomic(&file, &text)?;
 
     let mut entries = catalog.read_user_catalog()?;
-    let resource = DictResource {
+    let mut resource = DictResource {
         id: serde_json::Value::String(id.clone()),
         en_name: id.clone(),
         name: name.to_string(),
@@ -283,10 +287,12 @@ pub fn create_custom_dict(paths: &Paths, name: &str, words: Vec<Word>) -> Result
         cover: None,
         extra: serde_json::Map::new(),
     };
-    let mut value = serde_json::to_value(&resource)?;
-    if let Some(object) = value.as_object_mut() {
-        object.insert("custom".to_string(), serde_json::Value::Bool(true));
-    }
+    // `custom` 标记既要写进目录文件，也要留在返回的 resource 上——
+    // 调用方直接用它 `to_dict` 建词典，标记丢了自建词典的词表会被清空。
+    resource
+        .extra
+        .insert("custom".to_string(), serde_json::Value::Bool(true));
+    let value = serde_json::to_value(&resource)?;
     entries.retain(|entry| {
         entry
             .get("id")

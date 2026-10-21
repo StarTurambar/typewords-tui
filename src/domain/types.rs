@@ -879,6 +879,9 @@ impl BaseState {
             existing.complete = complete;
             existing.name = dict.name;
             existing.en_name = dict.en_name;
+            // `custom` 标记要跟着更新：词典从内置切成自建（或反过来）时，
+            // 落盘前的 `shake_common_dict` 会按这个标记决定要不要清词表。
+            existing.custom = dict.custom;
             self.word.study_index = index as i32;
         } else {
             let mut dict = dict;

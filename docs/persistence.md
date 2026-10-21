@@ -116,6 +116,8 @@ article.bookList 中 system == false 的词典                        → articl
 
 效果是 `dict.json` 只保存「官方资源词库的进度/统计元数据 + 系统词典词条 + 自定义词典词条」，官方词表在下次启动时按 `url` 从资源目录重新加载，避免把约 4.5 MB 词表写进存档。清空发生在**克隆体**上，内存里的当前词表不受影响。给上游的对应实现是 `shakeCommonDict`（`app/core/utils/index.ts`），规则基本一致。
 
+`custom` 标记由目录项（`home/list/word.json` 里的 `"custom": true`）经 `DictResource::to_dict` 带进 `Dict`；标记丢失会让自建词典的词表在下一次保存时被清空，因此 `create_custom_dict` 与 `BaseState::set_study_dict` 都要保证它跟着词典走。
+
 ## 3. `dict.json`（`BaseState`，版本 4）
 
 ### 3.1 示例

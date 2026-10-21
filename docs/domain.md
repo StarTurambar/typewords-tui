@@ -31,7 +31,7 @@
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
 | `src/domain/flow/store.rs` | 自建练习流程的存档（`flows.json`） | `FlowStore`、`StoredFlow` |
 | `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态 | `Article`、`parse_sentence`、`gen_sections`、`SentenceTyping` |
-| `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`sort_words` |
+| `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`mark_know`、`sort_words` |
 | `src/domain/flow/mod.rs` | 流程配置、游标、相位、展示模型 | `PracticeFlowConfig`、`PracticeFlowCursor`、`builtin_flow`、`resolve_phase_by_cursor`、`display_state` |
 | `src/domain/flow/navigator.rs` | 会话内的位置推进 | `Navigator`、`NavState`、`Notice` |
 | `src/domain/session.rs` | 会话控制器（初始化/恢复/结算） | `PracticeSession`、`PracticeViewState`、`cache_to_compact`、`cache_from_compact` |
@@ -214,11 +214,11 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `load(paths)` | 合并两处目录并校验非空，返回 `Catalog` |
 | `resources()` / `find(id)` | 列出/按 `matches_id`（id 或 enName）查找 |
 | `dict_file(resource)` | 返回实际词条文件路径（home 优先） |
-| `load_words(resource)` | 读取词条 JSON，`retain(Word::is_usable)` 过滤空词；文件缺失、解析失败或无可用词均返回错误 |
+| `load_words(resource)` | 读取词条 JSON，`retain(Word::is_usable)` 过滤空词；文件缺失或解析失败返回错误。词条文件存在但没有可用词时返回空列表——新建的自建词典一开始就是空的，用户要往里加词 |
 | `user_dict_file(name)` | `home/dicts/en/word/<name>` |
 | `read_user_catalog()` | 读 `home/list/word.json`；不存在返回空数组 |
 | `write_user_catalog(value)` | 以 pretty JSON 原子写入用户目录 |
-| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 缺省用实际词数 |
+| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 缺省用实际词数、`custom` 取自目录项的 `custom` 标记 |
 
 `import_dict(paths, source)` 的完整行为：
 
