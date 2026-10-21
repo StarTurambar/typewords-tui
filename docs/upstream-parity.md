@@ -68,7 +68,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | `(articles)/book-list.vue` | 书籍目录 | 无 |
 | `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无 |
 | `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 无 |
-| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（6 分区 24 行） |
+| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 30 行） |
 | `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
 | `doc.vue` | 英语学习资源分享 | 无 |
 | `about.vue` | 关于 | 无 |
@@ -112,7 +112,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 统计页有月历 + 选中日按词典明细 | 已对齐 | 日历以周一为首；有记录的日子打点；`v` 可切到按词典视图 |
 | 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
 | 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 已对齐 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
-| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（6 分区 24 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
+| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 30 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
 | 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
@@ -429,6 +429,6 @@ Web 备份 data.json                       TUI 数据目录
 
 - [文档索引](README.md)
 - [数据文件与互通](persistence.md)（存档格式、版本策略、手工迁移细节）
-- [设置项参考](settings.md)（24 行设置与透传字段的逐项说明）
+- [设置项参考](settings.md)（30 行设置与透传字段的逐项说明）
 - [领域算法](domain.md)（FSRS、流程、会话与统计的实现）
 - [应用状态机](app.md)（键位分发、保存时机与扩展点）

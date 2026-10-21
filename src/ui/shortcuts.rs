@@ -129,7 +129,10 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, action: ShortcutAction, 
     if !action.is_available() {
         label.push_str("（暂不可用）");
     }
-    let binding = app.shortcuts.key_for(action).to_display();
+    let binding = match app.shortcuts.key_for(action) {
+        Some(key) => key.to_display(),
+        None => "（未绑定）".to_string(),
+    };
 
     let binding_width = display_width(&binding);
     let label = fit_text(&label, inner_width.saturating_sub(binding_width + 1));
@@ -164,7 +167,10 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, action: ShortcutAction, 
 
 /// 当前行的键位文本（供帮助页与提示复用）。
 pub fn binding_text(app: &App, action: ShortcutAction) -> String {
-    app.shortcuts.key_for(action).to_upstream()
+    match app.shortcuts.key_for(action) {
+        Some(key) => key.to_upstream(),
+        None => String::new(),
+    }
 }
 
 /// 冲突提示色。

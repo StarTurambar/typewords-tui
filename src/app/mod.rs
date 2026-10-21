@@ -196,9 +196,19 @@ pub enum SettingKind {
     AudioSource,
 }
 
+/// 设置页的行（顺序即展示顺序）。
+///
+/// 分区由 `src/ui/settings.rs` 的 `SECTIONS` 划分：通用 → 音频 → 复习 →
+/// 键入 → 显示 → FSRS → 其他。分区起点用行 key 定位，因此这里的顺序必须
+/// 与 `SECTIONS` 里的起点一致（见 `docs/settings.md` 的「分区与顺序」）。
 pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
+    // 通用
     ("word_practice_mode", SettingKind::Mode),
+    ("theme", SettingKind::Theme),
+    ("sound_type", SettingKind::SoundType),
+    ("big_word", SettingKind::Bool),
     ("shortcut_settings", SettingKind::Shortcuts),
+    // 音频
     ("keyboard_sound", SettingKind::Bool),
     ("effect_sound", SettingKind::Bool),
     ("word_sound", SettingKind::Bool),
@@ -207,12 +217,11 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         "word_sound_speed",
         SettingKind::Number(EditTarget::WordSoundSpeed),
     ),
-    ("theme", SettingKind::Theme),
-    ("sound_type", SettingKind::SoundType),
-    ("big_word", SettingKind::Bool),
+    // 复习
     ("word_review_ratio", SettingKind::Number(EditTarget::Ratio)),
     ("auto_random_review", SettingKind::Bool),
     ("ignore_simple_word", SettingKind::Bool),
+    // 键入
     ("auto_next_word", SettingKind::Bool),
     ("repeat_count", SettingKind::Number(EditTarget::Repeat)),
     (
@@ -226,10 +235,12 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ),
     ("input_wrong_clear", SettingKind::Bool),
     ("ignore_case", SettingKind::Bool),
+    // 显示
     ("show_word_question", SettingKind::Bool),
     ("show_etymology", SettingKind::Bool),
     ("show_near_word", SettingKind::Bool),
     ("show_usage_tips", SettingKind::Bool),
+    // FSRS
     (
         "fsrs_easy_limit",
         SettingKind::Number(EditTarget::EasyLimit),
@@ -246,6 +257,7 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         "request_retention",
         SettingKind::Number(EditTarget::Retention),
     ),
+    // 其他
     (
         "reset_practice_progress",
         SettingKind::Action(ConfirmAction::ResetPractice),
@@ -2549,10 +2561,9 @@ impl App {
         let Some(action) = self.current_shortcut_action() else {
             return;
         };
-        self.boot
-            .settings
-            .shortcut_key_map
-            .remove(action.upstream_name());
+        let mut map = self.shortcuts.clone();
+        map.unbind(action);
+        self.boot.settings.shortcut_key_map = map.to_stored();
         self.refresh_shortcuts();
         self.save_settings_now();
         self.toast(

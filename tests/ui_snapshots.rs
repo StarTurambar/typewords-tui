@@ -137,6 +137,55 @@ fn tiny_terminal_shows_hint() {
     assert!(text.contains("终端太小"));
 }
 
+/// 设置项必须按分区归位：主题 / 音标 / 大字单词属于「通用」，
+/// 键音 / 发音属于「音频」。
+///
+/// 早期实现把 `SETTING_ROWS` 的顺序和 `SECTIONS` 的分区起点对不上，
+/// 「主题」「音标」「大字单词」被划进了「音频」分区。
+#[test]
+fn settings_rows_follow_their_documented_sections() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let text = render_text(&app, 100, 40);
+    let lines: Vec<&str> = text.lines().collect();
+
+    // 找到每个分区标题所在行
+    let section_row = |title: &str| lines.iter().position(|line| line.contains(title));
+
+    let general = section_row("通用").expect("应有通用分区");
+    let audio = section_row("音频").expect("应有音频分区");
+    let review = section_row("复习").expect("应有复习分区");
+
+    let row_of = |label: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(label))
+            .unwrap_or_else(|| panic!("设置页应有「{label}」行"))
+    };
+
+    assert!(
+        general < row_of("主题") && row_of("主题") < audio,
+        "主题应在通用分区"
+    );
+    assert!(
+        general < row_of("音标") && row_of("音标") < audio,
+        "音标应在通用分区"
+    );
+    assert!(
+        general < row_of("大字单词") && row_of("大字单词") < audio,
+        "大字单词应在通用分区"
+    );
+    assert!(
+        audio < row_of("键音") && row_of("键音") < review,
+        "键音应在音频分区"
+    );
+    assert!(
+        audio < row_of("单词发音") && row_of("单词发音") < review,
+        "单词发音应在音频分区"
+    );
+}
+
 #[test]
 fn usage_tips_can_be_hidden() {
     let fixture = common::Fixture::new();

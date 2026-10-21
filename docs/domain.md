@@ -643,7 +643,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 
 ## 14. 文案与随机（i18n.rs / rng.rs）
 
-`tr(key)` 是唯一的文案入口：内部是硬编码的 Rust `match`，覆盖 122 个键；键名与上游 `i18n/locales/zh.json` 对齐，其中 56 个键在上游同名存在（部分文案按 TUI 场景缩短，如 `another_group` 为“继续下一组”、`dict_list` 为“词库”），其余为 TUI 补充键（如 `step_group`、`timer_paused`、`big_word`）。项目只内置简体中文，不读取运行时 locale 文件。
+`tr(key)` 是唯一的文案入口：内部是硬编码的 Rust `match`，覆盖 132 个键；键名与上游 `i18n/locales/zh.json` 对齐，其中 56 个键在上游同名存在（部分文案按 TUI 场景缩短，如 `another_group` 为“继续下一组”、`dict_list` 为“词库”），其余为 TUI 补充键（如 `step_group`、`timer_paused`、`big_word`）。项目只内置简体中文，不读取运行时 locale 文件。
 
 | 键类别 | 代表键 | 使用方 |
 | --- | --- | --- |

@@ -645,8 +645,8 @@ fn shortcut_key_map_survives_a_restart() {
     assert_eq!(
         app.shortcuts
             .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
-            .to_upstream(),
-        "Ctrl+K",
+            .map(|key| key.to_upstream()),
+        Some("Ctrl+K".to_string()),
         "重启后应从存档恢复改绑"
     );
 }
@@ -679,8 +679,8 @@ fn shortcut_editor_rebinds_and_persists() {
     assert_eq!(
         app.shortcuts
             .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
-            .to_upstream(),
-        "Ctrl+K"
+            .map(|key| key.to_upstream()),
+        Some("Ctrl+K".to_string())
     );
 
     press(&mut app, KeyCode::Esc);
@@ -689,8 +689,8 @@ fn shortcut_editor_rebinds_and_persists() {
         reloaded
             .shortcuts
             .key_for(typewords_tui::domain::shortcut::ShortcutAction::ShowWord)
-            .to_upstream(),
-        "Ctrl+K",
+            .map(|key| key.to_upstream()),
+        Some("Ctrl+K".to_string()),
         "改绑应持久化"
     );
 }
@@ -704,15 +704,110 @@ fn shortcut_editor_rejects_a_conflicting_key() {
     press(&mut app, KeyCode::Enter);
 
     let show_word = typewords_tui::domain::shortcut::ShortcutAction::ShowWord;
-    let existing = app.shortcuts.key_for(show_word).to_upstream();
+    let existing = app
+        .shortcuts
+        .key_for(show_word)
+        .expect("默认键位")
+        .to_upstream();
 
     // 把「显示单词」改绑到已被「收藏」占用的 Enter
     press(&mut app, KeyCode::Enter);
     app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(
-        app.shortcuts.key_for(show_word).to_upstream(),
-        existing,
+        app.shortcuts
+            .key_for(show_word)
+            .map(|key| key.to_upstream()),
+        Some(existing),
         "冲突时不应改绑"
+    );
+}
+
+/// 清除绑定后该动作不再响应任何键位。
+///
+/// 早期实现直接 `remove()` 存档里的条目，读回来时又回退到默认键位——
+/// 按 `Delete` 等于「恢复默认」，而不是「取消绑定」。
+#[test]
+fn clearing_a_shortcut_binding_unbinds_the_action() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    goto_setting(&mut app, "shortcut_settings");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Shortcuts);
+
+    let show_word = typewords_tui::domain::shortcut::ShortcutAction::ShowWord;
+    let index = typewords_tui::domain::shortcut::ShortcutAction::ALL
+        .iter()
+        .position(|action| *action == show_word)
+        .expect("应有显示单词动作");
+    while app.shortcut_cursor < index {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.shortcut_cursor, index);
+
+    press(&mut app, KeyCode::Delete);
+    assert!(
+        app.shortcuts.key_for(show_word).is_none(),
+        "清除后不应再有键位"
+    );
+    assert!(
+        app.shortcuts
+            .actions_for(&typewords_tui::domain::shortcut::ShortcutKey::new(
+                typewords_tui::domain::shortcut::BaseKey::Esc
+            ))
+            .is_empty(),
+        "反查也不该再命中该动作"
+    );
+
+    // 重启后仍然是「未绑定」，而不是回到默认键位
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert!(
+        reloaded.shortcuts.key_for(show_word).is_none(),
+        "清除绑定应持久化"
+    );
+    assert_eq!(
+        reloaded
+            .boot
+            .settings
+            .shortcut_key_map
+            .get("ShowWord")
+            .map(String::as_str),
+        Some(""),
+        "存档里应写空串（与上游一致）"
+    );
+}
+
+/// 改绑不能撞上终端兼容别名。
+///
+/// 别名键（`Ctrl+N` = 下一词、`Ctrl+J` = 下一阶段）不落盘，但照样参与
+/// 反查；绑上去会让同一个键位同时触发两个动作。
+#[test]
+fn rebinding_rejects_a_key_used_by_a_terminal_alias() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    goto_setting(&mut app, "shortcut_settings");
+    press(&mut app, KeyCode::Enter);
+
+    let show_word = typewords_tui::domain::shortcut::ShortcutAction::ShowWord;
+    let index = typewords_tui::domain::shortcut::ShortcutAction::ALL
+        .iter()
+        .position(|action| *action == show_word)
+        .expect("应有显示单词动作");
+    while app.shortcut_cursor < index {
+        press(&mut app, KeyCode::Down);
+    }
+
+    // Ctrl+N 是「下一词」的终端兼容别名
+    press(&mut app, KeyCode::Enter);
+    app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    assert_eq!(
+        app.shortcuts
+            .key_for(show_word)
+            .map(|key| key.to_upstream()),
+        Some("Escape".to_string()),
+        "与别名冲突时不应改绑"
     );
 }
 

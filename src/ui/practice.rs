@@ -773,7 +773,11 @@ fn practice_block(title: &str, theme: &Theme) -> Block<'static> {
 /// 快捷键部分按当前键位表生成，用户改绑后提示自动跟着变。
 fn practice_hint_lines(app: &App) -> Vec<String> {
     use crate::domain::shortcut::ShortcutAction;
-    let key = |action: ShortcutAction| app.shortcuts.key_for(action).to_display();
+    // 已解除绑定的动作不显示键位（否则提示会指向一个按了没反应的键）。
+    let key = |action: ShortcutAction| match app.shortcuts.key_for(action) {
+        Some(key) => key.to_display(),
+        None => "（未绑定）".to_string(),
+    };
     vec![
         format!(
             " 空格 继续 · {} 显示 · Tab 跳过 · 反引号 掌握 · {} 收藏 · ? 帮助",
@@ -794,7 +798,10 @@ fn practice_hint_lines(app: &App) -> Vec<String> {
 }
 
 /// TUI 专有键位：上游没有对应动作，因此不进键位表。
-const TUI_ONLY_PAUSE_KEY: &str = "Ctrl+P";
+///
+/// 暂停计时的真实键位是 `Ctrl+,`（见 `App::handle_practice_tui_key`），
+/// `Ctrl+P` 是上游的「播放单词发音」。
+const TUI_ONLY_PAUSE_KEY: &str = "Ctrl+,";
 const TUI_ONLY_EXIT_KEY: &str = "Ctrl+C";
 
 fn hint_line(hints: &str, theme: &Theme) -> Line<'static> {

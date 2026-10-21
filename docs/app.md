@@ -85,7 +85,7 @@
 | `Number` | `word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
 | `Action(ConfirmAction)` | `reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
 
-设置页按 key 归入「通用 / 复习 / 键入 / 显示 / FSRS / 其他」六个分区（起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
+设置页按 key 归入「通用 / 音频 / 复习 / 键入 / 显示 / FSRS / 其他」七个分区（起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
 
 ## 3. 启动流程
 

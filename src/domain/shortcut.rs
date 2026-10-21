@@ -8,7 +8,7 @@
 //! 领域层不依赖终端 crate，因此基础键用本模块的 [`BaseKey`] 表示；
 //! `app` 层负责把 `KeyEvent` 转成 [`ShortcutKey`]。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 // ── 基础键 ─────────────────────────────────────────────────────────────────
@@ -532,9 +532,14 @@ pub fn alias_bindings() -> BTreeMap<ShortcutAction, Vec<ShortcutKey>> {
 // ── 快捷键表 ───────────────────────────────────────────────────────────────
 
 /// 快捷键表：动作 → 键位，并提供反向查找与冲突检测。
+///
+/// 「解除绑定」用 `unbound` 标记表达：上游把 `shortcutKeyMap` 里某个动作的值
+/// 写成空串来表示取消绑定，键位表里就不该再有它的条目。
 #[derive(Clone, Debug)]
 pub struct ShortcutMap {
     bindings: BTreeMap<ShortcutAction, ShortcutKey>,
+    /// 已被解除绑定的动作。
+    unbound: BTreeSet<ShortcutAction>,
 }
 
 impl Default for ShortcutMap {
@@ -542,42 +547,66 @@ impl Default for ShortcutMap {
     fn default() -> Self {
         Self {
             bindings: default_bindings(),
+            unbound: BTreeSet::new(),
         }
     }
 }
 
 impl ShortcutMap {
     /// 由存档读入；缺失或非法的条目回退到默认绑定。
+    ///
+    /// 值为空串的条目表示「已解除绑定」（上游 `setting.vue` 里按 `Delete`
+    /// 就是把值写成 `''`）。
     pub fn from_stored(stored: &BTreeMap<String, String>) -> Self {
         let defaults = default_bindings();
-        let mut bindings = defaults;
+        let mut bindings = defaults.clone();
+        let mut unbound = BTreeSet::new();
         for (name, text) in stored {
             let Some(action) = ShortcutAction::from_upstream_name(name) else {
                 continue;
             };
+            if text.trim().is_empty() {
+                // 明确解除绑定：默认键位也要一并去掉。
+                bindings.remove(&action);
+                unbound.insert(action);
+                continue;
+            }
             let Some(key) = ShortcutKey::from_upstream(text) else {
                 continue;
             };
+            unbound.remove(&action);
             bindings.insert(action, key);
         }
-        Self { bindings }
+        Self { bindings, unbound }
     }
 
     /// 导出为存档格式（上游 `shortcutKeyMap`）。
+    ///
+    /// 已解除绑定的动作写空串——上游用 `''` 表示取消绑定，读回来仍然是
+    /// 「没有绑定」而不是「回到默认键位」。
     pub fn to_stored(&self) -> BTreeMap<String, String> {
-        self.bindings
+        let mut result: BTreeMap<String, String> = self
+            .bindings
             .iter()
             .map(|(action, key)| (action.upstream_name().to_string(), key.to_upstream()))
-            .collect()
+            .collect();
+        for action in &self.unbound {
+            result.insert(action.upstream_name().to_string(), String::new());
+        }
+        result
     }
 
-    /// 动作的主键位。
-    pub fn key_for(&self, action: ShortcutAction) -> ShortcutKey {
-        self.bindings
-            .get(&action)
-            .copied()
-            .or_else(|| default_bindings().get(&action).copied())
-            .unwrap_or_else(|| ShortcutKey::new(BaseKey::Esc))
+    /// 动作是否已被解除绑定。
+    pub fn is_unbound(&self, action: ShortcutAction) -> bool {
+        self.unbound.contains(&action)
+    }
+
+    /// 动作的主键位；已解除绑定时返回 `None`。
+    pub fn key_for(&self, action: ShortcutAction) -> Option<ShortcutKey> {
+        if self.unbound.contains(&action) {
+            return None;
+        }
+        self.bindings.get(&action).copied()
     }
 
     /// 反向查找：命中该键位的所有动作。
@@ -593,6 +622,10 @@ impl ShortcutMap {
             }
         }
         for (action, extra) in &aliases {
+            // 已解除绑定的动作不该再被别名触发。
+            if self.unbound.contains(action) {
+                continue;
+            }
             if extra.contains(key) && !result.contains(action) {
                 result.push(*action);
             }
@@ -601,6 +634,9 @@ impl ShortcutMap {
     }
 
     /// 改绑；返回 `Err` 表示该键位已被别的动作占用。
+    ///
+    /// 冲突检查同样覆盖终端兼容别名：把「下一词」绑到 `Ctrl+N` 会和别名
+    /// 撞车，届时该键位会同时触发两个动作。
     pub fn set(&mut self, action: ShortcutAction, key: ShortcutKey) -> Result<(), String> {
         let clash = self
             .bindings
@@ -610,12 +646,29 @@ impl ShortcutMap {
         if let Some(other) = clash {
             return Err(format!("该键位已被「{}」占用", other.label()));
         }
+        let aliases = alias_bindings();
+        for (other, extra) in &aliases {
+            if *other == action || self.unbound.contains(other) {
+                continue;
+            }
+            if extra.contains(&key) {
+                return Err(format!("该键位已被「{}」的终端兼容键占用", other.label()));
+            }
+        }
+        self.unbound.remove(&action);
         self.bindings.insert(action, key);
         Ok(())
     }
 
+    /// 解除绑定：动作不再响应任何键位。
+    pub fn unbind(&mut self, action: ShortcutAction) {
+        self.bindings.remove(&action);
+        self.unbound.insert(action);
+    }
+
     /// 恢复默认绑定。
     pub fn reset(&mut self, action: ShortcutAction) {
+        self.unbound.remove(&action);
         if let Some(key) = default_bindings().get(&action).copied() {
             self.bindings.insert(action, key);
         }
@@ -624,6 +677,7 @@ impl ShortcutMap {
     /// 全部恢复默认。
     pub fn reset_all(&mut self) {
         self.bindings = default_bindings();
+        self.unbound.clear();
     }
 
     /// 当前所有冲突（同键绑定到多个动作）。
@@ -742,11 +796,16 @@ mod tests {
         stored.insert("Ignore".to_string(), "!!!".to_string());
         let map = ShortcutMap::from_stored(&stored);
         assert_eq!(
-            map.key_for(ShortcutAction::ShowWord).to_upstream(),
-            "Ctrl+K"
+            map.key_for(ShortcutAction::ShowWord)
+                .map(|key| key.to_upstream()),
+            Some("Ctrl+K".to_string())
         );
         // 非法条目回退默认
-        assert_eq!(map.key_for(ShortcutAction::Ignore).to_upstream(), "Tab");
+        assert_eq!(
+            map.key_for(ShortcutAction::Ignore)
+                .map(|key| key.to_upstream()),
+            Some("Tab".to_string())
+        );
         // 未知动作被忽略
         assert_eq!(map.to_stored().len(), ShortcutAction::ALL.len());
     }
@@ -754,21 +813,24 @@ mod tests {
     #[test]
     fn setting_a_conflicting_key_is_rejected() {
         let mut map = ShortcutMap::default();
-        let key = map.key_for(ShortcutAction::ToggleCollect);
+        let key = map
+            .key_for(ShortcutAction::ToggleCollect)
+            .expect("默认键位");
         let error = map
             .set(ShortcutAction::ShowWord, key)
             .expect_err("同一键位不应被两个动作占用");
         assert!(error.contains("收藏"));
         assert_eq!(
-            map.key_for(ShortcutAction::ShowWord).to_upstream(),
-            "Escape"
+            map.key_for(ShortcutAction::ShowWord)
+                .map(|key| key.to_upstream()),
+            Some("Escape".to_string())
         );
     }
 
     #[test]
     fn reverse_lookup_returns_every_action_on_a_key() {
         let map = ShortcutMap::default();
-        let key = map.key_for(ShortcutAction::KnowWord);
+        let key = map.key_for(ShortcutAction::KnowWord).expect("默认键位");
         let actions = map.actions_for(&key);
         assert!(actions.contains(&ShortcutAction::KnowWord));
         assert!(actions.contains(&ShortcutAction::ChooseA));
@@ -791,19 +853,19 @@ mod tests {
         let restored = ShortcutMap::from_stored(&stored);
         assert_eq!(
             restored.key_for(ShortcutAction::Next),
-            ShortcutKey::ctrl(BaseKey::Right)
+            Some(ShortcutKey::ctrl(BaseKey::Right))
         );
         assert_eq!(
             restored.key_for(ShortcutAction::Previous),
-            ShortcutKey::ctrl(BaseKey::Left)
+            Some(ShortcutKey::ctrl(BaseKey::Left))
         );
         assert_eq!(
             restored.key_for(ShortcutAction::NextChapter),
-            ShortcutKey::alt(BaseKey::Right)
+            Some(ShortcutKey::alt(BaseKey::Right))
         );
         assert_eq!(
             restored.key_for(ShortcutAction::NextStep),
-            ShortcutKey::shift(BaseKey::Right)
+            Some(ShortcutKey::shift(BaseKey::Right))
         );
 
         // 反查也要能命中，否则键位等于消失。
