@@ -153,3 +153,124 @@ fn words_screen_marks_entries_in_bulk() {
     assert_eq!(known.words.len(), 2, "两个词条应进入已掌握词典");
     assert!(app.words_marked.is_empty(), "标记后应清空勾选");
 }
+
+/// 编辑词条不应清空未被编辑的内容。
+///
+/// 例句、短语、近义词、词源、关联词、词性与 id 都不在弹层的编辑范围里，
+/// 早期实现用 `..Default::default()` 重建整个词条，改一个词就把它们全丢了。
+#[test]
+fn editing_a_word_keeps_its_other_content() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+
+    let before = app.boot.base.study_dict().expect("当前词库").words[0].clone();
+    assert!(!before.sentences.is_empty(), "测试词条应有例句");
+    assert!(!before.phrases.is_empty(), "测试词条应有短语");
+    assert!(!before.synos.is_empty(), "测试词条应有近义词");
+    assert!(!before.etymology.is_empty(), "测试词条应有词源");
+
+    // 编辑第 0 个词条，只改音标
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Enter);
+    assert!(app.word_edit.is_some(), "应打开词条编辑弹层");
+    app.apply_action(typewords_tui::app::Action::WordsEditSave);
+
+    let after = app.boot.base.study_dict().expect("当前词库").words[0].clone();
+    assert_eq!(after.sentences, before.sentences, "例句应保留");
+    assert_eq!(after.phrases, before.phrases, "短语应保留");
+    assert_eq!(after.synos, before.synos, "近义词应保留");
+    assert_eq!(after.etymology, before.etymology, "词源应保留");
+    assert_eq!(after.rel_words, before.rel_words, "关联词应保留");
+    assert_eq!(after.id, before.id, "id 应保留");
+    assert_eq!(
+        after.trans.first().map(|trans| trans.pos.clone()),
+        before.trans.first().map(|trans| trans.pos.clone()),
+        "原词性应保留"
+    );
+}
+
+/// 词条改动不能改写资源目录里的内置词库。
+///
+/// 内置词库随发布包分发，被改写后用户无法恢复；`tw import-dict` 也只能写
+/// 数据目录。改动应落到数据目录下的副本。
+#[test]
+fn editing_a_word_does_not_touch_the_builtin_asset_file() {
+    let fixture = common::Fixture::new();
+    let asset_file = fixture
+        .assets()
+        .join("dicts")
+        .join("en")
+        .join("word")
+        .join("toy.json");
+    let asset_before = std::fs::read(&asset_file).expect("内置词库");
+
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Enter);
+    app.apply_action(typewords_tui::app::Action::WordsEditSave);
+
+    let asset_after = std::fs::read(&asset_file).expect("内置词库");
+    assert_eq!(asset_before, asset_after, "内置词库文件不应被改写");
+
+    // 改动应落在数据目录的副本里
+    let user_file = fixture
+        .home()
+        .join("dicts")
+        .join("en")
+        .join("word")
+        .join("toy.json");
+    assert!(user_file.is_file(), "改动应写入数据目录的词条文件");
+}
+
+/// 删除词条后，勾选的下标要跟着重映射。
+///
+/// 否则被勾选的词会「漂移」到别的词上——按「已掌握」后标错词。
+#[test]
+fn deleting_a_word_remaps_the_marked_indices() {
+    let fixture = common::Fixture::new();
+    let mut app = typewords_tui::app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+
+    let words: Vec<String> = app
+        .boot
+        .base
+        .study_dict()
+        .expect("当前词库")
+        .words
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+
+    // 勾选第 0、2、4 个词条
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Char(' '));
+    app.words_cursor = 2;
+    press(&mut app, KeyCode::Char(' '));
+    app.words_cursor = 4;
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.words_marked, vec![0, 2, 4], "应勾选三个词条");
+
+    // 删除第 0 个词条
+    app.words_cursor = 0;
+    press(&mut app, KeyCode::Char('d'));
+    assert_eq!(
+        app.words_marked,
+        vec![1, 3],
+        "删除后勾选下标应前移，且仍指向原来那两个词"
+    );
+
+    // 标记为已掌握后，进「已掌握」词典的应是原来勾选的两个词
+    press(&mut app, KeyCode::Char('2'));
+    let known = app.boot.base.known().expect("已掌握词典");
+    let known_words: Vec<String> = known.words.iter().map(|word| word.word.clone()).collect();
+    assert_eq!(
+        known_words,
+        vec![words[2].clone(), words[4].clone()],
+        "已掌握的应是原来勾选的两个词"
+    );
+}

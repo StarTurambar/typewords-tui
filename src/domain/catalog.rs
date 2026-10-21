@@ -205,6 +205,20 @@ impl Catalog {
             .join(file_name)
     }
 
+    /// 词条文件的**写入**路径：始终落在数据目录。
+    ///
+    /// 读取时资源目录是兜底（`dict_file`），但写入绝不能改写资源目录里的
+    /// 内置词库——那些文件随发布包分发，用户改一个词就再也拿不回来，
+    /// `tw import-dict` 也只能写数据目录。写入数据目录后，读取会优先命中
+    /// 它，天然形成「用户覆盖内置」的语义。
+    pub fn dict_write_file(&self, resource: &DictResource) -> PathBuf {
+        let relative = Path::new("dicts")
+            .join(resource.language_or_default())
+            .join("word")
+            .join(&resource.url);
+        self.home.join(relative)
+    }
+
     fn user_catalog_file(&self) -> PathBuf {
         self.home.join("list").join("word.json")
     }

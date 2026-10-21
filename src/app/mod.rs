@@ -1989,6 +1989,10 @@ impl App {
     }
 
     /// 保存词表：系统词典存在存档里，其余词典写回词条文件。
+    ///
+    /// 词条文件写入**数据目录**（而不是资源目录里的内置词库），并用
+    /// 「临时文件 + fsync + rename」的原子写——资源目录里的内置词库随发布包
+    /// 分发，一旦被改写就再也恢复不了。
     fn persist_words(&mut self) {
         if self.words_is_system() {
             self.save_dict_now();
@@ -2001,10 +2005,7 @@ impl App {
             self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
             return;
         };
-        let Some(path) = self.boot.catalog.dict_file(&resource) else {
-            self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
-            return;
-        };
+        let path = self.boot.catalog.dict_write_file(&resource);
         let text = match serde_json::to_string_pretty(&dict.words) {
             Ok(text) => text,
             Err(err) => {
@@ -2012,7 +2013,16 @@ impl App {
                 return;
             }
         };
-        if let Err(err) = std::fs::write(&path, text) {
+        if let Some(parent) = path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            self.toast(
+                NoticeLevel::Error,
+                format!("创建目录 {} 失败: {err}", parent.display()),
+            );
+            return;
+        }
+        if let Err(err) = crate::store::write_atomic(&path, &text) {
             self.toast(
                 NoticeLevel::Error,
                 format!("写入 {} 失败: {err}", path.display()),
@@ -2058,11 +2068,26 @@ impl App {
         let Some(dict) = self.boot.base.study_dict_mut() else {
             return;
         };
+        // 排序前记住勾选的是哪些词，排序后按词重新定位下标。
+        let marked_words: Vec<String> = self
+            .words_marked
+            .iter()
+            .filter_map(|index| dict.words.get(*index).map(|word| word.word.clone()))
+            .collect();
         let mut words = std::mem::take(&mut dict.words);
         crate::domain::wordbook::sort_words(&mut words, order, &mut self.rng);
         if let Some(dict) = self.boot.base.study_dict_mut() {
             dict.words = words;
         }
+        self.words_marked = marked_words
+            .iter()
+            .filter_map(|word| {
+                self.boot
+                    .base
+                    .study_dict()
+                    .and_then(|dict| dict.words.iter().position(|item| &item.word == word))
+            })
+            .collect();
         self.persist_words();
         self.toast(NoticeLevel::Success, format!("排序：{}", order.label()));
     }
@@ -2164,6 +2189,11 @@ impl App {
     }
 
     /// 保存词条编辑。
+    ///
+    /// 只覆盖用户在弹层里编辑的三个字段（单词 / 音标 / 释义），其余字段
+    /// （例句、短语、近义词、词源、关联词、原词性、词频、id）沿用原词条——
+    /// 早期实现用 `..Default::default()` 重建整个词条，改一个词就会把这些
+    /// 内容永久清空。
     fn save_word_edit(&mut self) {
         let Some(edit) = self.word_edit.take() else {
             return;
@@ -2177,17 +2207,30 @@ impl App {
         let Some(dict) = self.boot.base.study_dict_mut() else {
             return;
         };
-        let entry = crate::domain::types::Word {
-            word: word_text.clone(),
-            phonetic0: edit.phonetic.trim().to_string(),
-            phonetic1: edit.phonetic.trim().to_string(),
-            trans: vec![crate::domain::types::Trans {
-                pos: String::new(),
-                cn: edit.translation.trim().to_string(),
-                frequency: None,
-            }],
-            ..Default::default()
-        };
+        // 以原词条为基底，只替换被编辑的字段。
+        let mut entry = match edit.index {
+            Some(index) => dict.words.get(index).cloned(),
+            None => None,
+        }
+        .unwrap_or_default();
+        entry.word = word_text.clone();
+        entry.phonetic0 = edit.phonetic.trim().to_string();
+        entry.phonetic1 = edit.phonetic.trim().to_string();
+        entry.trans = vec![crate::domain::types::Trans {
+            // 保留原文的词性（pos），它不在弹层的编辑范围内。
+            pos: edit
+                .index
+                .and_then(|index| dict.words.get(index))
+                .and_then(|word| word.trans.first())
+                .map(|trans| trans.pos.clone())
+                .unwrap_or_default(),
+            cn: edit.translation.trim().to_string(),
+            frequency: edit
+                .index
+                .and_then(|index| dict.words.get(index))
+                .and_then(|word| word.trans.first())
+                .and_then(|trans| trans.frequency),
+        }];
         match edit.index {
             Some(index) if index < dict.words.len() => dict.words[index] = entry,
             Some(_) => {}
@@ -2218,7 +2261,17 @@ impl App {
         let word = dict.words.remove(index);
         dict.length = dict.words.len();
         self.boot.base.note_data.remove(&word.word);
-        self.words_marked.retain(|item| *item != index);
+        // 删除后更大的下标会整体前移一位，勾选必须跟着重映射，
+        // 否则被勾选的词会「漂移」到别的词上。
+        self.words_marked = self
+            .words_marked
+            .iter()
+            .filter_map(|item| match item.cmp(&index) {
+                std::cmp::Ordering::Less => Some(*item),
+                std::cmp::Ordering::Equal => None,
+                std::cmp::Ordering::Greater => Some(item - 1),
+            })
+            .collect();
         self.persist_words();
     }
 
