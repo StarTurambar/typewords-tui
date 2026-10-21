@@ -8,7 +8,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `src/ui/mod.rs` | 渲染入口 `render`：终端过小检查、背景、按 `Screen` 分发、DIM 遮罩、三种弹层的顺序 |
+| `src/ui/mod.rs` | 渲染入口 `render`：终端过小检查、背景、按 `Screen` 分发、DIM 遮罩、七种弹层的顺序 |
 | `src/ui/theme.rs` | `Theme`（13 个 token 映射为 ratatui `Color`）与 `Theme::from_spec` |
 | `src/ui/shell.rs` | 外壳：响应式侧栏/顶栏/底栏、`Nav`、`ShellLayout`/`SidebarLayout`、颜色提示文案 |
 | `src/ui/home.rs` | 主页 dashboard 与 `targets` |
@@ -34,15 +34,18 @@ ui::render(app, frame)
   ├─ 用 Block(bg = theme.bg, fg = theme.fg) 铺满 area
   ├─ match app.screen
   │    Home → home::render_home      Practice → practice::render_practice
-  │    DictPicker / Stats / Settings / Help → 对应 render
-  ├─ modal_open = summary.is_some() || edit.is_some() || confirm.is_some()
+  │    WordTest / Words / Articles / ArticlePractice / Flows
+  │    DictPicker / Stats / Settings / Shortcuts / Help → 对应 render
+  ├─ modal_open = summary || edit || confirm || word_edit
+  │            || mode_picker || group_picker || collect_picker
   │    └─ 为 buffer 中每个 cell 加 Modifier::DIM（终端无 alpha，用 DIM 模拟遮罩）
-  └─ 依次渲染 summary → edit → confirm（Clear + panel 背景恢复高亮）
+  └─ 依次渲染 summary → edit → confirm → word_edit
+     → mode_picker → group_picker → collect_picker（Clear + panel 背景恢复高亮）
 ```
 
 - 练习页在 `session` 为空时直接返回，画面上只有背景色；正常流程不会出现这个状态。
 - 主题在每帧开头由 `App::theme()` 解析一次；13 色的小结构体让这层开销可忽略。
-- 三种弹层都有独立布局；即使出现异常的多弹层叠加，渲染顺序也是 summary → edit → confirm（后画的在上）。
+- 七种弹层都有独立布局；即使出现异常的多弹层叠加，渲染顺序也是 summary → edit → confirm → word_edit → mode_picker → group_picker → collect_picker（后画的在上）。
 - 渲染只读 `App` 的公开字段。没有任何 `render` 函数会写回状态或落盘。
 
 ## 3. 主题映射
@@ -305,7 +308,7 @@ ui::render(app, frame)
 | `home_screen_renders` / `home_uses_theme_surfaces` / `home_compact_renders_at_min_size` | 主页文本、`bg`/`panel`/`accent_alt` 表面、60×20 紧凑布局 |
 | `practice_screen_renders_big_word` / `masked_mode_renders_placeholder_blocks` / `typed_letters_are_colored` | 大字方块字符、默写占位符、正确输入用 `theme.good` 着色 |
 | `all_screens_render_without_panic` / `cjk_text_wraps_within_width` | 4 个非主页屏幕在 80×24 与 120×40 下渲染、逐行不超出宽度 |
-| `all_builtin_themes_render_home` / `tiny_terminal_shows_hint` / `overlay_screens_render` / `usage_tips_can_be_hidden` | 三套内置主题背景、`< 60 × 20` 提示、三种弹层文本、关闭「显示使用提示」后底部提示行消失 |
+| `all_builtin_themes_render_home` / `tiny_terminal_shows_hint` / `overlay_screens_render` / `usage_tips_can_be_hidden` | 三套内置主题背景、`< 60 × 20` 提示、弹层文本、关闭「显示使用提示」后底部提示行消失 |
 | `mouse_target_rects_match_rendered_text` / `help_scrolls_at_min_size` | 命中矩形与渲染文本一致、帮助页在小终端可滚动 |
 
 `examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / practice / dict / stats / settings / help / summary / edit / confirm` 与自定义宽高、主题。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
