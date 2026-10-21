@@ -360,6 +360,11 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
         .with_context(|| format!("复制词库失败: {} → {}", source.display(), target.display()))?;
 
     let stem = file_name.trim_end_matches(".json").to_string();
+    let mut extra = serde_json::Map::new();
+    // 导入的词库要标成自建：它的词条文件在数据目录里，不是随包分发的内置
+    // 资源。缺了这个标记，落盘前的 `shake_common_dict` 会把词表清空——
+    // 换个词库或改一个词再重启，整本词典就没了。
+    extra.insert("custom".to_string(), serde_json::Value::Bool(true));
     let resource = DictResource {
         id: serde_json::Value::String(stem.clone()),
         en_name: stem.clone(),
@@ -374,7 +379,7 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
         kind: Some("word".to_string()),
         version: Some(1),
         cover: None,
-        extra: serde_json::Map::new(),
+        extra,
     };
 
     let mut user_catalog = catalog.read_user_catalog()?;

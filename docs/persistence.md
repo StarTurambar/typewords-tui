@@ -436,13 +436,14 @@ article.bookList 中 system == false 的词典                        → articl
 2. 文件名必须以 `.json` 结尾；
 3. 加载词库目录（需要可用的 `assets/`）；
 4. 把源文件**原样复制**到 `<home>/dicts/en/word/<文件名>`（不改写内容）；
-5. 生成目录项：`id = enName = name = 文件名去掉 .json`、`description = "导入词库（N 词）"`、`url = 文件名`、`length = N`、`category = "自定义"`、`tags = ["导入"]`、`language = "en"`、`translateLanguage = "zh_CN"`、`type = "word"`、`version = 1`；
+5. 生成目录项：`id = enName = name = 文件名去掉 .json`、`description = "导入词库（N 词）"`、`url = 文件名`、`length = N`、`category = "自定义"`、`tags = ["导入"]`、`language = "en"`、`translateLanguage = "zh_CN"`、`type = "word"`、`version = 1`、`custom = true`；
 6. 写入 `<home>/list/word.json`（pretty JSON + 原子写；按解析后的 id 判重：同 id 替换旧目录项，否则追加），打印「已导入词库: <name>（N 词）」并提示 `tw --dict <id>` 切换；**不会自动切换**当前词库。
 
 行为要点与冲突规则：
 
 - **判重规则**：`Catalog::import_dict` 把每个已有目录项反序列化为 `DictResource` 后比较归一化 id（`Value::String` 与 `Value::Number` 都转成字符串），因此字符串 id 也能正确匹配；重复导入同一文件名只替换原目录项，不会累积重复条目。
 - 导入后立即出现在词库页（`d`）和 `tw --dict` 的可选值中；切换时 `Bootstrapped::select_dict` 会加载词表，并按 id/enName 找到旧书保留 `lastLearnIndex`/`perDayStudyNumber`/`complete`/`statistics`——重复导入同一文件名不会丢进度。
+- **`custom = true` 不能少**：导入的词条文件在数据目录里、不是随包分发的内置资源，落盘前的 `shake_common_dict` 会按这个标记决定要不要清词表（见 3.3）。标记丢了，换个词库或改一个词再重启，整本词典的词就都没了。
 - 命令**不是事务性的**：先复制词条文件、后写用户目录。若目录写入失败，词条文件已存在于 `<home>/dicts/en/word/` 但未注册，可直接重跑命令修复。
 - 用户 `list/word.json` 损坏会让词库目录加载失败，TUI/`tw task`/`import-dict` 启动即报错（`解析词库目录失败: <path>`），需要手工修复或删除该文件（删除后只剩内置词库）。
 
