@@ -19,6 +19,11 @@ pub struct WordsLayout {
     pub header: Rect,
     pub list: Rect,
     pub footer: Rect,
+    /// 列表的滚动偏移（过滤后的行号）。
+    ///
+    /// 早期实现没有偏移：词库有 200 个词时，键盘 `↓` 能把光标移到第
+    /// 100 条，可视区却一直停在第 1 条——光标词既看不见也点不到。
+    pub offset: usize,
 }
 
 pub fn layout(app: &App, content: Rect) -> WordsLayout {
@@ -35,27 +40,42 @@ pub fn layout(app: &App, content: Rect) -> WordsLayout {
         content.width,
         content.height.saturating_sub(2),
     );
-    let _ = app;
+    let offset = scroll_offset(
+        app.words_cursor,
+        app.filtered_word_indices().len(),
+        list.height as usize,
+    );
     WordsLayout {
         header,
         list,
         footer,
+        offset,
     }
+}
+
+/// 让光标始终落在可视区域内的滚动偏移。
+fn scroll_offset(cursor: usize, total: usize, visible: usize) -> usize {
+    if total == 0 || visible == 0 {
+        return 0;
+    }
+    cursor.min(total - 1).saturating_sub(visible - 1)
 }
 
 pub fn targets(app: &App, content: Rect) -> Vec<Target> {
     let layout = layout(app, content);
     let indices = app.filtered_word_indices();
     let mut result = Vec::new();
-    for (row, index) in indices.iter().enumerate() {
-        let y = layout.list.y + row as u16;
+    for (row, index) in indices.iter().enumerate().skip(layout.offset) {
+        let y = layout.list.y + (row - layout.offset) as u16;
         if y >= layout.list.bottom() {
             break;
         }
-        // 勾选行点一下是取消勾选，其余行是移动光标。
-        // 早期实现只比较 `words_marked.first()`，第二个及之后的勾选行点不动。
+        // 点已勾选的那一行 = 取消**那一行**的勾选；点其它行 = 移动光标。
+        //
+        // 早期实现用「光标所在行」执行勾选动作：勾选第 3 行、把光标移到
+        // 第 1 行、再点第 3 行，结果第 3 行仍被勾选，反而把第 1 行勾上了。
         let action = if app.words_marked.contains(index) {
-            crate::app::Action::WordsToggleMark
+            crate::app::Action::WordsToggleMark(*index)
         } else {
             // 光标在**过滤后**的位置，位移也要按过滤后的行号算。
             crate::app::Action::WordsMove(row as i32 - app.words_cursor as i32)
@@ -72,7 +92,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Dicts, |frame, content| {
         let layout = layout(app, content);
         render_header(app, frame, layout.header, theme);
-        render_list(app, frame, layout.list, theme);
+        render_list(app, frame, layout.list, layout.offset, theme);
         render_footer(app, frame, layout.footer, theme);
     });
 }
@@ -126,7 +146,7 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(spans)), rect);
 }
 
-fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
+fn render_list(app: &App, frame: &mut Frame, rect: Rect, offset: usize, theme: &Theme) {
     if rect.height == 0 {
         return;
     }
@@ -145,8 +165,8 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
         return;
     }
     let width = rect.width as usize;
-    for (row, index) in indices.iter().enumerate() {
-        let y = rect.y + row as u16;
+    for (row, index) in indices.iter().enumerate().skip(offset) {
+        let y = rect.y + (row - offset) as u16;
         if y >= rect.bottom() {
             break;
         }

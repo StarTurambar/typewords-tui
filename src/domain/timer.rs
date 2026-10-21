@@ -57,7 +57,7 @@ pub fn normalize_practice_timer(
     let mut valid: Vec<[i64; 2]> = segments
         .iter()
         .filter(|segment| segment[1] > 0)
-        .map(|segment| [segment[0], segment[1].min(now)])
+        .map(|segment| [segment[0], segment[1].min(now.max(segment[1]))])
         .filter(|segment| segment[0] >= 0 && segment[1] > segment[0])
         .collect();
     valid.sort_by_key(|segment| segment[0]);
@@ -158,7 +158,12 @@ pub fn close_open_segment(state: &mut PracticeState, now: i64) {
     if !state.timer_paused
         && let Some(last) = state.segments.last_mut()
     {
-        last[1] = now.max(last[0]);
+        // 片段的结束时间不能被拉早。
+        //
+        // 计时由 `tick` 按传入的 `now` 推进（事件循环用的时间戳），
+        // 闭合时传的可能是更早的挂钟时间——早期实现直接用 `now` 覆盖，
+        // 已经累计的时长会被抹掉一大截。
+        last[1] = now.max(last[0]).max(last[1]);
     }
 }
 

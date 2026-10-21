@@ -11,13 +11,61 @@ use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
 use crate::ui::widgets::{self, fit_text};
 
+/// 书本 / 文章列表页的布局。
+pub struct ArticlesLayout {
+    /// 左：书本列表
+    pub books: Rect,
+    /// 右：文章列表
+    pub articles: Rect,
+}
+
+pub fn layout(content: Rect) -> ArticlesLayout {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Min(20)])
+        .split(content);
+    ArticlesLayout {
+        books: columns[0],
+        articles: columns[1],
+    }
+}
+
+/// 书本 / 文章列表页的鼠标目标。
+///
+/// 书本列表每行一个目标（选书本），文章列表每行一个目标（选文章）。
+pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let layout = layout(content);
+    let mut result = Vec::new();
+    // List 组件的内容从边框内侧开始，每行一个条目。
+    for (index, _) in app.article_books.iter().enumerate() {
+        let y = layout.books.y + 1 + index as u16;
+        if y >= layout.books.bottom().saturating_sub(1) {
+            break;
+        }
+        result.push(Target::new(
+            Rect::new(layout.books.x, y, layout.books.width, 1),
+            crate::app::Action::ArticleBookMove(index as i32 - app.article_book_cursor as i32),
+        ));
+    }
+    for (index, _) in app.article_list.iter().enumerate() {
+        let y = layout.articles.y + 1 + index as u16;
+        if y >= layout.articles.bottom().saturating_sub(1) {
+            break;
+        }
+        result.push(Target::new(
+            Rect::new(layout.articles.x, y, layout.articles.width, 1),
+            crate::app::Action::ArticleMove(index as i32 - app.article_cursor as i32),
+        ));
+    }
+    result
+}
+
 /// 书本 / 文章列表页。
 pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(38), Constraint::Min(20)])
-            .split(content);
+        let layout = layout(content);
+        let columns = [layout.books, layout.articles];
 
         // 左：书本列表
         let books: Vec<ListItem> = app
@@ -89,6 +137,13 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
             columns[1],
         );
     });
+}
+
+/// 句子跟打练习页的鼠标目标。
+///
+/// 该页独占整屏，不画侧栏，因此没有导航目标——练习本身只能用键盘。
+pub fn practice_targets(_app: &App, _area: Rect) -> Vec<crate::ui::target::Target> {
+    Vec::new()
 }
 
 /// 句子跟打练习页。

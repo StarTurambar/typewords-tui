@@ -771,6 +771,9 @@ fn practice_block(title: &str, theme: &Theme) -> Block<'static> {
 /// 练习页底部的按键提示。
 ///
 /// 快捷键部分按当前键位表生成，用户改绑后提示自动跟着变。
+///
+/// 早期实现把「跳过」「掌握」「继续」三个键位写死成字符串，改绑后提示仍
+/// 指向旧键位——用户按提示找不到对应的键。
 fn practice_hint_lines(app: &App) -> Vec<String> {
     use crate::domain::shortcut::ShortcutAction;
     // 已解除绑定的动作不显示键位（否则提示会指向一个按了没反应的键）。
@@ -780,8 +783,10 @@ fn practice_hint_lines(app: &App) -> Vec<String> {
     };
     vec![
         format!(
-            " 空格 继续 · {} 显示 · Tab 跳过 · 反引号 掌握 · {} 收藏 · ? 帮助",
+            " 空格 继续 · {} 显示 · {} 跳过 · {} 掌握 · {} 收藏 · ? 帮助",
             key(ShortcutAction::ShowWord),
+            key(ShortcutAction::Ignore),
+            key(ShortcutAction::ToggleSimple),
             key(ShortcutAction::ToggleCollect),
         ),
         format!(
@@ -800,7 +805,7 @@ fn practice_hint_lines(app: &App) -> Vec<String> {
 /// TUI 专有键位：上游没有对应动作，因此不进键位表。
 ///
 /// 暂停计时的真实键位是 `Ctrl+,`（见 `App::handle_practice_tui_key`），
-/// `Ctrl+P` 是上游的「播放单词发音」。
+/// `Ctrl+C` 是终端保留键。
 const TUI_ONLY_PAUSE_KEY: &str = "Ctrl+,";
 const TUI_ONLY_EXIT_KEY: &str = "Ctrl+C";
 

@@ -431,16 +431,13 @@ impl ShortcutAction {
     ///
     /// 依赖音频、文章编辑或尚未接入的练习模式的动作仍保留绑定（保持存档
     /// 互通），但设置页标注为「暂不可用」。
+    ///
+    /// `ChooseA`~`ChooseD` 与 `WordTestingNext` 在单词测试页生效；
+    /// `PlayWordPronunciation` 在练习页生效。
     pub fn is_available(self) -> bool {
         !matches!(
             self,
             ShortcutAction::EditArticle
-                | ShortcutAction::PlayWordPronunciation
-                | ShortcutAction::ChooseA
-                | ShortcutAction::ChooseB
-                | ShortcutAction::ChooseC
-                | ShortcutAction::ChooseD
-                | ShortcutAction::WordTestingNext
                 | ShortcutAction::PlaySentence1
                 | ShortcutAction::PlaySentence2
                 | ShortcutAction::PlaySentence3

@@ -284,18 +284,25 @@ ui::render(app, frame)
 
 - `centered_rect` 先把宽高夹到 `area`，所以最小终端 60×20 下弹层不会越界（单测 `summary_layout_fits_min_terminal`、`confirm_buttons_are_inside_modal` 覆盖）。
 - 遮罩：`ui::render` 在弹层打开时给全 buffer 加 `Modifier::DIM`；弹层绘制前用 `Clear` + `theme.bg` 清掉弹层外扩 2 列/行的背景，再用 `theme.panel` 画自身，从而在无 alpha 的终端里「压暗背景、恢复前景」。
-- 鼠标：`overlays::targets` 为确认弹层生成「确认/取消」、为结算弹层生成三个按钮（输入弹层没有按钮 target）；`target_action` 的额外规则：确认弹层点击按钮外但在框内返回 `None`（不取消）、点击框外返回 `ConfirmCancel`；输入弹层点击框外返回 `EditCancel`、框内返回 `None`；结算弹层只响应三个按钮，框外不动。结算截图见 [结算弹层](screenshots/summary-120x40-dark.png)。
+- 鼠标：`overlays::targets` 为确认弹层生成「确认/取消」、为结算弹层生成三个按钮，为模式 / 跳组 / 收藏 / 词条编辑弹层生成各自的行 target（输入弹层没有按钮 target）。
+  `target_action` **复用 `targets` 的结果**做命中——两处各写一遍时，模式 / 收藏 / 词条编辑三个弹层只有 `targets` 一侧，鼠标点它们毫无反应。
+  「点弹层外」的语义各弹层不同：跳组 / 确认 / 输入弹层点外面 = 取消；模式 / 收藏 / 词条编辑弹层点外面 = 无动作；结算弹层只响应三个按钮，点外面不动。
+  结算截图见 [结算弹层](screenshots/summary-120x40-dark.png)。
 
 ## 11. 鼠标命中
 
 - `Target { rect: Rect, action: Action }`；`contains(column, row)` 使用半开区间 `[x, right) × [y, bottom)`。
 - `hit::targets` 的收集顺序（也是命中优先级）：
   1. 有弹层时只返回 `overlays::targets`；
-  2. 外壳：`session == None` 时收集侧栏/顶栏导航 target，以及（宽屏）`quit_target`；
-  3. 页面 target：`Home`、`DictPicker`、`Settings` 的页面内按钮/列表；`Help` 整块内容区 → `HelpBack`；`Practice` 与 `Stats` 没有页面 target。
+  2. **独占整屏**的页面（`Practice`、`ArticlePractice`）不画侧栏，也不注册侧栏 target——早期实现按 shell 布局注册了导航，点屏幕上什么都没画的位置会突然跳回主页；
+  3. 外壳：收集侧栏/顶栏导航 target，以及（宽屏）`quit_target`；
+  4. 页面 target：`Home`、`DictPicker`、`Settings`、`Shortcuts`、`Words`、`Stats`、`Flows`、`Articles`、`WordTest` 的页面内按钮/列表；`Help` 是「滚动指示器 + 整块内容区 → `HelpBack`」。
 - `action_at` 用 `find` 返回第一个包含坐标的 target；因此导航优先于页面内按钮，页面内又按 `targets()` 的 push 顺序（例如主页：开始按钮 → 自由练习 → 目标 +/- → d 词库 → d 更多）。
-- `wheel_action`：有弹层返回 `None`；词库页 → `DictMove(delta)`、设置页 → `SettingsMove(delta)`、统计页 → `StatsScroll(delta)`、帮助页 → `HelpScroll(delta)`、其它页面 `None`；`delta` 由滚轮方向给出（上 `-1`、下 `1`）。
-- 不变量：每个页面只写一份 `layout`/`layout_xxx`，`render` 与 `targets` 都从它取 `Rect`；滚动偏移来自 `App` 的同一字段。这样绘制位置与可点击位置不会漂移。相关测试：`tests/app_drive.rs` 用 `hit::targets` 找按钮再模拟点击；`tests/ui_snapshots.rs` 的 `mouse_target_rects_match_rendered_text` 校验命中行与渲染文本一致；弹层布局单测保证按钮在弹层内。
+  **重叠的 target 要靠注册顺序让位**：设置页 / 词库页的滚动指示器画在内容区最右一列，行 target 必须让出这一列，否则点 `↓` 会误触行 target。
+- `wheel_action`：有弹层返回 `None`；词库页 → `DictMove(delta)`、设置页 → `SettingsMove(delta)`、统计页 → `StatsScroll(delta)`、帮助页 → `HelpScroll(delta)`、词条页 → `WordsMove(delta)`、快捷键页 → `ShortcutMove(delta)`、流程页 → `FlowMove(delta)`、文章页 → `ArticleBookMove(delta)`，其它页面 `None`；`delta` 由滚轮方向给出（上 `-1`、下 `1`）。
+- 不变量：每个页面只写一份 `layout`/`layout_xxx`，`render` 与 `targets` 都从它取 `Rect`；滚动偏移来自 `App` 的同一字段。这样绘制位置与可点击位置不会漂移。
+  **文本驱动的控件更进一步**：主页每日目标的 `[-]` / `[+]` 位置由「绘制用的同一行文本」算出来（`home::goal_line_text` + `goal_buttons`），不能各写一份偏移量——早期实现用固定偏移估算，与实际排版差 2 列，所有终端尺寸下点 `+` 都没反应。
+- 相关测试：`tests/app_drive.rs` 用 `hit::targets` 找按钮再模拟点击；`tests/ui_snapshots.rs` 的 `mouse_target_rects_match_rendered_text` 校验命中行与渲染文本一致；`tests/interaction_fixes.rs` 覆盖三个弹层的鼠标命中、主页 `+/-` 的像素对齐、滚动指示器不被行 target 抢走等回归；弹层布局单测保证按钮在弹层内。
 
 ## 12. 渲染测试与新增页面检查清单
 

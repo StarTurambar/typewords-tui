@@ -223,7 +223,7 @@ app.save_all()
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
-| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker/Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作 |
+| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker/Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作。离开 `WordTest` 时清掉 `word_test` 状态——否则切回来会显示上一轮的题目与分数 |
 | `Back` | 依次关闭 confirm/edit/summary；否则按屏返回 Home（Settings 先保存设置；Help 走 `help_back`） |
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
@@ -333,6 +333,8 @@ app.save_all()
 | 主页 | `summary_home` | 清空会话与结算、清练习缓存、回主页并刷新统计/任务 |
 
 `leave_practice`（`Ctrl+C` 或结算继续失败时）在无结算的情况下先保存练习与词典，再清空会话、回主页、刷新缓存。结算弹层出现后练习缓存已被删除，因此「回主页」不再产生缓存文件。
+
+**中途退出的学习时长不能丢**：统计有两条写入路径——会话正常结束（`settle` → `flush_stat_to_store`）与断点缓存被丢弃时的兜底（`flush_practice_stats`）。后者在**开新一轮练习**与**「清空当前练习进度」**时调用，对齐上游 `words.vue` 的 `resetCacheData`（先 `flushStatToStore` 再清缓存）。`stats_recorded` 保证同一轮只记一次。
 
 ## 8. 设置与主题交互
 

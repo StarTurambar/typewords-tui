@@ -26,9 +26,12 @@ pub enum Action {
     StatsScroll(i32),
     StatsToggleView,
     StatsDayMove(i32),
+    /// 选中指定日期（日历里点某一天）。
+    ///
+    /// `StatsDayMove` 是相对移动，鼠标点的是具体某一天，需要绝对值。
+    StatsSelectDay(chrono::NaiveDate),
     StatsMonthMove(i32),
     // 收藏到指定词典
-    OpenCollectPicker,
     CollectMove(i32),
     CollectSelect,
     CollectCancel,
@@ -51,13 +54,16 @@ pub enum Action {
     ArticleMove(i32),
     ArticleSelect,
     // 词条管理
-    OpenWords,
     OpenSelectedWords,
     WordsMove(i32),
     WordsSearchChar(char),
     WordsSearchToggle,
     WordsSearchBackspace,
-    WordsToggleMark,
+    /// 勾选 / 取消勾选词条。
+    ///
+    /// 携带被操作的下标：鼠标点的是哪一行就要改哪一行，早期实现用
+    /// 「光标所在行」执行，点第 3 行却改动了光标行。
+    WordsToggleMark(usize),
     WordsEdit,
     WordsAdd,
     WordsDelete,
@@ -87,7 +93,6 @@ pub enum Action {
     GroupSelect,
     GroupCancel,
     // 快捷键
-    OpenShortcuts,
     ShortcutMove(i32),
     ShortcutCapture,
     ShortcutClear,
@@ -148,8 +153,8 @@ impl App {
             Action::StatsScroll(delta) => self.scroll_stats(delta),
             Action::StatsToggleView => self.toggle_stats_view(),
             Action::StatsDayMove(delta) => self.move_stats_day(delta),
+            Action::StatsSelectDay(date) => self.select_stats_day(date),
             Action::StatsMonthMove(delta) => self.move_stats_month(delta),
-            Action::OpenCollectPicker => self.open_collect_picker(),
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
             Action::CollectSelect => self.select_collect_dict(),
             Action::CollectCancel => self.collect_picker = None,
@@ -171,13 +176,12 @@ impl App {
             Action::ArticleSpeak => {
                 self.speak_current_sentence();
             }
-            Action::OpenWords => self.open_words(),
             Action::OpenSelectedWords => self.open_selected_words(),
             Action::WordsMove(delta) => self.move_words_cursor(delta),
             Action::WordsSearchChar(character) => self.words_search_push(character),
             Action::WordsSearchToggle => self.toggle_words_search(),
             Action::WordsSearchBackspace => self.words_search_backspace(),
-            Action::WordsToggleMark => self.words_toggle_mark(),
+            Action::WordsToggleMark(index) => self.words_toggle_mark(index),
             Action::WordsEdit => self.edit_current_word(),
             Action::WordsAdd => self.open_word_edit(None),
             Action::WordsDelete => self.delete_current_word(),
@@ -207,7 +211,6 @@ impl App {
             Action::GroupMove(delta) => self.move_group_cursor(delta),
             Action::GroupSelect => self.select_group(),
             Action::GroupCancel => self.group_picker = None,
-            Action::OpenShortcuts => self.open_shortcuts(),
             Action::ShortcutMove(delta) => self.move_shortcut_cursor(delta),
             Action::ShortcutCapture => self.start_shortcut_capture(),
             Action::ShortcutClear => self.clear_shortcut_binding(),
@@ -248,6 +251,12 @@ impl App {
     fn navigate_to(&mut self, screen: Screen) {
         if self.session.is_some() {
             return;
+        }
+        // 离开单词测试页时清掉测试状态：否则状态残留，再切回来会显示
+        // 上一轮的题目、分数与用时。
+        if screen != Screen::WordTest {
+            self.word_test = None;
+            self.word_test_spend = 0;
         }
         match screen {
             Screen::Home => {
@@ -366,7 +375,14 @@ impl App {
                 self.quit = true;
             }
             ConfirmAction::ResetPractice => {
+                // 清缓存前先把本轮统计落盘——否则「清空练习进度」会连
+                // 已经学过的时长一起抹掉。
+                self.flush_practice_stats();
+                self.save_dict_now();
                 self.clear_practice_cache();
+                self.session = None;
+                self.stat = crate::domain::types::PracticeState::default();
+                self.typing = crate::domain::typing::TypingEngine::new();
                 self.toast(
                     crate::domain::flow::navigator::NoticeLevel::Success,
                     "已清空练习进度",
@@ -467,7 +483,10 @@ impl App {
 
     fn scroll_help(&mut self, delta: i32) {
         let next = (self.help_scroll as i32 + delta).max(0);
-        self.help_scroll = next.min(80) as u16;
+        // 上限按帮助页的实际条目数算，而不是写死 80——写死的值在条目
+        // 变多时会截断，条目变少时又会滚过头。
+        let max = crate::ui::help::max_scroll() as i32;
+        self.help_scroll = next.min(max) as u16;
     }
 
     fn scroll_stats(&mut self, delta: i32) {
@@ -493,6 +512,12 @@ impl App {
         };
         self.stats_day = next;
         self.stats_month = (next.year(), next.month());
+    }
+
+    /// 选中日历里的某一天。
+    pub fn select_stats_day(&mut self, date: chrono::NaiveDate) {
+        self.stats_day = date;
+        self.stats_month = (date.year(), date.month());
     }
 
     /// 翻到上 / 下一个月。

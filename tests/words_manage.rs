@@ -378,7 +378,12 @@ fn clicking_any_marked_row_toggles_it_off() {
     let targets = typewords_tui::ui::hit::targets(&app, area);
     let toggle_rows: Vec<u16> = targets
         .iter()
-        .filter(|target| target.action == typewords_tui::app::Action::WordsToggleMark)
+        .filter(|target| {
+            matches!(
+                target.action,
+                typewords_tui::app::Action::WordsToggleMark(_)
+            )
+        })
         .map(|target| target.rect.y)
         .collect();
     assert_eq!(
