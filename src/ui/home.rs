@@ -41,7 +41,11 @@ pub struct HomeLayout {
     pub open_more: Option<Rect>,
 }
 
-pub fn layout(body: Rect) -> HomeLayout {
+/// 主页布局。
+///
+/// `per_day` 是每日词数——它决定「每日目标」行里数字占几位，进而决定
+/// `[-]` / `[+]` 的位置，因此必须传进来。
+pub fn layout(body: Rect, per_day: usize) -> HomeLayout {
     let (hero_h, stats_h, dicts_h, recs_h) = heights(body.height);
     let mut constraints = vec![
         Constraint::Length(hero_h),
@@ -86,19 +90,12 @@ pub fn layout(body: Rect) -> HomeLayout {
         .then(|| Rect::new(hero_left.x + primary_width + 1, button_y, free_width, 1));
 
     let goal_short = hero_right.width < 24;
-    let (goal_minus, goal_plus) = if goal_short {
-        let minus_x = hero_right.x + 5;
-        let plus_x = hero_right.x + 14;
-        (
-            Some(Rect::new(minus_x, hero_right.y + 1, 3, 1)),
-            (plus_x + 3 <= hero_right.right()).then(|| Rect::new(plus_x, hero_right.y + 1, 3, 1)),
-        )
-    } else {
-        (
-            Some(Rect::new(hero_right.x + 9, hero_right.y + 1, 3, 1)),
-            Some(Rect::new(hero_right.x + 21, hero_right.y + 1, 3, 1)),
-        )
-    };
+    // 每日目标行的命中矩形必须由**绘制用的同一行文本**算出来。
+    // 早期实现用固定偏移（`hero_right.x + 9` / `+21`）估算位置，而渲染
+    // 用的是「每日目标 [-] N 词 [+]」的实际排版，两者对不上：所有终端
+    // 尺寸下 `[+]` 的命中区都偏 2 列，点 `+` 号没反应。
+    let goal_line = goal_line_text(goal_short, per_day);
+    let (goal_minus, goal_plus) = goal_buttons(&goal_line, hero_right);
 
     // 练习模式：显示在「今日任务」标题行的右端，点击打开模式选择
     let mode_label = "模式 学习 ▾";
@@ -190,6 +187,59 @@ pub fn layout(body: Rect) -> HomeLayout {
     }
 }
 
+/// 每日目标行的文本。
+///
+/// 命中检测与渲染共用它——两边各自排版就会算出不同的按钮位置。
+/// 拼接结果必须与 `goal_line_spans` 的内容一致。
+pub fn goal_line_text(goal_short: bool, per_day: usize) -> String {
+    if goal_short {
+        format!("目标 [-] {per_day} [+] ")
+    } else {
+        format!("每日目标 [-] {per_day:>2} 词 [+]")
+    }
+}
+
+/// 每日目标行的分段（带颜色）。
+///
+/// 拼接后的文本与 `goal_line_text` 相同——命中检测按后者算位置。
+fn goal_line_spans(goal_short: bool, per_day: usize, theme: &Theme) -> Vec<Span<'static>> {
+    if goal_short {
+        vec![
+            Span::styled("目标 ", Style::default().fg(theme.dim)),
+            Span::styled("[-]", Style::default().fg(theme.accent_alt)),
+            Span::styled(format!(" {per_day}"), Style::default().fg(theme.fg)),
+            Span::styled(" [+] ", Style::default().fg(theme.accent_alt)),
+        ]
+    } else {
+        vec![
+            Span::styled("每日目标 ", Style::default().fg(theme.dim)),
+            Span::styled("[-]", Style::default().fg(theme.accent_alt)),
+            Span::styled(
+                format!(" {per_day:>2} "),
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("词 ", Style::default().fg(theme.muted)),
+            Span::styled("[+]", Style::default().fg(theme.accent_alt)),
+        ]
+    }
+}
+
+/// 每日目标行里 `[-]` 与 `[+]` 的命中矩形。
+///
+/// 按文本里的实际字符位置计算，不做任何偏移估算。
+fn goal_buttons(text: &str, hero_right: Rect) -> (Option<Rect>, Option<Rect>) {
+    let row = Rect::new(hero_right.x, hero_right.y + 1, hero_right.width, 1);
+    let find = |needle: &str| -> Option<Rect> {
+        let offset = text.find(needle)?;
+        // 文本是 ASCII + CJK 混合，用显示宽度算列号。
+        let column = display_width(&text[..offset]) as u16;
+        let width = display_width(needle) as u16;
+        let rect = Rect::new(row.x + column, row.y, width, 1);
+        (rect.right() <= row.right()).then_some(rect)
+    };
+    (find("[-]"), find("[+]"))
+}
+
 fn heights(body_height: u16) -> (u16, u16, u16, u16) {
     if body_height >= 34 {
         (11, 7, 7, 6)
@@ -205,7 +255,12 @@ fn heights(body_height: u16) -> (u16, u16, u16, u16) {
 
 pub fn render_home(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
-        let layout = layout(content);
+        let per_day = app
+            .boot
+            .study_dict()
+            .map(|dict| dict.per_day())
+            .unwrap_or(0);
+        let layout = layout(content, per_day);
         render_hero(app, frame, &layout, theme);
         if let Some(stats) = layout.stats {
             render_stats(app, frame, stats, layout.stats_tiles, layout.week, theme);
@@ -372,27 +427,12 @@ fn render_hero_right(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &
 
     let dict = app.boot.study_dict();
     let per_day = dict.map(|dict| dict.per_day()).unwrap_or(0);
-    let goal_line = if layout.goal_short {
-        Line::from(vec![
-            Span::styled("目标 ", Style::default().fg(theme.dim)),
-            Span::styled("[-]", Style::default().fg(theme.accent_alt)),
-            Span::styled(format!(" {per_day}"), Style::default().fg(theme.fg)),
-            Span::styled(" [+] ", Style::default().fg(theme.accent_alt)),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled("每日目标 ", Style::default().fg(theme.dim)),
-            Span::styled("[-]", Style::default().fg(theme.accent_alt)),
-            Span::styled(
-                format!(" {per_day:>2} "),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("词 ", Style::default().fg(theme.muted)),
-            Span::styled("[+]", Style::default().fg(theme.accent_alt)),
-        ])
-    };
     frame.render_widget(
-        Paragraph::new(goal_line),
+        Paragraph::new(Line::from(goal_line_spans(
+            layout.goal_short,
+            per_day,
+            theme,
+        ))),
         Rect::new(right.x, right.y + 1, right.width, 1),
     );
 
@@ -830,7 +870,12 @@ fn two_part_line(left: Span<'static>, right: Span<'static>, width: usize) -> Lin
 /// 鼠标命中检测用的目标（主页）。
 pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     use crate::ui::target::Target;
-    let layout = layout(content);
+    let per_day = app
+        .boot
+        .study_dict()
+        .map(|dict| dict.per_day())
+        .unwrap_or(0);
+    let layout = layout(content, per_day);
     let mut targets = Vec::new();
     targets.push(Target::new(
         layout.primary,

@@ -355,7 +355,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `tick(state, last_activity, now)` | 暂停返回 `Paused`；空闲超时返回 `IdlePaused`；否则 `spend += 1000` 并把最后片段 `end` 设为 `now`，返回 `Ticked` |
 | `pause(state, reason, now)` | 已暂停则忽略；否则把最后片段 `end` 夹到 `now`，记录 `timer_pause_reason` |
 | `resume(state, now)` | 清除暂停标记并压入 `[now, now]` 新片段 |
-| `close_open_segment(state, now)` | 未暂停时把最后片段 `end` 夹到 `now`；结算前调用 |
+| `close_open_segment(state, now)` | 未暂停时把最后片段 `end` 夹到 `now`（但不早于它已有的 `end`——计时由 `tick` 按事件循环的时间戳推进，闭合时传的挂钟时间可能更早，直接覆盖会抹掉已累计的时长）；结算前调用 |
 | `normalize_practice_timer(segments, spend, now)` | 清洗、合并、裁剪、跨天拆分，返回 `(segments, spend)` |
 | `format_duration(ms)` | 至少 1 小时输出“x小时y分钟”，有分钟输出“y分钟”，否则“z秒” |
 

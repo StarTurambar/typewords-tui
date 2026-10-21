@@ -19,9 +19,11 @@ pub struct WordTestLayout {
     pub header: Rect,
     pub body: Rect,
     pub footer: Rect,
+    /// 每个选项一行，与 `question.candidates` 的顺序一致。
+    pub option_rows: Vec<Rect>,
 }
 
-pub fn layout(area: Rect) -> WordTestLayout {
+pub fn layout(area: Rect, options: usize) -> WordTestLayout {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -30,10 +32,20 @@ pub fn layout(area: Rect) -> WordTestLayout {
             Constraint::Length(2),
         ])
         .split(area);
+    // 每个选项占两行（选项文字 + 间隔）
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            (0..options)
+                .map(|_| Constraint::Length(2))
+                .collect::<Vec<_>>(),
+        )
+        .split(chunks[1]);
     WordTestLayout {
         header: chunks[0],
         body: chunks[1],
         footer: chunks[2],
+        option_rows: rows.to_vec(),
     }
 }
 
@@ -42,11 +54,36 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         return;
     };
     shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
-        let layout = layout(content);
+        let options = state
+            .question
+            .as_ref()
+            .map(|question| question.candidates.len())
+            .unwrap_or(0);
+        let layout = layout(content, options);
         render_header(state, frame, layout.header, theme);
-        render_options(state, frame, layout.body, theme);
+        render_options(state, frame, layout.body, &layout.option_rows, theme);
         render_footer(state, frame, layout.footer, theme);
     });
+}
+
+/// 单词测试页的鼠标目标：四个选项各一个。
+pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let Some(state) = app.word_test.as_ref() else {
+        return Vec::new();
+    };
+    let options = state
+        .question
+        .as_ref()
+        .map(|question| question.candidates.len())
+        .unwrap_or(0);
+    let layout = layout(content, options);
+    layout
+        .option_rows
+        .iter()
+        .enumerate()
+        .map(|(index, rect)| Target::new(*rect, crate::app::Action::WordTestChoose(index)))
+        .collect()
 }
 
 fn render_header(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &Theme) {
@@ -72,7 +109,13 @@ fn render_header(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &T
     frame.render_widget(Paragraph::new(Line::from(spans)), rect);
 }
 
-fn render_options(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &Theme) {
+fn render_options(
+    state: &WordTestState,
+    frame: &mut Frame,
+    rect: Rect,
+    option_rows: &[Rect],
+    theme: &Theme,
+) {
     let Some(question) = state.question.as_ref() else {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -84,19 +127,11 @@ fn render_options(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &
         return;
     };
     let answered = state.selected.is_some();
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            question
-                .candidates
-                .iter()
-                .map(|_| Constraint::Length(2))
-                .collect::<Vec<_>>(),
-        )
-        .split(rect);
 
     for (index, candidate) in question.candidates.iter().enumerate() {
-        let row = rows[index];
+        let Some(row) = option_rows.get(index).copied() else {
+            break;
+        };
         if row.height == 0 {
             break;
         }

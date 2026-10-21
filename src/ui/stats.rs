@@ -108,16 +108,25 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     );
 }
 
-/// 日历块：一个月的网格，标出有记录的日子与选中的日子。
-fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
-    let (year, month) = app.stats_month;
-    let today = insights::today();
-    let studied = insights::studied_days(&app.boot.base);
-    let first = match chrono::NaiveDate::from_ymd_opt(year, month, 1) {
-        Some(date) => date,
-        None => return Vec::new(),
-    };
-    // 周一为一周的第一天
+/// 日历网格的几何：每月第一天是周几、这个月有几天。
+///
+/// 绘制与命中检测共用它——两处各算一遍就会让「点日期选一天」点不准。
+struct CalendarGrid {
+    /// 每月 1 号前面空几格（周一为一周第一天）。
+    leading: usize,
+    /// 这个月的最后一天。
+    last_day: u32,
+}
+
+/// 日历里每格占 5 列（3 列日期 + 2 列记录点）。
+const CALENDAR_CELL_WIDTH: u16 = 5;
+/// 日历每行的日期数字占 3 列（右对齐）。
+const CALENDAR_NUMBER_WIDTH: u16 = 3;
+/// 日历块第一列前的缩进。
+const CALENDAR_INDENT: u16 = 2;
+
+fn calendar_grid(year: i32, month: u32) -> Option<CalendarGrid> {
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
     let leading = first.weekday().num_days_from_monday() as usize;
     let days_in_month = (first + chrono::Duration::days(31)).day();
     let last_day = if month == 12 {
@@ -128,6 +137,20 @@ fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
     .and_then(|d| d.pred_opt())
     .map(|d| d.day())
     .unwrap_or(days_in_month);
+    Some(CalendarGrid { leading, last_day })
+}
+
+/// 日历块：一个月的网格，标出有记录的日子与选中的日子。
+fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let (year, month) = app.stats_month;
+    let today = insights::today();
+    let studied = insights::studied_days(&app.boot.base);
+    let Some(grid) = calendar_grid(year, month) else {
+        return Vec::new();
+    };
+    let leading = grid.leading;
+    let last_day = grid.last_day;
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap_or_default();
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
@@ -379,6 +402,100 @@ fn render_tile(
         }
     }
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// 统计页的鼠标目标。
+///
+/// - 顶栏的「v 切换」→ 切换日历 / 按词典视图
+/// - 日历里的每一天 → 选中该日
+pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let layout = layout(app, content);
+    let mut result = Vec::new();
+    // 顶栏右侧的「v 切换」
+    let toggle = widgets::section_header(
+        "统计",
+        &format!(
+            "{} · v 切换",
+            if app.stats_by_dict {
+                "按词典"
+            } else {
+                "日历"
+            }
+        ),
+        layout.header.width as usize,
+        &app.theme(),
+    );
+    if let Some(rect) = header_right_rect(&toggle, layout.header) {
+        result.push(Target::new(rect, crate::app::Action::StatsToggleView));
+    }
+    // 日历里的每一天
+    if !app.stats_by_dict {
+        result.extend(calendar_targets(app, &layout));
+    }
+    result
+}
+
+/// 顶栏里右侧提示文字的矩形。
+fn header_right_rect(line: &Line<'_>, rect: Rect) -> Option<Rect> {
+    let text = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    let marker = text.rfind("v 切换")?;
+    let column = display_width(&text[..marker]) as u16;
+    let width = display_width("v 切换") as u16;
+    let target = Rect::new(rect.x + column, rect.y, width, 1);
+    (target.right() <= rect.right()).then_some(target)
+}
+
+/// 日历里每一天的命中矩形。
+fn calendar_targets(app: &App, layout: &StatsLayout) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let mut result = Vec::new();
+    let (year, month) = app.stats_month;
+    let Some(grid) = calendar_grid(year, month) else {
+        return result;
+    };
+    // 日历在正文里：第 0 行是月份标题，第 1 行是星期表头，
+    // 之后每一行是一周。
+    let first_week_row = 2usize;
+    let rows = grid.leading + grid.last_day as usize;
+    let weeks = rows.div_ceil(7);
+    for week in 0..weeks {
+        for weekday in 0..7usize {
+            let cell = week * 7 + weekday;
+            if cell < grid.leading {
+                continue;
+            }
+            let day = cell - grid.leading + 1;
+            if day as u32 > grid.last_day {
+                continue;
+            }
+            let line = first_week_row + week;
+            // 滚动偏移
+            let Some(visible_row) = line.checked_sub(app.stats_scroll as usize) else {
+                continue;
+            };
+            if visible_row >= layout.visible {
+                continue;
+            }
+            let y = layout.list.y + visible_row as u16;
+            let x = layout.list.x
+                + CALENDAR_INDENT
+                + (weekday as u16) * CALENDAR_CELL_WIDTH
+                + (CALENDAR_CELL_WIDTH - CALENDAR_NUMBER_WIDTH);
+            let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day as u32) else {
+                continue;
+            };
+            result.push(Target::new(
+                Rect::new(x, y, CALENDAR_NUMBER_WIDTH, 1),
+                crate::app::Action::StatsSelectDay(date),
+            ));
+        }
+    }
+    result
 }
 
 /// 下方内容区：日历视图渲染「日历 + 选中日明细 + 最近 14 天」，

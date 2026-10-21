@@ -50,6 +50,25 @@ pub fn layout(_app: &App, content: Rect) -> FlowsLayout {
     }
 }
 
+/// 流程页的鼠标目标：流程列表每行一个。
+pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let layout = layout(app, content);
+    let entries = app.flow_entries();
+    let mut result = Vec::new();
+    for (index, _) in entries.iter().enumerate() {
+        let y = layout.list.y + index as u16;
+        if y >= layout.list.bottom() {
+            break;
+        }
+        result.push(Target::new(
+            Rect::new(layout.list.x, y, layout.list.width, 1),
+            crate::app::Action::FlowMove(index as i32 - app.flow_cursor as i32),
+        ));
+    }
+    result
+}
+
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
         let layout = layout(app, content);

@@ -3,7 +3,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{Action, App, Screen};
-use crate::domain::shortcut::{BaseKey, ShortcutKey};
+use crate::domain::shortcut::{BaseKey, ShortcutAction, ShortcutKey};
 
 /// 把终端按键事件转成领域层的键位表示。
 ///
@@ -70,7 +70,11 @@ fn word_edit_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Tab | KeyCode::Down => Some(Action::WordsEditField(1)),
         KeyCode::BackTab | KeyCode::Up => Some(Action::WordsEditField(-1)),
         KeyCode::Backspace => Some(Action::WordsEditBackspace),
-        KeyCode::Char(character) => Some(Action::WordsEditChar(character)),
+        // 带 Ctrl / Alt 的组合键不是文本输入：`Ctrl+C` 会被终端报成
+        // `Char('c')`，不加判断就会把字母 c 写进词条。
+        KeyCode::Char(character) if !has_command_modifier(key) => {
+            Some(Action::WordsEditChar(character))
+        }
         _ => None,
     }
 }
@@ -93,7 +97,10 @@ fn words_action(app: &App, key: KeyEvent) -> Option<Action> {
         return match key.code {
             KeyCode::Esc => Some(Action::WordsSearchToggle),
             KeyCode::Backspace => Some(Action::WordsSearchBackspace),
-            KeyCode::Char(character) => Some(Action::WordsSearchChar(character)),
+            // 组合键不是搜索词：`Ctrl+C` 会被终端报成 `Char('c')`。
+            KeyCode::Char(character) if !has_command_modifier(key) => {
+                Some(Action::WordsSearchChar(character))
+            }
             _ => None,
         };
     }
@@ -106,7 +113,12 @@ fn words_action(app: &App, key: KeyEvent) -> Option<Action> {
         KeyCode::Home => Some(Action::WordsMove(-100_000)),
         KeyCode::End => Some(Action::WordsMove(100_000)),
         KeyCode::Enter => Some(Action::WordsEdit),
-        KeyCode::Char(' ') => Some(Action::WordsToggleMark),
+        KeyCode::Char(' ') => Some(Action::WordsToggleMark(
+            app.filtered_word_indices()
+                .get(app.words_cursor)
+                .copied()
+                .unwrap_or(usize::MAX),
+        )),
         KeyCode::Char('/') => Some(Action::WordsSearchToggle),
         KeyCode::Char('a') => Some(Action::WordsAdd),
         KeyCode::Char('d') => Some(Action::WordsDelete),
@@ -149,10 +161,22 @@ fn edit_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Esc => Some(Action::EditCancel),
         KeyCode::Enter => Some(Action::EditSave),
         KeyCode::Backspace => Some(Action::EditBackspace),
-        // 是否只接受数字由 apply_action 按编辑目标判断
-        KeyCode::Char(character) if !character.is_control() => Some(Action::EditChar(character)),
+        // 是否只接受数字由 apply_action 按编辑目标判断。
+        // `Ctrl+C` 会被终端报成 `Char('c')`，因此组合键不能当文本。
+        KeyCode::Char(character) if !character.is_control() && !has_command_modifier(key) => {
+            Some(Action::EditChar(character))
+        }
         _ => None,
     }
+}
+
+/// 是否是带 `Ctrl` / `Alt` 的组合键。
+///
+/// 终端把 `Ctrl+C` 报成 `Char('c')` + `CONTROL` 修饰位——只看
+/// `KeyCode::Char` 分支会把组合键误当成普通字母。输入类弹层必须用
+/// 它把组合键挡在外面。
+fn has_command_modifier(key: KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT)
 }
 
 fn confirm_action(key: KeyEvent) -> Option<Action> {
@@ -169,6 +193,26 @@ fn summary_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('q') | KeyCode::Esc => Some(Action::SummaryHome),
         _ => None,
     }
+}
+
+/// 单词测试页的选项键位。
+///
+/// 走键位表（`ChooseA`~`ChooseD` / `WordTestingNext`），用户改绑后新键位
+/// 同样生效。默认绑定是 `1`~`4` 与空格，与上游 `words-test/[id].vue` 一致。
+fn word_test_shortcut_action(app: &App, key: KeyEvent) -> Option<Action> {
+    let shortcut = to_shortcut_key(key)?;
+    for action in app.shortcuts.actions_for(&shortcut) {
+        let action = match action {
+            ShortcutAction::ChooseA => Action::WordTestChoose(0),
+            ShortcutAction::ChooseB => Action::WordTestChoose(1),
+            ShortcutAction::ChooseC => Action::WordTestChoose(2),
+            ShortcutAction::ChooseD => Action::WordTestChoose(3),
+            ShortcutAction::WordTestingNext => Action::WordTestNext,
+            _ => continue,
+        };
+        return Some(action);
+    }
+    None
 }
 
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
@@ -293,12 +337,7 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         Screen::Words => words_action(app, key),
         Screen::WordTest => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::WordTestExit),
-            KeyCode::Char('1') => Some(Action::WordTestChoose(0)),
-            KeyCode::Char('2') => Some(Action::WordTestChoose(1)),
-            KeyCode::Char('3') => Some(Action::WordTestChoose(2)),
-            KeyCode::Char('4') => Some(Action::WordTestChoose(3)),
-            KeyCode::Char(' ') => Some(Action::WordTestNext),
-            _ => None,
+            _ => word_test_shortcut_action(app, key),
         },
         Screen::Shortcuts => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),

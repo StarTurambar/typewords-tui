@@ -279,13 +279,16 @@ pub fn render_group_picker(
 }
 
 /// 「收藏到指定词典」弹层：列出可收藏的词典。
-pub fn render_collect_picker(
-    frame: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    dicts: &[(usize, String)],
-    cursor: usize,
-) {
+///
+/// 布局与绘制共用 `collect_picker_layout`，命中检测也读它。
+pub struct CollectPickerLayout {
+    pub rect: Rect,
+    pub inner: Rect,
+    /// 每个词典一行，与 `dicts` 的顺序一致。
+    pub rows: Vec<Rect>,
+}
+
+pub fn collect_picker_layout(dicts_len: usize, area: Rect) -> CollectPickerLayout {
     let rect = widgets::centered_rect(44, 12, area);
     let inner = Rect::new(
         rect.x + 2,
@@ -293,6 +296,29 @@ pub fn render_collect_picker(
         rect.width.saturating_sub(4),
         rect.height.saturating_sub(2),
     );
+    // 标题占一行，底部提示占一行，中间是列表
+    let list = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    let rows = (0..dicts_len)
+        .map(|index| Rect::new(list.x, list.y + index as u16, list.width, 1))
+        .collect();
+    CollectPickerLayout { rect, inner, rows }
+}
+
+pub fn render_collect_picker(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    dicts: &[(usize, String)],
+    cursor: usize,
+) {
+    let layout = collect_picker_layout(dicts.len(), area);
+    let rect = layout.rect;
+    let inner = layout.inner;
     clear_modal_backdrop(frame, area, rect, theme);
     widgets::paint_rect(frame, rect, theme.panel);
 
@@ -306,9 +332,11 @@ pub fn render_collect_picker(
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
 
-    let list_y = inner.y + 1;
     for (offset, (_, name)) in dicts.iter().enumerate() {
-        if offset as u16 + 1 >= inner.height.saturating_sub(1) {
+        let Some(row) = layout.rows.get(offset).copied() else {
+            break;
+        };
+        if row.y >= inner.bottom().saturating_sub(1) {
             break;
         }
         let selected = offset == cursor;
@@ -322,7 +350,7 @@ pub fn render_collect_picker(
         let marker = if selected { "▶ " } else { "  " };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(format!("{marker}{name}"), style))),
-            Rect::new(inner.x, list_y + offset as u16, inner.width, 1),
+            row,
         );
     }
 
@@ -337,17 +365,44 @@ pub fn render_collect_picker(
 }
 
 /// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
+///
+/// 布局与绘制共用 `word_edit_layout`，命中检测也读它。
+pub struct WordEditLayout {
+    pub rect: Rect,
+    pub inner: Rect,
+    /// 四个字段各占一行，与 `WORD_EDIT_LABELS` 的顺序一致。
+    pub rows: Vec<Rect>,
+}
+
+/// 词条编辑弹层的字段名。
+const WORD_EDIT_LABELS: [&str; 4] = ["单词", "音标", "释义", "笔记"];
+
+pub fn word_edit_layout(area: Rect) -> WordEditLayout {
+    let rect = widgets::centered_rect(56, 11, area);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height.saturating_sub(2),
+    );
+    // 顶部一行标题，中间四行字段
+    let rows = (0..WORD_EDIT_LABELS.len())
+        .map(|index| Rect::new(inner.x, inner.y + 1 + index as u16, inner.width, 1))
+        .collect();
+    WordEditLayout { rect, inner, rows }
+}
+
 pub fn render_word_edit(
     frame: &mut Frame,
     area: Rect,
     theme: &Theme,
     edit: &crate::app::WordEditState,
 ) {
-    let rect = widgets::centered_rect(56, 11, area);
+    let layout = word_edit_layout(area);
+    let rect = layout.rect;
     clear_modal_backdrop(frame, area, rect, theme);
     widgets::paint_rect(frame, rect, theme.panel);
 
-    const LABELS: [&str; 4] = ["单词", "音标", "释义", "笔记"];
     let values = [
         edit.word.clone(),
         edit.phonetic.clone(),
@@ -363,7 +418,7 @@ pub fn render_word_edit(
         },
         Style::default().fg(theme.muted),
     )));
-    for (index, label) in LABELS.iter().enumerate() {
+    for (index, label) in WORD_EDIT_LABELS.iter().enumerate() {
         let active = index == edit.field;
         let marker = if active { "▶" } else { " " };
         let style = if active {
@@ -605,6 +660,11 @@ fn edit_label(edit: &EditState) -> String {
     }
 }
 
+/// 弹层的鼠标目标。
+///
+/// 命中检测（`target_action`）与目标列表（`targets`）必须来自同一份
+/// 布局——早期实现把两者各写一遍，`mode_picker` / `collect_picker` /
+/// `word_edit` 三个弹层只写了 `targets` 一侧，鼠标点它们毫无反应。
 pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Target> {
     use crate::ui::target::Target;
     if app.confirm.is_some() {
@@ -621,9 +681,6 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
             Target::new(layout.relearn_btn, Action::SummaryRelearn),
             Target::new(layout.home_btn, Action::SummaryHome),
         ];
-    }
-    if app.collect_picker.is_some() {
-        return Vec::new();
     }
     if let Some(picker) = &app.mode_picker {
         let modes = crate::domain::constants::PRACTICE_MODE_NAMES;
@@ -650,23 +707,68 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
             })
             .collect();
     }
+    if app.collect_picker.is_some() {
+        let dicts = app.collectible_dicts();
+        let layout = collect_picker_layout(dicts.len(), area);
+        return layout
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, rect)| {
+                Target::new(
+                    *rect,
+                    Action::CollectMove(index as i32 - picker_cursor(app)),
+                )
+            })
+            .collect();
+    }
+    if let Some(edit) = &app.word_edit {
+        let layout = word_edit_layout(area);
+        return layout
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, rect)| {
+                Target::new(
+                    *rect,
+                    Action::WordsEditField(index as i32 - edit.field as i32),
+                )
+            })
+            .collect();
+    }
     Vec::new()
 }
 
+/// 收藏弹层的当前光标。
+fn picker_cursor(app: &crate::app::App) -> i32 {
+    app.collect_picker
+        .as_ref()
+        .map(|p| p.cursor as i32)
+        .unwrap_or(0)
+}
+
+/// 命中检测：先在 `targets` 里找，再处理「点击弹层外」的语义。
+///
+/// 各弹层的「点外面」行为不一样：
+/// - 跳组 / 确认 / 输入弹层：点外面 = 取消
+/// - 模式 / 收藏 / 词条编辑弹层：点外面 = 无动作
+/// - 结算弹层：只响应三个按钮，点外面不动
 pub fn target_action(app: &crate::app::App, area: Rect, column: u16, row: u16) -> Option<Action> {
     let hits = |rect: Rect| {
         column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom()
     };
-    if app.collect_picker.is_some() {
+    if let Some(action) = targets(app, area)
+        .into_iter()
+        .find(|target| hits(target.rect))
+    {
+        return Some(action.action);
+    }
+    // 没命中任何目标：只有「点外面 = 取消」的弹层才有反应。
+    if app.collect_picker.is_some() || app.word_edit.is_some() {
         return None;
     }
     if let Some(picker) = &app.group_picker {
         let layout = group_picker_layout(app.total_groups(), picker.cursor, area);
-        for (index, rect) in layout.rows.iter() {
-            if hits(*rect) {
-                return Some(Action::GroupMove(*index as i32 - picker.cursor as i32));
-            }
-        }
         if !hits(layout.rect) {
             return Some(Action::GroupCancel);
         }
@@ -674,12 +776,6 @@ pub fn target_action(app: &crate::app::App, area: Rect, column: u16, row: u16) -
     }
     if app.confirm.is_some() {
         let layout = confirm_layout(area);
-        if hits(layout.accept) {
-            return Some(Action::ConfirmAccept);
-        }
-        if hits(layout.cancel) {
-            return Some(Action::ConfirmCancel);
-        }
         if !hits(layout.rect) {
             return Some(Action::ConfirmCancel);
         }
@@ -689,19 +785,6 @@ pub fn target_action(app: &crate::app::App, area: Rect, column: u16, row: u16) -
         let rect = edit_layout(area);
         if !hits(rect) {
             return Some(Action::EditCancel);
-        }
-        return None;
-    }
-    if let Some(summary) = &app.summary {
-        let layout = summary_layout(area, summary_extra_lines(summary));
-        if hits(layout.continue_btn) {
-            return Some(Action::SummaryContinue);
-        }
-        if hits(layout.relearn_btn) {
-            return Some(Action::SummaryRelearn);
-        }
-        if hits(layout.home_btn) {
-            return Some(Action::SummaryHome);
         }
         return None;
     }

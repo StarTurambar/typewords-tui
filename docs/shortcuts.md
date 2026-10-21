@@ -52,11 +52,11 @@
 | KnowWord | 自测：认识 | `1` | 可用 |
 | UnknownWord | 自测：不认识 | `2` | 可用 |
 | MasteredWord | 自测：已掌握 | `3` | 可用 |
-| ChooseA | 选择 A | `1` | 暂不可用 |
-| ChooseB | 选择 B | `2` | 暂不可用 |
-| ChooseC | 选择 C | `3` | 暂不可用 |
-| ChooseD | 选择 D | `4` | 暂不可用 |
-| WordTestingNext | 单词测试：下一题 | `Space` | 暂不可用 |
+| ChooseA | 选择 A | `1` | 可用 |
+| ChooseB | 选择 B | `2` | 可用 |
+| ChooseC | 选择 C | `3` | 可用 |
+| ChooseD | 选择 D | `4` | 可用 |
+| WordTestingNext | 单词测试：下一题 | `Space` | 可用 |
 | SelfTestingChooseA | 自测选择 A | `Alt+1` | 可用 |
 | SelfTestingChooseB | 自测选择 B | `Alt+2` | 可用 |
 | SelfTestingChooseC | 自测选择 C | `Alt+3` | 可用 |
@@ -64,6 +64,8 @@
 | PlaySentence1..9 | 播放例句 1..9 | `Ctrl+1` … `Ctrl+9` | 暂不可用 |
 
 「暂不可用」表示该动作的绑定仍然保留（以便与上游存档互通），但当前版本还没有对应功能，实现后会去掉标记。
+
+`ChooseA`~`ChooseD` 与 `WordTestingNext` 在**单词测试页**生效，`PlayWordPronunciation` 在**练习页**生效；其余动作的生效位置见[使用手册 · 按键参考](usage.md)。
 
 ### 终端兼容别名
 

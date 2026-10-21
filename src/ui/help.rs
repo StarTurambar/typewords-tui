@@ -77,6 +77,32 @@ const NAVIGATION: &[HelpEntry] = &[
 ];
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    // 练习中进入帮助：整屏显示，不画侧栏。
+    //
+    // 练习中侧栏的导航是禁用的，画出来却点不动，用户会以为鼠标坏了。
+    if app.session.is_some() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "帮助（Esc 返回练习）",
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ))),
+            Rect::new(area.x + 2, area.y, area.width.saturating_sub(4), 1),
+        );
+        let content = Rect::new(
+            area.x + 2,
+            area.y + 1,
+            area.width.saturating_sub(4),
+            area.height.saturating_sub(1),
+        );
+        if content.width >= TWO_COLUMN_MIN_WIDTH && content.height >= 20 {
+            render_columns(frame, content, theme, app.help_scroll);
+        } else {
+            render_single(frame, content, theme, app.help_scroll);
+        }
+        return;
+    }
     shell::render(app, frame, area, theme, Nav::Help, |frame, content| {
         if content.width >= TWO_COLUMN_MIN_WIDTH && content.height >= 20 {
             render_columns(frame, content, theme, app.help_scroll);
@@ -102,10 +128,25 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) 
         content.height,
     );
 
-    render_entries(frame, left, PRACTICE, theme, 0);
+    // 两栏各自滚动。
+    //
+    // 早期实现两栏都固定从第 0 行开始画，且不响应 `help_scroll`：
+    // 终端高度不够时，最后几行（Ctrl+C / Ctrl+Q 等）被裁掉且滚不出来。
+    let visible = content.height as usize;
+    let left_max = PRACTICE.len().saturating_sub(visible);
+    let right_entries_len = NAVIGATION.len() + 4; // 含末尾的鼠标说明
+    let right_max = right_entries_len.saturating_sub(visible);
+    let (left_offset, right_offset) = if left_max.max(right_max) == 0 {
+        (0, 0)
+    } else {
+        // 滚动量按两栏里更长的一栏分配，两栏同步前进。
+        let offset = (scroll as usize).min(left_max.max(right_max));
+        (offset.min(left_max), offset.min(right_max))
+    };
+    render_entries(frame, left, PRACTICE, theme, left_offset);
     let mut right_entries: Vec<HelpEntry> = NAVIGATION.to_vec();
     push_mouse_notes(&mut right_entries);
-    render_entries(frame, right, &right_entries, theme, 0);
+    render_entries(frame, right, &right_entries, theme, right_offset);
 
     for y in content.y..content.bottom() {
         frame.render_widget(
@@ -113,6 +154,13 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) 
             Rect::new(divider_x, y, 1, 1),
         );
     }
+    render_scroll_indicators(
+        frame,
+        content,
+        theme,
+        left_offset > 0 || right_offset > 0,
+        left_offset < left_max || right_offset < right_max,
+    );
 }
 
 fn render_single(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
@@ -130,13 +178,27 @@ fn render_single(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
     let max_offset = entries.len().saturating_sub(visible);
     let offset = (scroll as usize).min(max_offset);
     render_entries(frame, list, &entries, theme, offset);
-    if offset > 0 && content.width > 0 {
+    render_scroll_indicators(frame, content, theme, offset > 0, offset < max_offset);
+}
+
+/// 右侧的 `↑` / `↓` 滚动指示器。
+fn render_scroll_indicators(
+    frame: &mut Frame,
+    content: Rect,
+    theme: &Theme,
+    can_scroll_up: bool,
+    can_scroll_down: bool,
+) {
+    if content.width == 0 {
+        return;
+    }
+    if can_scroll_up {
         frame.render_widget(
             Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
             Rect::new(content.right().saturating_sub(1), content.y, 1, 1),
         );
     }
-    if offset < max_offset && content.width > 0 {
+    if can_scroll_down {
         frame.render_widget(
             Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
             Rect::new(
@@ -147,6 +209,56 @@ fn render_single(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
             ),
         );
     }
+}
+
+/// 帮助页的鼠标目标：滚动指示器。
+///
+/// 正文区整体是「点击返回上一层」，但滚动指示器要能滚动——早期实现
+/// 两者共用同一块矩形，点 `↓` 反而退出了帮助页。
+pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let mut result = Vec::new();
+    let entries = help_entry_count();
+    let visible = content.height as usize;
+    let max_offset = entries.saturating_sub(visible);
+    let offset = (app.help_scroll as usize).min(max_offset);
+    if content.width == 0 {
+        return result;
+    }
+    if offset > 0 {
+        result.push(Target::new(
+            Rect::new(content.right().saturating_sub(1), content.y, 1, 1),
+            crate::app::Action::HelpScroll(-1),
+        ));
+    }
+    if offset < max_offset {
+        result.push(Target::new(
+            Rect::new(
+                content.right().saturating_sub(1),
+                content.bottom().saturating_sub(1),
+                1,
+                1,
+            ),
+            crate::app::Action::HelpScroll(1),
+        ));
+    }
+    result
+}
+
+/// 帮助页的最大滚动量。
+///
+/// 键位表条目会随版本增减，写死一个上限迟早会截断或滚过头。
+pub fn max_scroll() -> u16 {
+    help_entry_count().saturating_sub(1) as u16
+}
+
+/// 帮助页的条目总数（两栏 / 单栏共用）。
+fn help_entry_count() -> usize {
+    let mut entries: Vec<HelpEntry> = Vec::new();
+    entries.extend_from_slice(PRACTICE);
+    entries.extend_from_slice(NAVIGATION);
+    push_mouse_notes(&mut entries);
+    entries.len()
 }
 
 fn push_mouse_notes(entries: &mut Vec<HelpEntry>) {

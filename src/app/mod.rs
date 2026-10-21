@@ -350,6 +350,11 @@ pub struct App {
     pub word_test: Option<WordTestState>,
     /// 单词测试本轮的用时（毫秒）
     pub word_test_spend: i64,
+    /// 本轮练习的统计是否已写进词典统计。
+    ///
+    /// 统计有两条写入路径——会话正常结束（`settle`）与中途退出时的
+    /// `flush_practice_stats`——两者都可能针对同一轮练习，必须保证只记一次。
+    pub stats_recorded: bool,
     /// 词条管理页的光标（过滤后的下标）
     pub words_cursor: usize,
     /// 词条管理页的搜索词
@@ -486,6 +491,7 @@ impl App {
             mode_picker: None,
             word_test: None,
             word_test_spend: 0,
+            stats_recorded: false,
             words_cursor: 0,
             words_filter: String::new(),
             words_search_focus: false,
@@ -763,12 +769,22 @@ impl App {
         let mut session = PracticeSession::with_flow(mode, self.active_flow(mode));
         session.all_words = all_words;
 
+        // 开新一轮 = 上一轮的断点缓存被丢弃：先把上一轮的统计落盘，
+        // 否则中途退出的那部分学习时长会跟着缓存一起消失。
+        // 对齐上游 `words.vue` 的 `resetCacheData`。
+        //
+        // 判据是 `stats_recorded` 而不是「有没有会话」——中途退出练习后
+        // `session` 已经是 `None`，但统计仍等着落盘。
+        self.flush_practice_stats();
+
         self.stat = PracticeState::default();
         session.initialize_task(task, &mut self.rng, &mut self.stat, timer::now_ms());
         self.session = Some(session);
         self.screen = Screen::Practice;
         self.summary = None;
         self.identify_select = None;
+        // 新的一轮：统计还没落盘。
+        self.stats_recorded = false;
         self.typing = TypingEngine::new();
         self.last_activity = timer::now_ms();
         self.last_timer_tick = timer::now_ms();
@@ -777,6 +793,12 @@ impl App {
         self.refresh_stats();
     }
 
+    /// 退出练习页。
+    ///
+    /// 中途退出**不**把统计写进词典——断点缓存里还留着本轮的
+    /// `stat_store_data`，下次启动能接着练。统计是在缓存被丢弃时才落盘
+    /// （见 `flush_practice_stats` 的调用点），与上游
+    /// `words.vue` 的 `resetCacheData` 同一时机。
     pub fn leave_practice(&mut self) {
         if self.summary.is_none() {
             self.save_practice_now();
@@ -788,6 +810,33 @@ impl App {
         self.typing = TypingEngine::new();
         self.refresh_task_preview();
         self.refresh_stats();
+    }
+
+    /// 把本轮练习的统计落进词典。
+    ///
+    /// 统计有两条写入路径——会话正常结束（`settle`）与缓存被丢弃时的
+    /// 兜底——必须保证同一轮只记一次，`stats_recorded` 负责这个约束。
+    ///
+    /// 调用时机是「断点缓存被丢弃」：开新一轮练习、清空练习进度。
+    /// 这与上游 `words.vue` 的 `resetCacheData`（先 `flushStatToStore`
+    /// 再清缓存）一致。
+    fn flush_practice_stats(&mut self) {
+        if self.stats_recorded {
+            return;
+        }
+        let now = timer::now_ms();
+        crate::domain::timer::close_open_segment(&mut self.stat, now);
+        let (segments, spend) = crate::domain::timer::normalize_practice_timer(
+            &self.stat.segments,
+            self.stat.spend,
+            now,
+        );
+        self.stat.segments = segments;
+        self.stat.spend = spend;
+        if let Some(dict) = self.boot.base.study_dict_mut() {
+            crate::domain::statistics::flush_stat_to_store(dict, &self.stat);
+        }
+        self.stats_recorded = true;
     }
 
     fn after_advance(&mut self) {
@@ -847,6 +896,8 @@ impl App {
             &mut self.stat,
             now,
         );
+        // `settle` 已把统计写进词典，这里标记一下，退出时不再重复写。
+        self.stats_recorded = true;
         let total = self.stat.total;
         let wrong = self.stat.wrong;
         let accuracy = if total == 0 {
@@ -1194,6 +1245,14 @@ impl App {
     /// 于是「重学本组」会把当前组算成下一组：正在学第 1 组时按 `Ctrl+Enter`
     /// 会跳到第 2 组的词。练习中的推进量不该影响「当前组」——词典进度要等到
     /// 结算（`settle`）才写回。
+    ///
+    /// 上游 `base.ts` 的 `currentGroup()` 用 `last % per == 0 ? last/per + 1 :
+    /// last/per`，组号会随进度在两组之间来回跳（学到第 6 个词时组号从 2 退回
+    /// 1）。TUI 取「下一组」这个单调口径，组号只增不减。
+    ///
+    /// 结果被夹在 `[1, total_groups()]` 内：词典学完时 `last_learn_index`
+    /// 等于词数，算出来的组号会越过最后一组，弹层光标与「重学本组」都会
+    /// 指向不存在的组。
     pub fn current_group(&self) -> usize {
         let per_day = self.words_per_group();
         let learned = self
@@ -1202,7 +1261,7 @@ impl App {
             .study_dict()
             .map(|dict| dict.last_learn_index)
             .unwrap_or(0);
-        learned / per_day + 1
+        (learned / per_day + 1).clamp(1, self.total_groups())
     }
 
     /// 词库一共多少组。
@@ -1462,6 +1521,25 @@ impl App {
         };
         // 单词测试有自己的用时统计，不复用上一轮练习残留的 `stat.spend`。
         let spend = self.word_test_spend;
+        // 用时写进当前词典的 statistics——否则这一轮在统计页里完全看不见。
+        // 与文章跟打同口径（见 `finish_article_practice`）。
+        if spend > 0
+            && let Some(dict) = self.boot.base.study_dict_mut()
+        {
+            let now = timer::now_ms();
+            dict.statistics.push(Statistics {
+                start_date: now,
+                spend,
+                total,
+                new_words: 0,
+                review: total,
+                wrong: state.wrong,
+                title: None,
+                segments: None,
+                session_role: Some("single".to_string()),
+            });
+            self.save_dict_now();
+        }
         self.summary = Some(SummaryData {
             spend_ms: spend,
             accuracy,
@@ -1482,6 +1560,7 @@ impl App {
     /// 退出单词测试，回主页。
     pub fn leave_word_test(&mut self) {
         self.word_test = None;
+        self.word_test_spend = 0;
         self.screen = Screen::Home;
         self.refresh_stats();
         self.refresh_task_preview();
@@ -2152,12 +2231,11 @@ impl App {
         self.words_cursor = 0;
     }
 
-    /// 勾选 / 取消勾选当前词条。
-    fn words_toggle_mark(&mut self) {
-        let indices = self.filtered_word_indices();
-        let Some(index) = indices.get(self.words_cursor).copied() else {
-            return;
-        };
+    /// 勾选 / 取消勾选词条。
+    ///
+    /// `index` 是**要操作的词条下标**（过滤后的原始下标）。鼠标点击
+    /// 传的是被点的那一行，空格键传的是光标所在行。
+    pub fn words_toggle_mark(&mut self, index: usize) {
         match self.words_marked.iter().position(|item| *item == index) {
             Some(position) => {
                 self.words_marked.remove(position);
@@ -2489,7 +2567,12 @@ impl App {
 
     /// 打开跳组弹层，光标停在当前组。
     pub fn open_group_picker(&mut self) {
-        let cursor = self.current_group().saturating_sub(1);
+        // 光标是 0 基下标，必须落在实际存在的组内——词典学完时
+        // `current_group()` 可能是最后一组 + 1。
+        let cursor = self
+            .current_group()
+            .saturating_sub(1)
+            .min(self.total_groups().saturating_sub(1));
         self.group_picker = Some(GroupPickerState { cursor });
     }
 
@@ -2787,7 +2870,24 @@ impl App {
             SelfTestingChooseB => self.identify_choose(1),
             SelfTestingChooseC => self.identify_choose(2),
             SelfTestingChooseD => self.identify_choose(3),
+            // 播放单词发音：走键位表，用户改绑后新键位同样生效。
+            PlayWordPronunciation => {
+                self.pronounce_current_word();
+                true
+            }
             _ => false,
+        }
+    }
+
+    /// 朗读当前单词。
+    fn pronounce_current_word(&mut self) {
+        if let Some(word) = self
+            .session
+            .as_ref()
+            .map(|session| session.current_word().word)
+            .filter(|word| !word.is_empty())
+        {
+            crate::audio::pronounce(&self.boot.settings, &word);
         }
     }
 
@@ -2798,18 +2898,6 @@ impl App {
             KeyCode::Char('?') => {
                 self.help_scroll = 0;
                 self.screen = Screen::Help;
-                true
-            }
-            // 播放单词发音（上游语义）
-            KeyCode::Char('p') if ctrl => {
-                if let Some(word) = self
-                    .session
-                    .as_ref()
-                    .map(|session| session.current_word().word)
-                    .filter(|word| !word.is_empty())
-                {
-                    crate::audio::pronounce(&self.boot.settings, &word);
-                }
                 true
             }
             // 暂停计时：上游没有手动暂停，这是 TUI 专有键位
@@ -2883,11 +2971,15 @@ impl App {
     pub fn setting_number_value(&self, target: EditTarget) -> i64 {
         let settings = &self.boot.settings;
         match target {
+            // 用 `Dict::per_day()` 而不是原始字段：它会把每日词数夹到
+            // 词库词数以内，与主页「每日目标」显示的是同一个值。
+            // 早期实现读原始字段，于是词库词数变少后设置页显示 100、
+            // 主页显示 12，两处对不上。
             EditTarget::PerDay => self
                 .boot
                 .base
                 .study_dict()
-                .map(|dict| dict.per_day_study_number as i64)
+                .map(|dict| dict.per_day() as i64)
                 .unwrap_or(20),
             EditTarget::Ratio => settings.word_review_ratio,
             EditTarget::Repeat => settings.repeat_count,

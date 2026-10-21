@@ -117,7 +117,14 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
             } else {
                 Action::SelectSetting(index)
             };
-            Some(Target::new(*rect, action))
+            // 行矩形要避开最右一列——那里画着滚动指示器 `↑` / `↓`。
+            // 早期实现铺满整行，命中测试用 `find` 取第一个，于是点 `↓`
+            // 反而把光标跳到了别的设置项。
+            let width = rect.width.saturating_sub(1);
+            Some(Target::new(
+                Rect::new(rect.x, rect.y, width, rect.height),
+                action,
+            ))
         })
         .collect()
 }
