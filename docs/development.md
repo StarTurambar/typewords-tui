@@ -135,8 +135,6 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `articles-120x40-dark.png` | `articles 120 40 dark` |
 | `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
 | `flows-120x40-dark.png` | `flows 120 40 dark` |
-| `articles-120x40-dark.png` | `articles 120 40 dark` |
-| `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
 | `help-120x40-dark.png` | `help 120 40 dark` |
 | `summary-120x40-dark.png` | `summary 120 40 dark` |
 
