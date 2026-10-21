@@ -102,7 +102,7 @@
 | `BookGroup` | `book_list`、`study_index` | `study_index < 0` 表示没有当前词典 |
 | `Card` | `due`、`stability`、`difficulty`、`elapsed_days`、`scheduled_days`、`learning_steps`、`reps`、`lapses`、`state`、`last_review?` | 与 ts-fsrs `Card` 对齐；`state` 取值 0–3 |
 | `Statistics` | `start_date`、`spend`、`total`、`new`、`review`、`wrong`、`title?`、`segments?`、`session_role?` | 一条学习记录；`segments` 为 `[startMs, endMs]` 数组 |
-| `FsrsParameters` | `request_retention`、`maximum_interval`、`w`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps` | 三个 `effective_*` 方法做非法值回退 |
+| `FsrsParameters` | `request_retention`、`maximum_interval`、`w`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps` | `effective_w()` 只兜底权重长度；其余非法值在 `src/domain/fsrs.rs` 的 `Fsrs::new` 里回退 |
 | `BaseState` | `simple_words`、`load`、`word`、`article`、`dict_list_version`、`fsrs_data`、`note_data`、`_ignoreWatch` | `dict.json` 根；`fsrs_data` 的 key 是单词字符串（跨词典共享） |
 | `SettingState` | 见 2.4 | `setting.json` 根 |
 | `PracticeState` | `stage`、`start_date`、`spend`、`total`、`new_word_number`、`review_word_number`、`input_word_number`、`wrong`、`timer_paused`、`timer_pause_reason`、`segments` | 一次会话的计时与计数；`reset_session` 清零并写入新的 `start_date` |

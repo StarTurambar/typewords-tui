@@ -76,7 +76,7 @@
 | 跟写 / 拼写 / 听写 / 默写 / 自测 | 五种键入方式：跟写是照着显示逐字母输入；拼写（Spell）在部分提示下拼写；听写只给音标/释义回忆；默写遮挡单词；自测用 1/2/3 或选择题判断认识程度。 |
 | 小组（group） | 跟写阶段按 7 词一组推进：先整组跟写，再在组内逐词拼写巩固，然后进入下一组。 |
 | 错词巩固（wrong word clear） | 某个阶段结束仍有错词时，自动进入的循环，直到错词清空或达到流程定义的结束条件。 |
-| FSRS | Free Spaced Repetition Scheduler，间隔重复算法；TUI 用 `fsrs` crate（FSRS-6）计算复习间隔，评级（Again/Hard/Good/Easy）与 Web 端一致。 |
+| FSRS | Free Spaced Repetition Scheduler，间隔重复算法；TUI 用 `src/domain/fsrs.rs` 自实现 FSRS-6（逐条移植上游 ts-fsrs），复习间隔与 Web 端一致，评级（Again/Hard/Good/Easy）也一致。 |
 | 卡片（Card） | 每个单词的调度状态：due、stability、difficulty、state、last_review、reps、lapses 等；字段名沿用 ts-fsrs。 |
 | 到期（due） | 卡片的下次复习时间早于或等于今天（按本地自然日判断），会进入今日复习列表。 |
 | 今日任务 / 每日目标 | 本次学习的新词数量（perDayStudyNumber）与到期复习的组合；新词用完可显示「已学完」。 |

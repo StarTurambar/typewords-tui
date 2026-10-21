@@ -171,13 +171,14 @@ app.save_all()
 | 字母、数字、符号、空格、退格 | 经 `key_to_input` 进入 `handle_typing_key`；Ctrl/Alt 组合不进入键入 |
 | `Esc` | `session.show_word`：显示完整单词；遮罩或非跟写流程下会记一次错误 |
 | `Tab` | `skip_word` |
-| `Enter` / `Ctrl+Enter` | 收藏/取消收藏 / 立即保存练习缓存与 `dict.json` |
+| `Enter` / `Ctrl+Enter` | 收藏/取消收藏 / 重学本组（`RepeatChapter`，按组重建会话） |
 | `?` | 帮助页（`help_scroll = 0`）；会话保留，返回时回练习页 |
 | 反引号 | 标记/取消已掌握，然后重置键入并推进到下一个词 |
 | `Alt+1`~`Alt+4` | 自测选择题 A~D（`identify_choose(0..3)`） |
 | `1`/`2`/`3`（自测阶段，非 Ctrl） | 认识 / 不认识 / 已掌握 |
 | `Ctrl+Z` / `Ctrl+I` | 切换翻译 / 切换默写遮罩 |
-| `Ctrl+P` | 暂停 / 恢复计时（带 Toast） |
+| `Ctrl+,` | 暂停 / 恢复计时（带 Toast）；TUI 专有键位，上游的 `Ctrl+P` 是「播放单词发音」 |
+| `Ctrl+P` | 用系统 TTS（或设置里选的有道发音）朗读当前词 |
 | `Ctrl+R` | 随机默写当前词表：打乱当前节点词表、设为遮罩、从第一个词开始，并重置键入 |
 | `Ctrl+B` / `Ctrl+L` / `Ctrl+E` | 切换工具栏 / 右侧词表 / 例句与词源 |
 | `Ctrl+C` | 保存练习与词典，退出练习回主页 |
@@ -190,7 +191,7 @@ app.save_all()
 
 | 屏幕 | 键 → `Action` |
 | --- | --- |
-| 主页 | `Enter`→`StartPractice`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`m`→`CycleMode`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
+| 主页 | `Enter`→`StartPractice`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
 | 词库页 | `Esc`/`q`→`Back`；`↑`/`k`→`DictMove(-1)`，`↓`/`j`→`DictMove(1)`；`Enter`→`ActivateDict(cursor)`；`+`/`-`→`AdjustDaily(±5)` |
 | 统计页 | `Esc`/`q`/`Enter`→`Back`；`↑`/`k`→`StatsScroll(-1)`，`↓`/`j`→`StatsScroll(1)`；`PgUp`/`PgDn`→`StatsScroll(∓5)` |
 | 设置页 | `Esc`/`q`→`Back`；`↑`/`k`→`SettingsMove(-1)`，`↓`/`j`→`SettingsMove(1)`；`Enter`/`Space`→`ActivateSetting(cursor)` |
@@ -214,7 +215,7 @@ app.save_all()
 
 ### 5.6 `Action` 全表
 
-`Action` 的 25 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
+`Action` 的 86 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
@@ -223,7 +224,7 @@ app.save_all()
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
 | `AdjustDaily(delta)` | 每日词数 `±delta` 并夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
-| `CycleMode` | 按 7 模式顺序切换、保存设置、刷新任务预览 |
+| `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
 | `DictMove(delta)` | 词库光标移动并夹在有效范围 |
 | `SelectDict(i)` / `SelectSetting(i)` | 只移动光标（越界忽略） |
 | `ActivateDict(i)` | 切换当前学习词库：保存词典、回主页、刷新任务与 Toast |
@@ -388,7 +389,8 @@ app.save_all()
 | 每轮单词推进、键入错误、自测操作 | 安排 500 ms 防抖保存 |
 | 本次 tick 累计了学习时长且跨过 30 秒整数倍（`on_tick`） | 安排 500 ms 防抖保存 |
 | 防抖到期 | 保存练习缓存并清除 deadline |
-| `Ctrl+Enter` / `Ctrl+C` | 立即保存练习缓存 + 词典（Ctrl+C 随后离开练习） |
+| `Ctrl+C` | 立即保存练习缓存 + 词典，随后离开练习 |
+| `Ctrl+Enter`（重学本组） | 新会话建立时立即保存练习缓存 |
 | `finish_session` | 立即保存词典，删除练习缓存 |
 | 结算继续 / 重学 | 新会话立即保存练习缓存 |
 | 主页/词库页 `+`/`-`、切换词库、`PerDay` 数字项 | 立即保存词典 |

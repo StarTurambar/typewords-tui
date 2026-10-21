@@ -43,7 +43,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 | 维度 | 上游 TypeWords（Web / Tauri 桌面） | typewords-tui 0.1.0 |
 | --- | --- | --- |
-| 技术栈 | Nuxt 4.2、Vue 3.5、Pinia 3、UnoCSS 66、vue-i18n 11、ts-fsrs 5.2、idb-keyval、Tauri v2 | Rust 2024（rust-version 1.90）、ratatui 0.30.2、crossterm、fsrs 6.6.2、serde / chrono / clap |
+| 技术栈 | Nuxt 4.2、Vue 3.5、Pinia 3、UnoCSS 66、vue-i18n 11、ts-fsrs 5.2、idb-keyval、Tauri v2 | Rust 2024（rust-version 1.90）、ratatui 0.30.2、crossterm、serde / chrono / clap（FSRS-6 自实现） |
 | 产物 | `nuxt generate` 静态站（`.output/public`）；桌面端为 Tauri 安装包，WebView2 加载同一份前端 | 单个 `tw.exe` + 只读 `assets/` 目录；无运行时、无 Node、无 WebView2 |
 | 运行环境 | 浏览器（含移动端）或 Windows 桌面窗口 | 终端（Windows Terminal 等），最小 60 × 20 |
 | 代码共享 | 与 TUI 不共享代码 | 不复制上游 TS/Vue 实现，只沿用资源格式、字段命名与行为约定 |
@@ -194,7 +194,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 ### 4.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 29 个具名字段：28 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord`；其余 30 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 23 个配置项 + 3 个动作项（快捷键、清空练习进度、清除所有数据），共 26 行。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：40 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 18 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 28 个配置项 + 2 个动作项（清空练习进度、清除所有数据），共 30 行。
 
 | 类别 | 项 |
 | --- | --- |
@@ -226,7 +226,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 - 上游有 CSS 动画、Vue 过渡、hover 显示单词、拖拽、Shepherd 引导；TUI 全部没有。终端鼠标只有点击与滚轮，没有悬停、拖拽和右键菜单。
 - 上游可播放键盘音效、正确/错误音效与单词发音（受设置开关控制）；TUI 用终端响铃代替键音/对错音，发音走系统 TTS（可选有道 mp3），听写阶段仍靠音标与释义回忆。
-- 计时：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（`Ctrl+P`）不会被自动恢复。差异是上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
+- 计时：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（TUI 用 `Ctrl+,`，上游没有手动暂停）不会被自动恢复。差异是上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
 - TUI 事件循环是 100 ms 轮询 + 批量读事件；上游是浏览器事件驱动。对键盘手感影响可忽略，但 TUI 没有帧动画。
 
 ### 4.7 数据存储

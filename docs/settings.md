@@ -197,7 +197,7 @@
 | 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段都原样保存在这里，保存时写回 |
 
-`SettingState` 共建模 29 个具名字段 + `extra`，设置页只覆盖其中 23 个配置项（外加 3 个动作项：快捷键、清空练习进度、清除所有数据）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
+`SettingState` 共建模 43 个具名字段 + `extra`，设置页覆盖其中 28 个配置项（外加 2 个动作项：清空练习进度、清除所有数据；快捷键页是独立入口）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
 
 ## 未生效 / 半生效设置项清单
 
@@ -213,7 +213,7 @@
 
 - **版本**：`setting.json` 的 `version` 恒为 `23`，对应 Web 的 `typing-word-setting` v23；TUI 不升级也不降级该版本号。
 - **同名字段**：上表 28 个有 UI 的配置项与 Web 使用相同 camelCase 键名与数值语义（枚举值同样用整数：练习模式 0=学习、1=自由、2=自测、3=默写、4=听写、5=随机复习、6=复习）；Web 其余字段通过 `extra` 原样保留。
-- **FSRS 参数**：`fsrsParameters` 与 ts-fsrs 的参数结构一致（snake_case 的 `request_retention` / `maximum_interval` / `w` / `enable_fuzz` 等），因此两端的参数可以手工互相拷贝；TUI 的 fuzz 为近似实现。
+- **FSRS 参数**：`fsrsParameters` 与 ts-fsrs 的参数结构一致（snake_case 的 `request_retention` / `maximum_interval` / `w` / `enable_fuzz` 等），因此两端的参数可以手工互相拷贝；TUI 的 FSRS-6 逐条移植自 ts-fsrs（含 fuzz 区间与随机源），黄金样本见 `tests/fsrs_parity.rs`。
 - **TUI 新增**：`tuiBigWord` 是 TUI 专属字段，Web 设置里没有对应项。
 - **不互通**：TUI 不读写浏览器 IndexedDB，所以设置不会自动双向同步；手工迁移方法见 [存档与数据格式](persistence.md)。
 
@@ -225,7 +225,7 @@
 | 想恢复默认设置 | 单项重置没有入口，全部重置有 | 设置页「其他 → 清除所有数据」把设置与学习记录一起恢复默认（不可撤销）；只想重置某一项则退出程序后编辑 `setting.json` |
 | 手工改完设置，重启丢失 | 修改时程序仍在运行，退出时被内存状态覆盖 | 退出程序 → 改文件 → 再启动 |
 | 启动提示设置损坏 | JSON 语法错误、类型不匹配或枚举值非法 | 修复或删除 `setting.json`；坏文件已隔离为 `*.corrupt-*.json` |
-| 手工改了 FSRS 参数没效果 | 字段名拼错（落进 `extra`）、`w` 不是 21 个、或程序运行中被覆盖；`enable_short_term` / `learning_steps` / `relearning_steps` 本就不生效 | 退出后修改；核对 snake_case 字段名与 `w` 长度；学习步进固定为 1/6/10 分钟 |
+| 手工改了 FSRS 参数没效果 | 字段名拼错（落进 `extra`）、`w` 不是 21 个、或程序运行中被覆盖 | 退出后修改；核对 snake_case 字段名与 `w` 长度 |
 | 设置版本过高，改动不保存 | 存档来自更新版本，本次运行只读 | 备份后升级程序；本次运行的设置不会写回 |
 | 设置能否跨设备同步 | v1 无云同步与账号 | 复制数据目录（见 [存档与数据格式](persistence.md)） |
 

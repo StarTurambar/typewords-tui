@@ -1165,3 +1165,87 @@ fn word_test_tracks_its_own_elapsed_time() {
     app.on_tick(base + 2_000);
     assert_eq!(app.word_test_spend, 2000, "单词测试应累计自己的用时");
 }
+
+/// 「重学本组」要重学当前这一组，而不是下一组。
+///
+/// 早期实现的 `current_group()` 把本轮任务的新词总数加进了词典进度，
+/// 于是正在学第 1 组时按 `Ctrl+Enter` 会跳到第 2 组的词——「重学」变成了
+/// 「跳到下一组」。
+#[test]
+fn repeating_the_group_repeats_the_current_one() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 每天学 5 个词 -> 12 个词分 3 组
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.per_day_study_number = 5;
+    }
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice);
+    let before: Vec<String> = app
+        .session
+        .as_ref()
+        .expect("会话")
+        .data
+        .words
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+    assert_eq!(before.len(), 5, "第一组应有 5 个词");
+    assert_eq!(app.current_group(), 1, "刚开始学的是第 1 组");
+    assert_eq!(app.total_groups(), 3, "12 个词每天 5 个应分 3 组");
+
+    // 重学本组（上游 `Ctrl+Enter` → `RepeatChapter`）
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+    let after: Vec<String> = app
+        .session
+        .as_ref()
+        .expect("会话")
+        .data
+        .words
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+    assert_eq!(after, before, "重学本组应回到当前组的词表，而不是下一组");
+    assert_eq!(app.current_group(), 1, "重学后仍在第 1 组");
+}
+
+/// 跳组弹层的光标要停在当前组。
+///
+/// 弹层用 `current_group() - 1` 当光标初值，当前组算错时光标就落在别的组上，
+/// 打开弹层再直接回车会跳到不相干的一组。
+#[test]
+fn the_group_picker_opens_on_the_current_group() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.per_day_study_number = 5;
+    }
+
+    press(&mut app, KeyCode::Enter);
+    app.open_group_picker();
+    let picker = app.group_picker.as_ref().expect("跳组弹层");
+    assert_eq!(picker.cursor, 0, "弹层光标应停在第 1 组");
+
+    // 回车即跳到当前组，词表不变
+    let before: Vec<String> = app
+        .session
+        .as_ref()
+        .expect("会话")
+        .data
+        .words
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+    app.apply_action(app::Action::GroupSelect);
+    let after: Vec<String> = app
+        .session
+        .as_ref()
+        .expect("会话")
+        .data
+        .words
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+    assert_eq!(after, before, "跳到当前组不应换词表");
+}

@@ -1187,7 +1187,13 @@ impl App {
 
     /// 当前学习到第几组（1 起）。
     ///
-    /// 练习中的推进量还没写回词典进度，因此要把本轮已学的新词数算进去。
+    /// 取「下一个未学词所在的组」：`last_learn_index` 是词典进度，`last_learn_index
+    /// / per_day + 1` 就是该词落在第几组——刚好学完一组时指向下一组。
+    ///
+    /// 早期实现在这里加上了 `stat.new_word_number`（本轮任务的新词总数），
+    /// 于是「重学本组」会把当前组算成下一组：正在学第 1 组时按 `Ctrl+Enter`
+    /// 会跳到第 2 组的词。练习中的推进量不该影响「当前组」——词典进度要等到
+    /// 结算（`settle`）才写回。
     pub fn current_group(&self) -> usize {
         let per_day = self.words_per_group();
         let learned = self
@@ -1195,19 +1201,21 @@ impl App {
             .base
             .study_dict()
             .map(|dict| dict.last_learn_index)
-            .unwrap_or(0)
-            + self.stat.new_word_number;
+            .unwrap_or(0);
         learned / per_day + 1
     }
 
     /// 词库一共多少组。
+    ///
+    /// 词数取 `effective_length()`，与 `Dict::per_day()` 用的是同一个口径——
+    /// 早期实现混用了 `length`，两者不一致时组数会算错。
     pub fn total_groups(&self) -> usize {
         let per_day = self.words_per_group();
         let length = self
             .boot
             .base
             .study_dict()
-            .map(|dict| dict.length)
+            .map(|dict| dict.effective_length())
             .unwrap_or(0);
         length.div_ceil(per_day).max(1)
     }

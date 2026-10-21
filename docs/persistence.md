@@ -201,7 +201,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `state` | `u8` | 0 新卡、1 学习中、2 复习中、3 重学中 |
 | `last_review` | 可选 RFC 3339 时间 | 上次复习时间 |
 
-评级常量与 Web 一致（`Rating = u8`）：Again 1、Hard 2、Good 3、Easy 4；评级不落在这张表里，而是先写进练习缓存的 `ratingMap`，结算时由 `PracticeSession::settle` 按 `fsrs` crate 计算新卡片后写入 `fsrsData`。
+评级常量与 Web 一致（`Rating = u8`）：Again 1、Hard 2、Good 3、Easy 4；评级不落在这张表里，而是先写进练习缓存的 `ratingMap`，结算时由 `PracticeSession::settle` 按 `src/domain/fsrs.rs`（自实现的 FSRS-6）计算新卡片后写入 `fsrsData`。
 
 ### 3.5 写入时机
 
@@ -211,7 +211,7 @@ article.bookList 中 system == false 的词典                        → articl
 | --- | --- |
 | 结算 `finish_session` | `PracticeSession::settle` 写入 `statistics` 与 `fsrsData` 后立即保存 |
 | 离开练习 | `Ctrl+C`（无结算时）、结算后「回主页」不写（已保存过） |
-| `Ctrl+Enter` | 练习中立即保存练习缓存与词典 |
+| `Ctrl+Enter`（重学本组） | 重建会话后立即保存练习缓存（新会话） |
 | 切换词库、主页/词库页 `+`/`-`、设置页每日词数（`PerDay`） | 修改当前词典元数据后立即保存 |
 | 确认退出 / 事件循环结束 | `save_all` 保存；首次运行即使没进练习，也会在退出时生成 `dict.json` |
 
@@ -264,13 +264,13 @@ article.bookList 中 system == false 的词典                        → articl
 
 ### 4.3 透传字段与 `serde` 行为
 
-- 上游 `SettingState` 有 58 个顶层字段，TUI 建模 28 个具名字段（27 个同名 + TUI 专有的 `tuiBigWord`）；其余 31 个未建模字段（`fontSize`、`shortcutKeyMap`、`wordSoundVolume`、`mobileNavCollapsed` 等）在读取时进入 `extra: serde_json::Map<String, Value>`，保存时原样写回。测试 `tests/store_roundtrip.rs` 的 `settings_roundtrip_preserves_unknown_fields` 固定了这一行为：读入 `someFutureField` 后保存，输出 JSON 中仍然存在。
+- 上游 `SettingState` 有 58 个顶层字段，TUI 建模 43 个具名字段（40 个与上游同名 + TUI 专有的 `tuiBigWord`、`ttsSource`、`_ignoreWatch`）；其余 18 个上游顶层字段（`fontSize`、`showToolbar`、`first`、`webAppVersion`、`ttsVoiceMap` 等）在读取时进入 `extra: serde_json::Map<String, Value>`，保存时原样写回。测试 `tests/store_roundtrip.rs` 的 `settings_roundtrip_preserves_unknown_fields` 固定了这一行为：读入 `someFutureField` 后保存，输出 JSON 中仍然存在。
 - 结构体级 `#[serde(default)]` 保证缺失字段取默认值；枚举字段用整型序列化（如 `wordPracticeMode`），未知数值会解析失败并触发隔离。
-- `FsrsParameters` 的 `effective_w` / `effective_retention` / `effective_maximum_interval` 在运行时做兜底：`w` 不是 21 个有限数、留存率不在 `(0,1)`、最大间隔小于 1 时回退默认值，因此手改坏参数不会让调度崩溃。
+- `FsrsParameters` 的参数兜底在 `src/domain/fsrs.rs` 的 `Fsrs::new` 里统一做：`FsrsParameters::effective_w` 只负责权重长度（不是 21 个有限数就回退默认权重），留存率必须落在 `(0,1)`、最大间隔至少一天，否则回退默认值，因此手改坏参数不会让调度崩溃。
 
 ### 4.4 默认值与 FSRS 参数
 
-默认 FSRS 参数（`domain/constants.rs` 的 `default_fsrs_parameters`，与上游 ts-fsrs 默认值一致）：`request_retention = 0.9`、`maximum_interval = 36500`、21 个权重 `0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542`、`enable_fuzz = false`、`enable_short_term = true`、学习步进 `["1m","10m"]`、重学步进 `["10m"]`。TUI 读取 `w`/`request_retention`/`maximum_interval`/`enable_fuzz`；`enable_short_term` 与两组步进不生效（学习步进固定 1/6/10 分钟，fuzz 为 ±5% 近似实现）。
+默认 FSRS 参数（`domain/constants.rs` 的 `default_fsrs_parameters`，与上游 ts-fsrs 默认值一致）：`request_retention = 0.9`、`maximum_interval = 36500`、21 个权重 `0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542`、`enable_fuzz = false`、`enable_short_term = true`、学习步进 `["1m","10m"]`、重学步进 `["10m"]`。TUI 全部读取：`w`、`request_retention`、`maximum_interval`、`enable_fuzz`、`enable_short_term` 与两组步进都生效——FSRS-6 逐条移植自上游 ts-fsrs，黄金样本见 `tests/fsrs_parity.rs`。
 
 ### 4.5 如何安全新增一个设置项
 
@@ -332,7 +332,8 @@ article.bookList 中 system == false 的词典                        → articl
 | 开始一轮练习 `begin_session_with_task` | 立即保存（新缓存） |
 | 单词推进、键入错误、自测操作、随机默写等改变进度 | 安排 500 ms 防抖保存（`pending_practice_save`），由 `on_tick` 到期落盘 |
 | 本次 tick 确实累计了时长且跨过 30 秒整数倍 | 再安排一次防抖保存（暂停时不会重复调度） |
-| `Ctrl+Enter` / `Ctrl+C` | 立即保存（`Ctrl+C` 随后离开练习） |
+| `Ctrl+C` | 立即保存，随后离开练习 |
+| `Ctrl+Enter`（重学本组） | 新会话建立后立即保存缓存 |
 | 退出程序（事件循环结束/确认退出） | `save_all`：若仍有未结算会话则立即保存 |
 | 结算 `finish_session` | 删除缓存（结算弹层出现后不再有断点） |
 | 结算后回主页、设置页「清空当前练习进度」 | 删除缓存 |
@@ -482,7 +483,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 | TUI 独有字段 | `tuiBigWord` 只存在于 TUI 的 `SettingState`；Web 端加载设置时只保留它自己认识的字段（`checkAndUpgradeSaveSetting` 的 `checkRiskKey`），因此经 Web 往返后该字段会丢失、回到默认值 |
 | 未建模的词条字段 | 写回系统词典（收藏/错词/已掌握）时，`Word` 未建模的字段（如 `inflections`）会被丢弃；词典/设置层级的未知字段则通过 `extra` 保留 |
 | Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页只列出资源目录，切走后就无法再切回 |
-| FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容，但 TUI 用 `fsrs` crate 固定学习步进，与 ts-fsrs 的间隔计算并不逐日相同，来回切换后复习日期会漂移 |
+| FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容；TUI 自实现的 FSRS-6 已逐条对齐上游 ts-fsrs（黄金样本见 `tests/fsrs_parity.rs`），同一张卡在两端得到相同的下次复习时间 |
 | 练习缓存 | TUI 恢复还要求 `sessionSnapshot`；Web 旧缓存若缺这个字段则只迁移词表与统计、无法恢复断点 |
 | 文章与音频 | `PracticeSaveArticle`、`dicts/en/article`、备份 ZIP 里的 `mp3/` 在 TUI 中都没有对应实现，迁移时直接丢弃即可 |
 
