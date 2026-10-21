@@ -6,11 +6,11 @@
 
 ## 1. 项目定位
 
-typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt + Vue 的 Web / Tauri 桌面端）拆分出的**独立终端客户端**：一个单进程、无网络、数据全本地的 Rust 程序。
+typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt + Vue 的 Web / Tauri 桌面端）拆分出的**独立终端客户端**：一个单进程、数据全本地的 Rust 程序（默认不联网；可选的有道发音会联网下载 mp3）。
 
 - **目标**：在终端里完成单词练习闭环——选词库、按 FSRS 排程生成今日任务、跟写/听写/默写/自测/复习/随机/自由七种流程、结算写入统计、断点续练；界面支持响应式布局、鼠标与自定义主题。
 - **非目标**（v1 明确不做，详见 [upstream-parity.md](upstream-parity.md)）：文章背诵、发音/键音、云同步、备份导入导出、在线查词翻译、多语言界面、自定义流程与快捷键。
-- **硬约束**：运行时不依赖 Node.js / WebView / 网络；词库资源随发布包分发；终端最小 60 × 20；Windows 是主要发布平台，代码本身跨平台（CI 在 Linux 与 Windows 上跑测试）。
+- **硬约束**：运行时不依赖 Node.js / WebView / Node 运行时（可选的系统 TTS 与外部播放器除外）；词库资源随发布包分发；终端最小 60 × 20；Windows 是主要发布平台，代码本身跨平台（CI 在 Linux 与 Windows 上跑测试）。
 
 ## 2. 技术栈
 
@@ -269,10 +269,10 @@ Catalog(assets) ───────┘                                      �
 
 ## 12. 安全与隐私
 
-- **无网络**：依赖树中没有 HTTP/WebSocket 客户端，程序不发起任何网络请求；无遥测、无账号、无云同步。
+- **默认不联网**：依赖树中没有 HTTP/WebSocket 客户端，程序自身不发网络请求；无遥测、无账号、无云同步。唯一的例外是设置里把「发音来源」切到「有道发音」时，会用系统 `curl` 下载 mp3（用户主动开启，可随时关掉）。
 - **纯本地数据**：存档是可读 JSON，位于用户数据目录；备份/迁移即复制文件。
 - **输入校验**：词库、存档、主题都是 serde 反序列化；主题文件校验失败只跳过该文件并告警；存档损坏会被隔离而不是覆盖。
-- **无子进程/动态加载**：不执行外部命令（scripts/ 下的 Node/PowerShell 只在维护者本机用于同步词库与打包，不随程序运行）。
+- **子进程仅限音频**：发音用系统自带的 TTS（Windows `System.Speech`、macOS `say`、Linux `espeak-ng`/`spd-say`）与可选的外部播放器（`ffplay`/`mpv`/`vlc`），全部**即发即忘**，不阻塞界面；不执行其他外部命令（scripts/ 下的 Node/PowerShell 只在维护者本机用于同步词库与打包，不随程序运行）。
 - **许可证**：GPL-3.0；词库数据来自上游 TypeWords 仓库，遵循同一许可证，再分发时需保留 LICENSE。
 
 ## 13. 已知限制与技术债

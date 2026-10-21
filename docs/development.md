@@ -220,7 +220,7 @@ typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc/
 - **布局与命中**：同一页面的 `layout()` 结果同时给 `render()` 和 `targets()`；新增可点击区域必须同时在 `targets()` 注册并补测试。
 - **测试命名**：用行为句子（如 `practice_progress_persists_and_resumes`），避免 `test1`。
 - **提交信息**：仓库沿用 conventional 前缀（`feat(tui):`、`fix(paths):`、`refactor(...):`、`chore:`），一个提交聚焦一件事，说明动机与影响面。
-- **依赖**：新增依赖前先确认是否必要（TUI 应保持轻量、无网络/无系统音频）；更新 `Cargo.lock` 并说明原因。
+- **依赖**：新增依赖前先确认是否必要（TUI 应保持轻量，不引入 HTTP 客户端与音频库——发音走系统自带的 TTS 与外部播放器）；更新 `Cargo.lock` 并说明原因。
 
 ## 10. 文档维护
 

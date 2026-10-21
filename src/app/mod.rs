@@ -1789,6 +1789,9 @@ impl App {
                 self.article_cursor = 0;
                 self.article_list.clear();
                 self.screen = Screen::Articles;
+                // 立刻载入第一本书的文章——早期实现只在移动书本光标时才载入，
+                // 第一次进文章页右边是空的，看不到任何文章。
+                self.load_selected_book();
             }
             Err(err) => self.toast(NoticeLevel::Error, format!("读取文章目录失败: {err}")),
         }

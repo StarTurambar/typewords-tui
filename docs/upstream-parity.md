@@ -12,7 +12,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 上游 TypeWords 是 Nuxt 4 + Vue 3 + Pinia + UnoCSS + vue-i18n 的 Web 应用，`app/` 下共 15 个页面、208 个文件、约 3.1 万行；同一份前端产物装进 Tauri v2 壳即为 Windows 桌面端（`package.json` 的 `desktop:*` 脚本、`docs/DESKTOP.md`）。数据存在浏览器 IndexedDB（`idb-keyval`），练习调度用 `ts-fsrs`，声音、在线查词、翻译、云同步都依赖网络能力。
 
-本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 44 个文件、约 1.4 万行；界面为 7 个屏幕（主页 / 练习 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 3 类弹层（结算 / 输入 / 确认），数据是本地 JSON，无网络、无音频、无 WebView。
+本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 44 个文件、约 1.4 万行；界面为 7 个屏幕（主页 / 练习 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 3 类弹层（结算 / 输入 / 确认），数据是本地 JSON，默认无网络、无 WebView。
 
 ### 1.2 对照基线记录
 
@@ -49,7 +49,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 代码共享 | 与 TUI 不共享代码 | 不复制上游 TS/Vue 实现，只沿用资源格式、字段命名与行为约定 |
 | 词库资源 | `public/list/word.json` + `public/dicts/<lang>/word/*.json`（另有 article 目录） | 同布局的 `assets/`（当前仅 CET-4），可 `--assets` 替换、`tw import-dict` 扩展 |
 | 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 3 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 |
-| 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测 |
+| 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 默认无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测；「有道发音」可选，用系统 `curl` 下载 mp3 |
 | 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 6 组集成测试 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
 | 分发 | 静态站 + Tauri NSIS 安装包 | GitHub Release 的 Windows zip（`tw.exe`、`assets/`、`docs/`、README、LICENSE、SHA256） |
 | 许可证 | GPL-3.0（上游仓库内含 LICENSE，词库数据同许可证） | GPL-3.0（见仓库 LICENSE，词库数据沿用上游许可证） |
@@ -187,7 +187,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 切主题 / 简洁模式 / 编辑文章 | `Ctrl+Q` / `Ctrl+M` / `Ctrl+E` | `Ctrl+Q` / `Ctrl+G` / 显示隐藏例句与词源 | 主题与简洁模式已对齐；`Ctrl+M` 在终端等同回车，简洁模式改用 `Ctrl+G`；文章编辑尚未实现 |
 | 自测三键 | `1` / `2` / `3` | 同左 | 已对齐 |
 | 自测选择题 | `Alt+1`~ `Alt+4` | 同左 | 已对齐 |
-| 播放例句 1~9 | `Ctrl+1`~ `Ctrl+9` | 无 | 缺失（无音频） |
+| 播放例句 1~9 | `Ctrl+1`~ `Ctrl+9` | 无 | 缺失 |
 | 单词测试下一题 | `Space` | 无 | 缺失（无测试模式） |
 
 TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页面、`m` 循环练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键` 等组合键，TUI 因此提供了 ASCII 别名并允许直接拼写代替选择题；完整键表见 [使用手册](usage.md) 与 [快捷键](shortcuts.md)。
@@ -225,7 +225,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 ### 4.6 交互与计时
 
 - 上游有 CSS 动画、Vue 过渡、hover 显示单词、拖拽、Shepherd 引导；TUI 全部没有。终端鼠标只有点击与滚轮，没有悬停、拖拽和右键菜单。
-- 上游可播放键盘音效、正确/错误音效与单词发音（受设置开关控制）；TUI 无音频，听写阶段靠音标与释义回忆。
+- 上游可播放键盘音效、正确/错误音效与单词发音（受设置开关控制）；TUI 用终端响铃代替键音/对错音，发音走系统 TTS（可选有道 mp3），听写阶段仍靠音标与释义回忆。
 - 计时：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（`Ctrl+P`）不会被自动恢复。差异是上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
 - TUI 事件循环是 100 ms 轮询 + 批量读事件；上游是浏览器事件驱动。对键盘手感影响可忽略，但 TUI 没有帧动画。
 
@@ -421,7 +421,7 @@ Web 备份 data.json                       TUI 数据目录
 | 图片、图标、封面、字体 | Web 图片、图标库、自定义字体 | 终端字体由用户终端决定；点阵大字是折中方案 |
 | 系统集成 | 文件选择、另存为、剪贴板、外链打开 | 用 CLI 参数、路径与终端快捷键替代；`Shift+拖拽` 才能复制文本 |
 | 移动端与触控 | 响应式 Web + 移动端导航 | 终端场景不适用 |
-| 在线服务 | 在线词库目录、百度翻译、查词 API、umami 统计 | 无网络是设计目标；也避免隐私与可用性问题 |
+| 在线服务 | 在线词库目录、百度翻译、查词 API、umami 统计 | 默认无网络是设计目标；也避免隐私与可用性问题（可选的有道发音除外） |
 | 云同步 / 备份 UI | Supabase 用户自带后端、ZIP 导入导出、历史快照 | 需要账号、网络与服务端；与本地 JSON 模型冲突，优先级最低 |
 | 多语言界面 | 14 种 locale JSON | 终端字体与宽度处理成本高；当前中文硬编码，键名已与上游对齐 |
 

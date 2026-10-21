@@ -6,9 +6,12 @@
 //! - 下载：`curl`（Windows 10+ 自带 curl.exe，macOS / Linux 也都有）。
 //! - 播放：依次探测 `ffplay`、`mpv`、`vlc`。
 //!
-//! 任何一步失败都返回 `false`，由调用方降级回系统 TTS。
+//! **不阻塞界面**：下载 + 播放整条链路由一个后台子进程完成，界面立刻恢复
+//! 响应——早期实现在主线程上 `wait()` 等 curl 与播放器，最坏情况卡十几秒。
+//! 能否降级回系统 TTS 由「工具是否装好了」决定（纯 PATH 查询，不起进程），
+//! 判定在启动子进程之前完成。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// 有道发音接口。
@@ -21,21 +24,23 @@ const PLAYERS: &[&str] = &["ffplay", "mpv", "vlc"];
 ///
 /// `sound_type` 为 `"uk"` 时用英式（`type=1`），否则美式（`type=2`），
 /// 与上游 `hooks/sound.ts` 一致。
+///
+/// 返回 `false` 表示「这条路径走不通」，调用方应降级回系统 TTS。判定依据是
+/// 工具是否可用——真正下载失败时已经来不及降级（子进程在后台跑着）。
 pub fn play_remote_pronunciation(word: &str, sound_type: &str) -> bool {
     if !is_ascii_word(word) {
         return false;
     }
-    let Some(path) = download(word, sound_type) else {
+    let kind = if sound_type == "uk" { 1 } else { 2 };
+    let url = format!("{PRONUNCIATION_API}{word}&type={kind}");
+    let Some(path) = audio_path(word, kind) else {
         return false;
     };
-    let played = play_file(&path);
-    // 播放是异步的，文件先留着；下次下载时顺手清理旧的
-    if played {
-        spawn_cleanup(&path);
-    } else {
-        let _ = std::fs::remove_file(&path);
+    // 工具不全就别白跑一趟：直接让调用方降级回系统 TTS。
+    if !has_program("curl") || !PLAYERS.iter().any(|player| has_program(player)) {
+        return false;
     }
-    played
+    spawn_pipeline(&path, &url)
 }
 
 /// 是否是可以交给有道接口的单词（只含字母与连字符）。
@@ -46,82 +51,115 @@ fn is_ascii_word(word: &str) -> bool {
         })
 }
 
-/// 下载 mp3 到临时目录。
-fn download(word: &str, sound_type: &str) -> Option<PathBuf> {
-    let kind = if sound_type == "uk" { 1 } else { 2 };
-    let url = format!("{PRONUNCIATION_API}{word}&type={kind}");
+/// mp3 的存放路径（临时目录）。
+fn audio_path(word: &str, kind: u8) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join("typewords-tui-audio");
     std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join(format!("{word}.{kind}.mp3"));
-    let mut command = Command::new("curl");
+    Some(dir.join(format!("{word}.{kind}.mp3")))
+}
+
+/// 程序是否在 PATH 里（只查文件系统，不起进程）。
+fn has_program(program: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let candidates: Vec<String> = if cfg!(target_os = "windows") {
+        vec![
+            program.to_string(),
+            format!("{program}.exe"),
+            format!("{program}.cmd"),
+            format!("{program}.bat"),
+        ]
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::split_paths(&path).any(|dir| candidates.iter().any(|name| dir.join(name).is_file()))
+}
+
+/// 后台跑「下载 → 播放 → 删除」这条链，界面不等它。
+fn spawn_pipeline(path: &Path, url: &str) -> bool {
+    let mut command = if cfg!(target_os = "windows") {
+        let script = windows_script();
+        let mut command = Command::new("powershell");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &script,
+        ]);
+        command.arg(path).arg(url);
+        command
+    } else {
+        let script = unix_script();
+        let mut command = Command::new("sh");
+        command.args(["-c", &script, "sh"]);
+        command.arg(path).arg(url);
+        command
+    };
     command
-        .args(["-sSL", "--max-time", "10", "-o"])
-        .arg(&path)
-        .arg(&url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let status = command.status().ok()?;
-    if !status.success() || !path.exists() {
-        let _ = std::fs::remove_file(&path);
-        return None;
-    }
-    Some(path)
+    command.spawn().is_ok()
 }
 
-/// 用探测到的播放器播放文件。
-fn play_file(path: &PathBuf) -> bool {
-    for player in PLAYERS {
-        let mut command = Command::new(player);
-        match *player {
-            "ffplay" => {
-                command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
-            }
-            "mpv" => {
-                command.args(["--no-video", "--really-quiet"]);
-            }
-            "vlc" => {
-                command.args(["--intf", "dummy", "--play-and-exit"]);
-            }
-            _ => {}
-        }
-        command
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Ok(status) = command.status()
-            && status.success()
-        {
-            return true;
-        }
-    }
-    false
+/// Windows：PowerShell 里下载、依次试播放器、播完删文件。
+///
+/// 路径与 URL 走 `$args`，带空格也不会被拆开。
+fn windows_script() -> String {
+    let mut script = String::from(
+        "$ErrorActionPreference='SilentlyContinue';\
+         $p=$args[0]; $u=$args[1];\
+         & curl.exe -sSL --max-time 10 -o $p $u;\
+         if (-not (Test-Path -LiteralPath $p)) { exit 0 };\
+         if (Get-Command ffplay -ErrorAction SilentlyContinue) { & ffplay -nodisp -autoexit -loglevel quiet $p }\
+         elseif (Get-Command mpv -ErrorAction SilentlyContinue) { & mpv --no-video --really-quiet $p }\
+         elseif (Get-Command vlc -ErrorAction SilentlyContinue) { & vlc --intf dummy --play-and-exit $p };\
+         Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue",
+    );
+    script.push('\n');
+    script
 }
 
-/// 播放结束后删除临时文件。
-fn spawn_cleanup(path: &std::path::Path) {
-    let script = if cfg!(target_os = "windows") {
-        format!(
-            "Start-Sleep -Seconds 30; Remove-Item -LiteralPath '{}' -ErrorAction SilentlyContinue",
-            path.display()
-        )
-    } else {
-        format!("sleep 30; rm -f '{}'", path.display())
-    };
-    let mut command = Command::new(if cfg!(target_os = "windows") {
-        "powershell"
-    } else {
-        "sh"
-    });
-    if cfg!(target_os = "windows") {
-        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-    } else {
-        command.args(["-c", &script]);
+/// macOS / Linux：sh 里下载、依次试播放器、播完删文件。
+fn unix_script() -> String {
+    let mut script = String::from(
+        "p=$1; u=$2;\
+         curl -sSL --max-time 10 -o \"$p\" \"$u\" || exit 0;\
+         [ -f \"$p\" ] || exit 0;\
+         if command -v ffplay >/dev/null 2>&1; then ffplay -nodisp -autoexit -loglevel quiet \"$p\";\
+         elif command -v mpv >/dev/null 2>&1; then mpv --no-video --really-quiet \"$p\";\
+         elif command -v vlc >/dev/null 2>&1; then vlc --intf dummy --play-and-exit \"$p\"; fi;\
+         rm -f \"$p\"",
+    );
+    script.push('\n');
+    script
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_plain_words_can_be_pronounced() {
+        assert!(is_ascii_word("hello"));
+        assert!(is_ascii_word("o'clock"));
+        assert!(!is_ascii_word(""));
+        assert!(!is_ascii_word("你好"));
+        assert!(!is_ascii_word("a b"));
     }
-    let _ = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+
+    #[test]
+    fn a_missing_program_is_reported_as_missing() {
+        assert!(!has_program("definitely-not-a-real-program-xyz"));
+    }
+
+    #[test]
+    fn the_scripts_take_the_path_and_url_as_arguments() {
+        // 路径与 URL 不能被拼进脚本文本里——临时目录可能带空格。
+        assert!(windows_script().contains("$args[0]"));
+        assert!(unix_script().contains("$1"));
+    }
 }

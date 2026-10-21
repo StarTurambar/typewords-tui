@@ -73,3 +73,21 @@ fn article_sentence_splitting_follows_upstream_rules() {
     assert!(!words[1].next_space, "me 与 ! 之间没有空格");
     assert!(words[2].next_space, "! 与 Yes 之间有空格");
 }
+
+/// 第一次进文章页就该看到当前书本的文章。
+///
+/// 早期实现只在移动书本光标时才载入文章，第一次进页面右边是空的。
+#[test]
+fn the_article_list_is_loaded_on_first_entry() {
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.screen, app::Screen::Articles);
+    assert!(!app.article_books.is_empty(), "应读到文章书本列表");
+    assert!(
+        !app.article_list.is_empty(),
+        "第一次进文章页就该列出当前书本的文章"
+    );
+}
