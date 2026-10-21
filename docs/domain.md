@@ -39,7 +39,7 @@
 | `src/domain/i18n.rs` | 中文文案表 | `tr(key)` |
 | `src/domain/rng.rs` | 可注入随机源 | `Rng`、`seeded`、`random_seed`、`shuffle`、`pick_index` |
 
-边界规则：domain 不引用 `ratatui`、`crossterm`、`src/app`、`src/ui`；唯一做文件 I/O 的模块是 `catalog.rs`（依赖 `Paths` 与 `store::write_atomic`），其余模块只处理内存数据与时间——自建流程的 `flows.json` 也由 `store` 层读写（`FileStore::load_flows` / `save_flows`），领域层只留数据结构。应用层通过 `NavState` 按字段借用 `PracticeData`/`PracticeState` 调用推进器，从而避免领域层反向依赖应用层。
+边界规则：domain 不引用 `ratatui`、`crossterm`、`src/app`、`src/ui`、`src/store`；唯一做文件 I/O 的模块是 `catalog.rs`（依赖 `Paths` 与 `fs::write_atomic`），其余模块只处理内存数据与时间——自建流程的 `flows.json` 也由 `store` 层读写（`FileStore::load_flows` / `save_flows`），领域层只留数据结构。原子写原本放在 `store` 层，但 `catalog.rs` 也要用，两边互依赖就成了环，因此挪到更底层的 `src/fs.rs`。应用层通过 `NavState` 按字段借用 `PracticeData`/`PracticeState` 调用推进器，从而避免领域层反向依赖应用层。`tests/layering.rs` 会扫描 `src/domain/` 下的源码，挡住这类反向依赖。
 
 ## 2. 数据模型（types.rs）
 
@@ -663,7 +663,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 1. **游标单指针**：`PracticeFlowCursor` 是唯一位置来源；`PracticeData.index` 只是当前词表下标。持久化时保存 `flow_id` + 游标 + 工作词 key，不保存节点/步骤的副本状态。
 2. **相位唯一入口**：所有“当前练什么”的查询都经 `resolve_phase_by_cursor`；`Navigator::current_phase` 只是委托，渲染层的 `display_state` 只读游标派生展示数据。
 3. **工作词表传递**：同一 Node 内的步骤共享 `node_working_words`；进入新 Step 时按 `exclude_words` 与已掌握词过滤，跨 Node 才按新词源重新解析（`Current` 节点沿用工作词表）。
-4. **分层边界**：domain 不依赖 `app`/`ui`/ratatui；应用层通过 `NavState` 借用字段驱动推进器，推进器不直接持有会话或存储。
+4. **分层边界**：domain 不依赖 `app`/`ui`/`store`/ratatui；应用层通过 `NavState` 借用字段驱动推进器，推进器不直接持有会话或存储。需要原子写时用 `crate::fs::write_atomic`（底层原语，两层共用，不成环）。
 5. **结算单点**：FSRS 卡与 statistics 只在 `settle` 写入；练习过程中只有错词本、收藏、已掌握会立即变化。计时字段在结算前统一清洗。
 6. **自然日与时间**：到期判断、统计分天、摘要日期都基于 `Local` 自然日；时间戳统一为毫秒。
 7. **随机可注入**：任何涉及顺序的算法都必须接收 `&mut Rng`，不得在领域层内部创建随机源。

@@ -7,6 +7,7 @@
 //! - `ui`：ratatui 渲染
 //! - `audio`：终端响铃、系统 TTS 与外部播放器
 //! - `cli` / `paths`：进程入口与路径解析
+//! - `fs`：底层的原子写原语（`domain` 与 `store` 都用它，保持分层单向）
 
 pub mod app;
 pub mod audio;
@@ -14,6 +15,7 @@ pub mod backup;
 pub mod bootstrap;
 pub mod cli;
 pub mod domain;
+pub mod fs;
 pub mod paths;
 pub mod store;
 pub mod theme;

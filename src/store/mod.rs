@@ -7,7 +7,6 @@
 //! - flows.json          ↔ localStorage['PracticeFlowV2']（无版本号）
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -18,33 +17,15 @@ use crate::domain::constants::{DICT_STATE_VERSION, PRACTICE_CACHE_VERSION, SETTI
 use crate::domain::flow::store::{FILE_NAME as FLOW_FILE_NAME, FlowStore};
 use crate::domain::types::{BaseState, PracticeCacheCompact, SettingState};
 
+/// 原子写（实现在 `crate::fs`，与 `domain` 共用，避免 `domain ↔ store` 成环）。
+pub use crate::fs::write_atomic;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SaveEnvelope<T> {
     pub val: T,
     pub version: u32,
     #[serde(default)]
     pub updated_at: Option<String>,
-}
-
-pub fn write_atomic(path: &Path, text: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("创建目录失败: {}", parent.display()))?;
-    }
-    let file_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "state.json".to_string());
-    let tmp = path.with_file_name(format!(".{file_name}.tmp"));
-    {
-        let mut file = fs::File::create(&tmp)
-            .with_context(|| format!("写入临时文件失败: {}", tmp.display()))?;
-        file.write_all(text.as_bytes())
-            .with_context(|| format!("写入临时文件失败: {}", tmp.display()))?;
-        file.sync_all().ok();
-    }
-    fs::rename(&tmp, path).with_context(|| format!("替换存档失败: {}", path.display()))?;
-    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

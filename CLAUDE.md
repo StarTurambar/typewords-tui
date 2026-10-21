@@ -54,9 +54,10 @@ main.rs → lib.rs::run(cli)
 
 | 层 | 目录 | 硬约束 |
 | --- | --- | --- |
-| domain | `src/domain/` | **不能**依赖 `app`/`ui`/`store`/`theme`，也不引入终端相关 crate（因此可被单测与 `tw task` 直接复用） |
-| store | `src/store/` | 依赖 domain；原子写 + 版本校验 + 损坏隔离 |
+| domain | `src/domain/` | **不能**依赖 `app`/`ui`/`store`/`theme`，也不引入终端相关 crate（因此可被单测与 `tw task` 直接复用）；`tests/layering.rs` 守着这条 |
+| store | `src/store/` | 依赖 domain 与 `fs`；原子写 + 版本校验 + 损坏隔离 |
 | theme | `src/theme/` | 不依赖 ratatui，也不依赖 `ui` |
+| fs | `src/fs.rs` | 只依赖 `std` 的原子写原语；`domain` 与 `store` 都用它，避免两层成环 |
 | app | `src/app/` | 唯一的状态修改者，渲染入口调用 `ui` |
 | ui | `src/ui/` | 只读 `App`，**不得**修改状态 |
 

@@ -60,7 +60,7 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 
 写入使用 `serde_json::to_string` 的**紧凑格式**（单行、无缩进）；手写或格式化编辑不影响读取。`version` 的常量在 `src/domain/constants.rs`：`DICT_STATE_VERSION = 4`、`SETTING_VERSION = 23`、`PRACTICE_CACHE_VERSION = 2`，与上游 Web 端保持一致，便于手工迁移（见第 8 节）。
 
-### 2.2 原子写（`write_atomic`）
+### 2.2 原子写（`fs::write_atomic`）
 
 1. 确保目标文件的父目录存在（`create_dir_all`）；
 2. 在同目录创建临时文件 `.<文件名>.tmp`（例如 `.dict.json.tmp`）；

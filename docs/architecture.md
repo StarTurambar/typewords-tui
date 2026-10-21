@@ -48,12 +48,13 @@ main.rs
 
 | 层 | 目录 | 职责 | 依赖约束 |
 | --- | --- | --- | --- |
-| 领域层 | `src/domain/` | 与终端无关的类型、词库、调度、流程、键入、会话、统计 | 只依赖自身与 `paths::Paths`；**不能**依赖 `app`/`ui`/`store`/`theme` |
-| 存档层 | `src/store/` | 本地 JSON 读写、版本校验、损坏隔离、原子写 | 依赖 `domain` |
+| 领域层 | `src/domain/` | 与终端无关的类型、词库、调度、流程、键入、会话、统计 | 只依赖自身与 `paths::Paths`/`fs`；**不能**依赖 `app`/`ui`/`store`/`theme`（`tests/layering.rs` 守着这条） |
+| 存档层 | `src/store/` | 本地 JSON 读写、版本校验、损坏隔离、原子写 | 依赖 `domain` 与 `fs` |
 | 主题配置层 | `src/theme/` | 颜色/主题模型、内置主题、`<home>/themes/*.json` 加载与校验 | 不依赖 ratatui，也不依赖 `ui` |
 | 应用层 | `src/app/` | `App` 状态机、Action、键鼠映射、事件循环、保存时机 | 依赖 `domain`/`store`/`bootstrap`/`cli`/`paths`，渲染入口调用 `ui` |
 | 渲染层 | `src/ui/` | ratatui 布局与绘制、主题→颜色映射、鼠标命中区域 | 读 `app::App` 与 `domain` 数据，**不修改**状态 |
 | 音频层 | `src/audio/` | 终端响铃、系统 TTS、外部播放器 | 只依赖 `domain` 的设置；子进程即发即忘，不阻塞事件循环 |
+| 底层原语 | `src/fs.rs` | 原子写（临时文件 + fsync + rename） | 只依赖 `std`，`domain` 与 `store` 都用它，避免两层互相依赖 |
 | 入口/装配 | `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs` | 解析参数、解析路径、装载初始状态、分发子命令 | 最外层，可依赖所有层 |
 
 有两条值得明确的实际约束：

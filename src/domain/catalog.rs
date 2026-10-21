@@ -246,7 +246,7 @@ impl Catalog {
                 .with_context(|| format!("创建目录失败: {}", parent.display()))?;
         }
         let text = serde_json::to_string_pretty(value)?;
-        crate::store::write_atomic(&file, &text)
+        crate::fs::write_atomic(&file, &text)
     }
 }
 
@@ -268,7 +268,7 @@ pub fn create_custom_dict(paths: &Paths, name: &str, words: Vec<Word>) -> Result
         fs::create_dir_all(parent)
             .with_context(|| format!("创建目录失败: {}", parent.display()))?;
     }
-    crate::store::write_atomic(&file, &text)?;
+    crate::fs::write_atomic(&file, &text)?;
 
     let mut entries = catalog.read_user_catalog()?;
     let mut resource = DictResource {
