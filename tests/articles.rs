@@ -91,3 +91,43 @@ fn the_article_list_is_loaded_on_first_entry() {
         "第一次进文章页就该列出当前书本的文章"
     );
 }
+
+/// 文章跟打结束后要落在能操作的页面上。
+///
+/// 文章练习没有单词练习会话，结算后停在 `Screen::Practice` 会渲染成一个
+/// 空白页——`render_practice` 遇到没有会话直接返回，用户既看不到结算，
+/// 也退不出去。
+#[test]
+fn the_article_summary_lands_on_a_usable_screen() {
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    press(&mut app, KeyCode::Char('a'));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::ArticlePractice);
+
+    // 打完所有句子（输完一句就自动进下一句，不用按回车）
+    for _ in 0..500 {
+        let Some(practice) = app.article_practice.as_ref() else {
+            break;
+        };
+        let sentence = practice.sentences[practice.index].clone();
+        for character in sentence.text.chars() {
+            press(&mut app, KeyCode::Char(character));
+        }
+    }
+
+    assert!(app.summary.is_some(), "应给出结算");
+    // 文章跟打没有练习会话：结算弹出时底层不能停在练习页，
+    // 否则渲染出来是一个没有会话的空白页。
+    assert_eq!(
+        app.screen,
+        app::Screen::Home,
+        "结算时底层应是主页，而不是没有会话的空白练习页"
+    );
+    assert!(app.session.is_none(), "文章跟打不应留下练习会话");
+
+    app.apply_action(app::Action::SummaryHome);
+    assert_eq!(app.screen, app::Screen::Home, "结算后应回到主页");
+}

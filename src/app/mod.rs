@@ -1987,7 +1987,9 @@ impl App {
             wrong_top: Vec::new(),
             week_days: [None; 7],
         });
-        self.screen = Screen::Practice;
+        // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
+        // 会渲染成一个没有会话的空白页，且没有任何退路。
+        self.screen = Screen::Home;
     }
 
     // ── 词条管理 ─────────────────────────────────────────────────────────

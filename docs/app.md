@@ -61,6 +61,10 @@
 | `Home` | 主页 | `Nav::Home`（`Practice` 也映射到它） | 1 |
 | `Practice` | 练习页（全屏，不套外壳） | — | 无（练习中数字属于键入/自测） |
 | `WordTest` | 单词测试页（一题 4 选 1） | `Nav::Home` | 无（数字用于选答案） |
+| `Words` | 词条管理页（搜索 / 编辑 / 增删 / 批量标记） | `Nav::Dicts` | —（由词库页进入） |
+| `Articles` | 文章背诵页（书本列表 + 文章列表） | `Nav::Home` | —（由主页进入） |
+| `ArticlePractice` | 文章跟打页（全屏，不套外壳） | — | 无 |
+| `Flows` | 练习流程页（内置 + 自建流程） | `Nav::Home` | —（由主页 `Ctrl+F` 进入） |
 | `DictPicker` | 词库页 | `Nav::Dicts` | 2 |
 | `Stats` | 统计页 | `Nav::Stats` | 3 |
 | `Settings` | 设置页 | `Nav::Settings` | 4 |
@@ -72,18 +76,18 @@
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
 - `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action`，文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。
 - `SummaryData`：`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`；后三项来自当前学习词典的总进度。
-- `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention` 十个取值；`PerDay` 没有设置行可打开，仅 `apply_number_value` 保留处理（每日词数由主页/词库页 `+`/`-` 修改）。
+- `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 没有设置行可打开，仅 `apply_number_value` 保留处理（每日词数由主页/词库页 `+`/`-` 修改），`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
 
 ### 2.4 设置表与 `SettingKind`
 
-`SETTING_ROWS` 是设置页唯一数据源，共 24 项，数组顺序即渲染顺序。
+`SETTING_ROWS` 是设置页唯一数据源，共 30 行（28 个配置项 + 2 个动作项），数组顺序即渲染顺序。
 
 | `SettingKind` | `SETTING_ROWS` 中的 key（按出现顺序） |
 | --- | --- |
-| `Mode` / `Theme` / `SoundType` | `word_practice_mode` / `theme` / `sound_type` |
-| `Bool` | `big_word`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
+| `Mode` / `Theme` / `SoundType` / `AudioSource` | `word_practice_mode` / `theme` / `sound_type` / `tts_source` |
+| `Bool` | `big_word`、`keyboard_sound`、`effect_sound`、`word_sound`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
 | `Number` | `word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
-| `Action(ConfirmAction)` | `reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
+| `Shortcuts` / `Action(ConfirmAction)` | `shortcut_settings`（跳到快捷键编辑页）、`reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
 
 设置页按 key 归入「通用 / 音频 / 复习 / 键入 / 显示 / FSRS / 其他」七个分区（起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
 
