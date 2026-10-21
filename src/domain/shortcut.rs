@@ -76,7 +76,18 @@ impl BaseKey {
     }
 
     /// 解析上游写法；无法识别时返回 `None`。
+    ///
+    /// 方向键字面量必须先于「单字符 → `Char`」的早返回匹配：`➡` 也是一个
+    /// Unicode 标量，若按单字符处理会被当成普通字符 `Char('➡')`，存档里的
+    /// 方向键绑定就再也解析不回 `BaseKey::Right`。
     pub fn from_upstream(text: &str) -> Option<Self> {
+        match text {
+            "➡" | "ArrowRight" | "Right" => return Some(Self::Right),
+            "⬅" | "ArrowLeft" | "Left" => return Some(Self::Left),
+            "⬆" | "ArrowUp" | "Up" => return Some(Self::Up),
+            "⬇" | "ArrowDown" | "Down" => return Some(Self::Down),
+            _ => {}
+        }
         if text.chars().count() == 1 {
             let character = text.chars().next()?;
             return Some(Self::Char(character.to_ascii_uppercase()));
@@ -89,10 +100,6 @@ impl BaseKey {
             "Backspace" => Self::Backspace,
             "Delete" => Self::Delete,
             "Insert" => Self::Insert,
-            "➡" | "ArrowRight" | "Right" => Self::Right,
-            "⬅" | "ArrowLeft" | "Left" => Self::Left,
-            "⬆" | "ArrowUp" | "Up" => Self::Up,
-            "⬇" | "ArrowDown" | "Down" => Self::Down,
             "Home" => Self::Home,
             "End" => Self::End,
             "PageUp" => Self::PageUp,
@@ -765,5 +772,55 @@ mod tests {
         let actions = map.actions_for(&key);
         assert!(actions.contains(&ShortcutAction::KnowWord));
         assert!(actions.contains(&ShortcutAction::ChooseA));
+    }
+
+    /// 方向键绑定必须能原样往返。
+    ///
+    /// `➡` 只有一个 Unicode 标量，早期实现先走「单字符 → `Char`」的早返回，
+    /// 把方向键绑成 `Char('➡')`；存档再读回来时匹配不上 `BaseKey::Right`，
+    /// 于是「下一个词 / 上一组 / 下一阶段」等键位在重启后全部失效。
+    #[test]
+    fn direction_key_bindings_survive_a_store_round_trip() {
+        let map = ShortcutMap::default();
+        let stored = map.to_stored();
+        assert_eq!(stored.get("Next").map(String::as_str), Some("Ctrl+➡"));
+        assert_eq!(stored.get("Previous").map(String::as_str), Some("Ctrl+⬅"));
+        assert_eq!(stored.get("NextChapter").map(String::as_str), Some("Alt+➡"));
+        assert_eq!(stored.get("NextStep").map(String::as_str), Some("Shift+➡"));
+
+        let restored = ShortcutMap::from_stored(&stored);
+        assert_eq!(
+            restored.key_for(ShortcutAction::Next),
+            ShortcutKey::ctrl(BaseKey::Right)
+        );
+        assert_eq!(
+            restored.key_for(ShortcutAction::Previous),
+            ShortcutKey::ctrl(BaseKey::Left)
+        );
+        assert_eq!(
+            restored.key_for(ShortcutAction::NextChapter),
+            ShortcutKey::alt(BaseKey::Right)
+        );
+        assert_eq!(
+            restored.key_for(ShortcutAction::NextStep),
+            ShortcutKey::shift(BaseKey::Right)
+        );
+
+        // 反查也要能命中，否则键位等于消失。
+        assert!(
+            restored
+                .actions_for(&ShortcutKey::ctrl(BaseKey::Right))
+                .contains(&ShortcutAction::Next)
+        );
+        assert!(
+            restored
+                .actions_for(&ShortcutKey::alt(BaseKey::Right))
+                .contains(&ShortcutAction::NextChapter)
+        );
+        assert!(
+            restored
+                .actions_for(&ShortcutKey::shift(BaseKey::Right))
+                .contains(&ShortcutAction::NextStep)
+        );
     }
 }
