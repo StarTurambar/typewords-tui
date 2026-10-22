@@ -17,6 +17,7 @@ use crate::ui::widgets::{self, display_width, fit_text, footer_hints};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Nav {
     Home,
+    Articles,
     Dicts,
     Stats,
     Settings,
@@ -24,14 +25,25 @@ pub enum Nav {
 }
 
 impl Nav {
-    pub const ALL: [Nav; 5] = [Nav::Home, Nav::Dicts, Nav::Stats, Nav::Settings, Nav::Help];
-    pub const MAIN: [Nav; 4] = [Nav::Home, Nav::Dicts, Nav::Stats, Nav::Help];
+    /// 窄屏顶栏的全部标签，顺序即视觉顺序。
+    pub const ALL: [Nav; 6] = [
+        Nav::Home,
+        Nav::Articles,
+        Nav::Dicts,
+        Nav::Stats,
+        Nav::Help,
+        Nav::Settings,
+    ];
+    /// 宽屏侧栏主导航区（设置固定在底部，不在此列）。
+    pub const MAIN: [Nav; 5] = [Nav::Home, Nav::Articles, Nav::Dicts, Nav::Stats, Nav::Help];
 
     pub fn from_screen(screen: Screen) -> Self {
         match screen {
             Screen::Home | Screen::Practice | Screen::WordTest => Nav::Home,
             Screen::Words => Nav::Dicts,
-            Screen::Articles | Screen::ArticlePractice | Screen::Flows => Nav::Home,
+            Screen::Articles | Screen::ArticlePractice => Nav::Articles,
+            // 流程页是单词练习的附属页面，归到「单词」下。
+            Screen::Flows => Nav::Home,
             Screen::DictPicker => Nav::Dicts,
             Screen::Stats => Nav::Stats,
             Screen::Settings | Screen::Shortcuts => Nav::Settings,
@@ -42,6 +54,7 @@ impl Nav {
     pub fn screen(self) -> Screen {
         match self {
             Nav::Home => Screen::Home,
+            Nav::Articles => Screen::Articles,
             Nav::Dicts => Screen::DictPicker,
             Nav::Stats => Screen::Stats,
             Nav::Settings => Screen::Settings,
@@ -52,6 +65,7 @@ impl Nav {
     pub fn label(self) -> &'static str {
         match self {
             Nav::Home => "单词",
+            Nav::Articles => "文章",
             Nav::Dicts => "词库",
             Nav::Stats => "统计",
             Nav::Settings => "设置",
@@ -62,10 +76,11 @@ impl Nav {
     pub fn key(self) -> &'static str {
         match self {
             Nav::Home => "1",
-            Nav::Dicts => "2",
-            Nav::Stats => "3",
-            Nav::Settings => "4",
+            Nav::Articles => "2",
+            Nav::Dicts => "3",
+            Nav::Stats => "4",
             Nav::Help => "5",
+            Nav::Settings => "6",
         }
     }
 }
@@ -476,6 +491,7 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("enter", "开始"),
             ("f", "自由练习"),
             ("d", "词库"),
+            ("a", "文章"),
             ("s", "设置"),
             ("t", "统计"),
             ("?", "帮助"),

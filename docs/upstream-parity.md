@@ -64,10 +64,10 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | `(words)/dict.vue` | 单词管理：增删改、批量、导入导出、复制词库 | 无 |
 | `(words)/practice-words/[id].vue` | 单词练习页 | 练习页 `src/ui/practice.rs` |
 | `(words)/words-test/[id].vue` | 单词测试（4 选 1） | 无 |
-| `(articles)/articles.vue` | 文章学习主页 | 无 |
-| `(articles)/book-list.vue` | 书籍目录 | 无 |
-| `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无 |
-| `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 无 |
+| `(articles)/articles.vue` | 文章学习主页 | 文章页 `src/ui/articles.rs`（书本 + 文章列表，合并上游的两级页面） |
+| `(articles)/book-list.vue` | 书籍目录 | 无（与文章页合并） |
+| `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无（与文章页合并；音频用系统 TTS 替代） |
+| `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 文章跟打页 `src/ui/articles.rs` |
 | `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 30 行） |
 | `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
 | `doc.vue` | 英语学习资源分享 | 无 |
@@ -82,7 +82,8 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 | 分组 | 功能 | 上游（页面/文件） | TUI 现状 | 状态 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分 | 当前词库、今日任务、统计、我的词典、推荐齐全；无日历、任务词表预览、改学习进度入口 |
+| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分 | 当前词库、今日任务、统计、我的词典、推荐齐全；无月历、任务词表预览、改学习进度入口、「上次任务」标题 |
+| 外观 | 侧栏一级导航 | `app/layouts/default.vue`（单词 / 文章 / 反馈 / 文档 / 帮助 / 设置） | `src/ui/shell.rs` | 部分 | 单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6 连续；无反馈、文档、资源分享（与学习无关，且上游页面本身无对应实现） |
 | 主页 | 营销落地页 | `index.vue` | 无 | 不适用 | 终端客户端不需要网站首页 |
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
@@ -248,7 +249,7 @@ TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::sha
 | `dict.json` | `typing-word-dict` | 4 | 字段同名；系统词典与当前词库进度可搬运 |
 | `setting.json` | `typing-word-setting` | 23 | TUI 建模 28 个字段，其余透传 |
 | `practice-word.json` | `PracticeSaveWord` | 2 | compact v2；TUI 额外要求 `sessionSnapshot` |
-| 无 | `PracticeSaveArticle` | 1 | 文章与音频没有对应实现，迁移时直接丢弃 |
+| 无 | `PracticeSaveArticle` | 1 | 文章背诵已实现，但跟打断点缓存尚未接入；音频无对应实现，迁移时直接丢弃 |
 
 ### 5.2 Web 备份结构与迁移方向
 

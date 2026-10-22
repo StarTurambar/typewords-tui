@@ -486,7 +486,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 | Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页只列出资源目录，切走后就无法再切回 |
 | FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容；TUI 自实现的 FSRS-6 已逐条对齐上游 ts-fsrs（黄金样本见 `tests/fsrs_parity.rs`），同一张卡在两端得到相同的下次复习时间 |
 | 练习缓存 | TUI 恢复还要求 `sessionSnapshot`；Web 旧缓存若缺这个字段则只迁移词表与统计、无法恢复断点 |
-| 文章与音频 | `PracticeSaveArticle`、`dicts/en/article`、备份 ZIP 里的 `mp3/` 在 TUI 中都没有对应实现，迁移时直接丢弃即可 |
+| 文章与音频 | `PracticeSaveArticle`（文章背诵的跟打断点缓存，尚未接入）、备份 ZIP 里的 `mp3/` 在 TUI 中没有对应实现，迁移时直接丢弃即可 |
 
 ## 9. 备份、恢复与重置
 

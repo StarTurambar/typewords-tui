@@ -60,10 +60,12 @@ const PRACTICE: &[HelpEntry] = &[
 
 const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Section("导航/查看"),
-    HelpEntry::Key("1 ~ 5", "切换页面"),
+    HelpEntry::Key("1 ~ 6", "切换页面"),
     HelpEntry::Key("?", "帮助"),
     HelpEntry::Key("q", "退出"),
     HelpEntry::Key("d / s / t", "词库 / 设置 / 统计"),
+    HelpEntry::Key("a", "文章背诵"),
+    HelpEntry::Key("Ctrl+F", "练习流程"),
     HelpEntry::Key("m", "切换练习模式"),
     HelpEntry::Key("Enter", "开始学习"),
     HelpEntry::Key("f", "自由练习"),

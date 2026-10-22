@@ -78,7 +78,7 @@ ui::render(app, frame)
 
 | 条件 | 结果 |
 | --- | --- |
-| `area.width < 100` | 窄屏：无侧栏，`main = area`，顶栏显示 `Type Words` 与 5 个可点击标签 |
+| `area.width < 100` | 窄屏：无侧栏，`main = area`，顶栏显示 `Type Words` 与 6 个可点击标签 |
 | `100 <= area.width < 120` | 宽屏：侧栏 24 列 |
 | `area.width >= 120` | 宽屏：侧栏 26 列 |
 | 主区行分配 | 顶栏 `main.y`、分隔线 `main.y+1`、正文区从 `main.y+3` 到 `footer.y` 前 |
@@ -89,11 +89,13 @@ ui::render(app, frame)
 ### 4.2 侧栏
 
 - `TW` 大字标识：内宽 `width-4`，当 `内宽 >= 22 && 高度 >= 28` 时用 2× 点阵（7 行），否则 1×（4 行）；下面最多一行 `Type Words` 副标题（放得下才画）。
-- 导航项 `Nav::MAIN`（单词 / 词库 / 统计 / 帮助）每个占 2 行，从副标题下 2 行开始；与底部保留区冲突时停止追加。
+- 导航项 `Nav::MAIN`（单词 / 文章 / 词库 / 统计 / 帮助）每个占 2 行，从副标题下 2 行开始；与底部保留区冲突时停止追加。
 - 底部固定 5 行：分隔线 `height-5`、版本号 `height-4`、设置 `height-3`、退出 `height-2`，左侧有一条 1 列宽的分隔边（`Borders::RIGHT`）。
 - 选中项用 `selection` 铺背景、左侧 1 列 `accent`，标签用 `fg`/`accent_alt`，未选中用 `muted`/`dim`。
 
-`Nav` 枚举：`Home`（单词，1）、`Dicts`（词库，2）、`Stats`（统计，3）、`Settings`（设置，4）、`Help`（帮助，5）。`Nav::ALL` 是 5 项（窄屏顶栏用），`Nav::MAIN` 是除 Settings 外的 4 项（宽屏侧栏的导航区用，Settings 固定在底部）；`Nav::from_screen` 把 `Practice` 映射为 `Home`。
+`Nav` 枚举：`Home`（单词，1）、`Articles`（文章，2）、`Dicts`（词库，3）、`Stats`（统计，4）、`Help`（帮助，5）、`Settings`（设置，6）。`Nav::ALL` 是 6 项（窄屏顶栏用，顺序即视觉顺序）；`Nav::MAIN` 是除 Settings 外的 5 项（宽屏侧栏的导航区用，Settings 固定在底部）。编号按**视觉顺序**排：设置虽然在侧栏最底部，编号却是 6，否则侧栏会显示「统计 4 / 帮助 5 / 设置 6」夹着底部的 6 号，和主导航区对不上。
+
+`Nav::from_screen` 把 `Practice` 映射为 `Home`、`Articles` 与 `ArticlePractice` 映射为 `Articles`、`Flows` 映射为 `Home`（流程页是单词练习的附属页）。文章页必须高亮「文章」——早期映射成 `Home`，用户站在文章页却看到「单词」被选中。
 
 ### 4.3 顶栏与底栏
 
@@ -120,8 +122,9 @@ ui::render(app, frame)
 - 外框 `panel` 背景、左侧 1 列 `accent` 竖条，中间 1 列 `border` 分隔左右两栏（58% / 1 列 / `Min(18)`）。
 - 左栏：词库名（bold）、预计完成日期（`insights::estimated_finish`；已学完为 `已学完 · 总复习阶段`；未选词库为「按 d 选择词库」）、细线进度条 + 百分比（`thin_bar_spans`，完成用 `good` 否则 `accent_alt`）、「已学 N / M 词」。
 - 底部按钮：主按钮宽 `min(22, 左栏宽)`，文案按 `last_learn_index > 0 || complete` 选择「Enter 继续学习 →」或「Enter 开始学习 →」；`f 自由练习` 按钮宽 13，放得下才出现。
-- 右栏「今日任务」：`◆`（`warn`）+ 标题；每日目标行 `[-] N [+] `，右栏宽度 `< 24` 时用短文案「目标 [-] N [+]」；下面两块数字卡：新词、复习，复习卡在 `review == 0 && due == 0` 时补「无到期」小字。
-- 目标按钮的命中矩形与实际绘制位置一致：普通布局在 `hero_right.x+9` 与 `+21`（各 3 列宽），短布局在 `+5` 与 `+14`。
+- 右栏「今日任务」：`◆`（`warn`）+ 标题；右端是「模式 X ▾」标签（`accent_alt`），点击打开模式选择弹层；每日目标行 `[-] N [+] `，右栏宽度 `< 24` 时用短文案「目标 [-] N [+]」；下面两块数字卡：新词、复习，复习卡在 `review == 0 && due == 0` 时补「无到期」小字。
+- 目标按钮的命中矩形由**绘制用的同一行文本**算出：`goal_line_text` 生成文本，`goal_buttons` 在其中找 `[-]` 与 `[+]` 的字符位置，按显示宽度换算成列号。早期实现用固定偏移（`hero_right.x+9` / `+21`）估算，与实际排版差 2 列，所有终端尺寸下点 `+` 都没反应。
+- 「模式 X ▾」标签的宽度按**当前模式名**算（`mode_label_text`），不能写死「学习」——写死会让「自由练习」「随机复习」「单词测试」等 6 个模式被截成「模式 随机…」，连下拉三角 `▾` 都被吃掉。
 
 ### 5.2 统计与本周记录
 
@@ -134,7 +137,8 @@ ui::render(app, frame)
 - 「我的词典」：标题行右侧「d 词库」；卡片数量 `max_tiles = (tiles.width / 14).clamp(3, 5)`。当前学习词典如果排在第 `max_tiles` 位之后，会与第一张卡交换，避免被系统词典挤出视野；卡片不足时追加「+ / d 管理」卡。
 - 每张词库卡：名称（bold）、徽标（`内置` / `当前` / `词库`）与「N 词」；词数取 `effective_length()`。
 - 「推荐」：从 `catalog.resources()` 过滤掉当前词典与 `book_list` 已拥有的 id/enName，按行显示 名称（截断 18 列）/ 简介（22 列）/ 词数；行数由区块高度决定；无推荐时显示「暂无推荐 · d 浏览词库」。
-- `targets`：主按钮 `StartPractice`、自由按钮 `StartFreePractice`、目标 `AdjustDaily(±5)`、「d 词库」「d 更多」→ `Navigate(DictPicker)`。标题右侧文字本身是 `section_header` 画出来的，命中矩形由 layout 预留（`open_dicts`/`open_more`）。
+- 词典卡片的排布由 `dict_tile_layout` 统一计算，绘制（`render_dicts`）与命中检测（`layout`）共用它——两边各算一遍必然漂移，「+ / d 管理」卡就会点不到。`ordered_dicts` 负责展示顺序（当前词库优先）。
+- `targets`：主按钮 `StartPractice`、自由按钮 `StartFreePractice`、目标 `AdjustDaily(±5)`、模式标签 `OpenModePicker`、「d 词库」「+ / d 管理」卡「d 更多」→ `Navigate(DictPicker)`。标题右侧文字本身是 `section_header` 画出来的，命中矩形由 layout 预留（`open_dicts`/`open_more`/`manage_tile`）。
 
 ## 6. 练习页
 
