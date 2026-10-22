@@ -109,13 +109,21 @@
 2. 应用 CLI 覆盖：`--mode` 经 `cli::parse_mode` 写 `settings.word_practice_mode`（未知模式返回错误）；`--theme` 直接覆盖 `settings.theme` 字符串。
 3. 随机种子取 `cli.seed`，缺省 `rng::random_seed()`；构造 `rng::seeded(seed)`；组装 `App`（`screen = Home`、无会话、空 Toast、工具栏显示、词表面板与例句开关的默认值）。
 4. `notices` 逐条转 `Warning` Toast；再次 `ThemeRegistry::resolve`，发生回退时追加 Warning「主题 X 不存在，已回退到深色」。
-5. `--reset-practice` 删除 `practice-word.json` 并提示「已清空练习进度」，否则 `try_restore_practice()`（见 3.3）。
+5. `--reset-practice` 删除 `practice-word.json` 并提示「已清空练习进度」，否则 `try_restore_practice()` 与 `try_restore_article_practice()`（见 3.3）。
 6. `ensure_study_dict()`：当前词典缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库；失败写 `fatal = "加载词库失败: ..."`。
 7. `refresh_stats()` 与 `refresh_task_preview()` 计算主页缓存，返回 `App`。
 
 ### 3.3 恢复练习缓存与 fatal
 
 `try_restore_practice`：读 `practice-word.json`，有损坏/版本不受支持的通知则弹 Warning；无缓存静默返回；有缓存时要求学习词典已有词表且 `cache_from_compact` 能还原，然后用缓存里的 `flow_id` 反查模式、新建 `PracticeSession`、把当前词典全部单词洗牌后交给 `apply_cache`。成功则 `screen = Practice`、重置键入、提示「已恢复上次练习进度」；失败静默丢弃（不删文件，等待下一次练习覆盖）。
+
+恢复逻辑抽在 `restore_practice_from_cache`（返回是否成功）里，供两处复用：启动时用它决定要不要弹「已恢复」，按 `Enter` 时用它决定是接着练还是重开一轮。
+
+`try_resume_saved_practice`：**同一次运行内**退出练习页再按 `Enter` 时，若有断点缓存就接着上次的练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`——它只在自由模式下 `resetCache=true`，其余模式把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。要求断点里的 flow 模式与当前模式一致，否则不恢复（流程阶段对不上）。
+
+`try_restore_article_practice`：读 `practice-article.json` 恢复文章跟打进度。文章资源是懒加载的——启动时书本与文章列表都还是空的，得先 `load_books` 载入才能按 id 找回那篇文章；找不到就放弃恢复。恢复后跳到记录的句子并带上已用时与已完成句数。
+
+> **统计落盘时机**：上游的 `flushStatToStore` 只在**结算**与**重置缓存**两处调用，中途退出后继续练时统计留在缓存里不落盘。TUI 同此——`flush_practice_stats` 的调用点也相应调整。
 
 错误分两级：`bootstrap::load` 自身的错误从 `App::bootstrap` 返回，`app::run` 不会初始化终端，进程以错误退出；`fatal` 只用于 `ensure_study_dict` 失败——`App::bootstrap` 仍返回 `Ok`，`app::run` 在 `ratatui::init` 之前 `bail!`，不会留下半初始化界面。
 
@@ -381,8 +389,10 @@ app.save_all()
 | `save_settings_now` | `store.save_settings(&boot.settings)`；`readonly_settings` 为真（设置存档版本过高）时直接返回 |
 | `save_practice_now` | 无会话时返回；`session.build_cache()` 后把当前 `stat` 写进 `stat_store_data`，`cache_to_compact` 后写 `practice-word.json`，并清除 `pending_practice_save` |
 | `schedule_practice_save` | 只设 `pending_practice_save = now + 500ms`，落盘由 `on_tick` 完成 |
-| `save_all` | 依次保存词典、设置；若仍有未结算会话则保存练习缓存 |
-| `clear_practice_cache` | 删除 `practice-word.json` 并清除防抖 deadline |
+| `save_article_practice_now` | 无文章跟打会话时删除 `practice-article.json`；否则把句子进度与用时写进 `practice_data` 后落盘，并清除 `pending_article_save` |
+| `schedule_article_save` | 只设 `pending_article_save = now + 500ms`，落盘由 `on_tick` 完成；每完成一句与每 30 秒整点各调一次 |
+| `save_all` | 依次保存词典、设置；若仍有未结算会话则保存练习缓存；文章跟打进行中也保存文章缓存 |
+| `clear_practice_cache` | 删除 `practice-word.json` 并清除防抖 deadline（不动文章缓存） |
 | `clear_all_data` | 见 9.3；把两份存档恢复默认并删掉练习缓存 |
 
 保存失败不会 panic：统一转成 `Error` Toast（如「保存词典失败: ...」）。

@@ -1,10 +1,11 @@
 //! 本地存档：JSON 原子写、版本校验、损坏隔离。
 //!
 //! 文件名与 Web 的 IndexedDB key 对应，便于将来互通：
-//! - dict.json           ↔ typing-word-dict（版本 4）
-//! - setting.json        ↔ typing-word-setting（版本 23）
-//! - practice-word.json  ↔ PracticeSaveWord（版本 2）
-//! - flows.json          ↔ localStorage['PracticeFlowV2']（无版本号）
+//! - dict.json             ↔ typing-word-dict（版本 4）
+//! - setting.json          ↔ typing-word-setting（版本 23）
+//! - practice-word.json    ↔ PracticeSaveWord（版本 2）
+//! - practice-article.json ↔ PracticeSaveArticle（版本 1）
+//! - flows.json            ↔ localStorage['PracticeFlowV2']（无版本号）
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,10 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::constants::{DICT_STATE_VERSION, PRACTICE_CACHE_VERSION, SETTING_VERSION};
+use crate::domain::article::ArticleCacheEnvelope;
+use crate::domain::constants::{
+    DICT_STATE_VERSION, PRACTICE_ARTICLE_CACHE_VERSION, PRACTICE_CACHE_VERSION, SETTING_VERSION,
+};
 use crate::domain::flow::store::{FILE_NAME as FLOW_FILE_NAME, FlowStore};
 use crate::domain::types::{BaseState, PracticeCacheCompact, SettingState};
 
@@ -264,6 +268,72 @@ impl FileStore {
 
     pub fn practice_exists(&self) -> bool {
         self.file_path("practice-word.json").is_file()
+    }
+
+    /// 读取文章练习缓存（`practice-article.json`）。
+    ///
+    /// 与单词练习缓存分开存：两者的进度互不相干，混在一个文件里会让
+    /// 「清空单词练习进度」误删文章的跟打进度。
+    pub fn load_practice_article(&self) -> Loaded<Option<ArticleCacheEnvelope>> {
+        match self.read_envelope::<Option<ArticleCacheEnvelope>>("practice-article.json") {
+            Ok(None) => Loaded {
+                value: None,
+                status: LoadStatus::Missing,
+                updated_at: None,
+            },
+            Ok(Some((value, version, updated_at))) => {
+                if version != PRACTICE_ARTICLE_CACHE_VERSION {
+                    Loaded {
+                        value: None,
+                        status: LoadStatus::UnsupportedVersion {
+                            found: version,
+                            expected: PRACTICE_ARTICLE_CACHE_VERSION,
+                        },
+                        updated_at,
+                    }
+                } else {
+                    Loaded {
+                        value,
+                        status: LoadStatus::Loaded,
+                        updated_at,
+                    }
+                }
+            }
+            Err(_) => {
+                // 缓存损坏时直接丢弃，不阻断启动。
+                let path = self.file_path("practice-article.json");
+                let _ = self.quarantine(&path);
+                Loaded {
+                    value: None,
+                    status: LoadStatus::Corrupt("文章练习缓存损坏，已丢弃".to_string()),
+                    updated_at: None,
+                }
+            }
+        }
+    }
+
+    pub fn save_practice_article(&self, cache: Option<&ArticleCacheEnvelope>) -> Result<()> {
+        match cache {
+            Some(value) => self.save_typed(
+                "practice-article.json",
+                &Some(value),
+                PRACTICE_ARTICLE_CACHE_VERSION,
+            ),
+            None => self.remove_practice_article(),
+        }
+    }
+
+    pub fn remove_practice_article(&self) -> Result<()> {
+        let path = self.file_path("practice-article.json");
+        if path.is_file() {
+            fs::remove_file(&path)
+                .with_context(|| format!("删除文章练习缓存失败: {}", path.display()))?;
+        }
+        Ok(())
+    }
+
+    pub fn practice_article_exists(&self) -> bool {
+        self.file_path("practice-article.json").is_file()
     }
 
     /// 读取自建流程存档（`flows.json`）。

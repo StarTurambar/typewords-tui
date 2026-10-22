@@ -70,6 +70,52 @@ impl Fixture {
         )
         .unwrap();
 
+        // 文章资源：一本书、两篇文章，每篇两句。
+        fs::create_dir_all(assets.join("dicts").join("en").join("article")).unwrap();
+        let article_book = serde_json::json!([{
+            "id": 1,
+            "enName": "toybook",
+            "name": "测试文章集",
+            "description": "测试用文章",
+            "url": "toy.json",
+            "length": 2,
+            "language": "en",
+            "translateLanguage": "zh_CN",
+            "type": "article"
+        }]);
+        fs::write(
+            assets.join("list").join("article.json"),
+            serde_json::to_string(&article_book).unwrap(),
+        )
+        .unwrap();
+        let articles = serde_json::json!([
+            {
+                "id": 11,
+                "title": "第一篇",
+                "titleTranslate": "Article One",
+                "text": "Hello there.\n\nGeneral Kenobi.",
+                "textTranslate": "你好。\n\n肯尼将军。",
+                "audioSrc": ""
+            },
+            {
+                "id": 12,
+                "title": "第二篇",
+                "titleTranslate": "Article Two",
+                "text": "Good morning.\n\nGood night.",
+                "textTranslate": "早上好。\n\n晚安。",
+                "audioSrc": ""
+            }
+        ]);
+        fs::write(
+            assets
+                .join("dicts")
+                .join("en")
+                .join("article")
+                .join("toy.json"),
+            serde_json::to_string(&articles).unwrap(),
+        )
+        .unwrap();
+
         Self { root }
     }
 

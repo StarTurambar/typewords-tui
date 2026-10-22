@@ -30,7 +30,7 @@
 | `src/domain/typing.rs` | 键入状态机 | `TypingEngine`、`TypingSettings`、`TypingEvent`、`KeyInput` |
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
 | `src/domain/flow/store.rs` | 自建练习流程的数据结构（`flows.json` 的读写在 `store` 层） | `FlowStore`、`StoredFlow` |
-| `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态 | `Article`、`parse_sentence`、`gen_sections`、`SentenceTyping` |
+| `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态、断点缓存 | `Article`、`parse_sentence`、`gen_sections`、`SentenceTyping`、`ArticleCache`、`ArticleCacheEnvelope` |
 | `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`mark_know`、`sort_words` |
 | `src/domain/flow/mod.rs` | 流程配置、游标、相位、展示模型 | `PracticeFlowConfig`、`PracticeFlowCursor`、`builtin_flow`、`resolve_phase_by_cursor`、`display_state` |
 | `src/domain/flow/navigator.rs` | 会话内的位置推进 | `Navigator`、`NavState`、`Notice` |

@@ -400,6 +400,8 @@ pub struct App {
     pub last_activity: i64,
     last_timer_tick: i64,
     pending_practice_save: Option<i64>,
+    /// 文章跟打进度的延迟保存截止时间。
+    pending_article_save: Option<i64>,
 }
 
 impl App {
@@ -519,6 +521,7 @@ impl App {
             last_activity: now,
             last_timer_tick: now,
             pending_practice_save: None,
+            pending_article_save: None,
         };
 
         app.refresh_shortcuts();
@@ -544,10 +547,13 @@ impl App {
         }
 
         if cli.reset_practice {
+            // 两个练习的断点都清：启动参数的用途是「复现问题时清干净」。
             let _ = app.store.remove_practice();
+            let _ = app.store.remove_practice_article();
             app.toast(NoticeLevel::Success, "已清空练习进度");
         } else {
             app.try_restore_practice();
+            app.try_restore_article_practice();
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -559,18 +565,28 @@ impl App {
     }
 
     fn try_restore_practice(&mut self) {
+        if self.restore_practice_from_cache() {
+            self.toast(NoticeLevel::Info, "已恢复上次练习进度");
+        }
+    }
+
+    /// 从断点缓存恢复练习会话。
+    ///
+    /// 返回是否恢复成功——启动时用它决定要不要提示「已恢复」，
+    /// 按 Enter 时用它决定是接着练还是重新生成任务。
+    fn restore_practice_from_cache(&mut self) -> bool {
         let loaded = self.store.load_practice();
         if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
         let Some(compact) = loaded.value else {
-            return;
+            return false;
         };
         let Some(dict) = self.boot.base.study_dict() else {
-            return;
+            return false;
         };
         let Some(cache) = cache_from_compact(&compact, &dict.words) else {
-            return;
+            return false;
         };
         let flow = match self.flow_store.flows.get(&cache.session_snapshot.flow_id) {
             Some(stored) => stored.config.clone(),
@@ -581,12 +597,48 @@ impl App {
         let mut session = PracticeSession::with_flow(mode, flow);
         shuffle(&mut self.rng, &mut all_words);
         session.all_words = all_words;
-        if session.apply_cache(&cache, &mut self.rng, &mut self.stat, timer::now_ms()) {
-            self.session = Some(session);
-            self.screen = Screen::Practice;
-            self.typing.reset();
-            self.toast(NoticeLevel::Info, "已恢复上次练习进度");
+        if !session.apply_cache(&cache, &mut self.rng, &mut self.stat, timer::now_ms()) {
+            return false;
         }
+        self.session = Some(session);
+        self.screen = Screen::Practice;
+        self.typing.reset();
+        // 恢复的是上一轮的统计快照，本轮尚未落盘——与新开一轮同理。
+        self.stats_recorded = false;
+        true
+    }
+
+    /// 尝试接着上次的练习继续。
+    ///
+    /// 模式必须与断点里的一致——用「复习」模式去续「学习」模式的进度
+    /// 会让流程的阶段对不上。这种情况不恢复，交给调用方新建任务。
+    fn try_resume_saved_practice(&mut self, mode: WordPracticeMode) -> bool {
+        if !self.has_saved_practice() {
+            return false;
+        }
+        // 先看一眼断点里的模式，对不上就别费劲恢复。
+        let loaded = self.store.load_practice();
+        let Some(compact) = loaded.value else {
+            return false;
+        };
+        let Some(dict) = self.boot.base.study_dict() else {
+            return false;
+        };
+        let Some(cache) = cache_from_compact(&compact, &dict.words) else {
+            return false;
+        };
+        let flow = match self.flow_store.flows.get(&cache.session_snapshot.flow_id) {
+            Some(stored) => stored.config.clone(),
+            None => get_flow_config(&cache.session_snapshot.flow_id),
+        };
+        if flow.mode != mode {
+            return false;
+        }
+        if !self.restore_practice_from_cache() {
+            return false;
+        }
+        self.toast(NoticeLevel::Info, "已继续上次练习");
+        true
     }
 
     pub fn save_dict_now(&mut self) {
@@ -621,9 +673,15 @@ impl App {
         self.pending_practice_save = None;
     }
 
+    /// 清空练习断点：单词练习与文章跟打两个缓存都清。
+    ///
+    /// 「清空当前练习进度」与 `--reset-practice` 共用此函数——两者的用途
+    /// 都是「从干净状态开始」，留着半个文章的跟打进度没意义。
     pub fn clear_practice_cache(&mut self) {
         let _ = self.store.remove_practice();
+        let _ = self.store.remove_practice_article();
         self.pending_practice_save = None;
+        self.pending_article_save = None;
     }
 
     /// 清除所有数据：`dict.json` 与 `setting.json` 都回到默认值，并删掉断点缓存。
@@ -640,6 +698,7 @@ impl App {
             return;
         }
         self.clear_practice_cache();
+        self.article_practice = None;
         self.session = None;
         self.typing = TypingEngine::new();
         self.stat = PracticeState::default();
@@ -673,9 +732,27 @@ impl App {
         if self.session.is_some() && self.summary.is_none() {
             self.save_practice_now();
         }
+        // 文章跟打同理：退出程序时把当前句的进度写进缓存。
+        if self.article_practice.is_some() {
+            self.save_article_practice_now();
+        }
     }
 
     // ── 统计 / 任务预览 ──────────────────────────────────────────────────
+
+    /// 是否有未完成的单词练习进度（断点缓存存在）。
+    ///
+    /// 主页据此把「今日任务」改成「上次任务」——对齐上游 `words.vue` 的
+    /// `isSaveData`。只查文件在不在，不解析内容：主页每次重绘都问一次，
+    /// 解析整个缓存太贵。
+    pub fn has_saved_practice(&self) -> bool {
+        self.store.practice_exists()
+    }
+
+    /// 是否有未完成的文章跟打进度。
+    pub fn has_saved_article_practice(&self) -> bool {
+        self.store.practice_article_exists()
+    }
 
     pub fn refresh_stats(&mut self) {
         let today = chrono::Local::now().date_naive();
@@ -743,6 +820,18 @@ impl App {
         // 单词测试模式走 4 选 1 的答题流程，不进入键入练习
         if crate::domain::constants::is_words_test_mode(mode) {
             self.start_word_test(mode);
+            return;
+        }
+        // 有未完成的断点时接着练，而不是重新生成任务。
+        //
+        // 对齐上游 `words.vue` 的 `systemPractice()`——它只在自由模式下
+        // `resetCache=true`，其余模式把现存的 `practiceData` 传给练习页，
+        // 练习页优先 `applyPracticeCache`。早期实现总是新建任务，用户
+        // 中途退出再按 Enter 就会丢掉已练的部分，从头再来一遍。
+        //
+        // 自由练习例外：上游的「自由练习」按钮走 `resetCache=true`，
+        // 明确要开一轮新的，不接着上次的断点。
+        if mode != WordPracticeMode::Free && self.try_resume_saved_practice(mode) {
             return;
         }
         let task = if mode == WordPracticeMode::Shuffle {
@@ -1958,6 +2047,110 @@ impl App {
         self.speak_current_sentence();
     }
 
+    /// 把当前文章跟打进度写进断点缓存。
+    ///
+    /// 跟单词练习一样是「防抖 + 定期」：每完成一句立刻排一次延迟保存，
+    /// 另有 30 秒整点兜底，避免用户直接杀进程时丢掉最后几句。
+    pub fn save_article_practice_now(&mut self) {
+        let Some(practice) = self.article_practice.as_ref() else {
+            let _ = self.store.remove_practice_article();
+            self.pending_article_save = None;
+            return;
+        };
+        let cache = crate::domain::article::ArticleCache {
+            article_id: practice.article_id,
+            sentence_index: practice.index,
+            finished: practice.finished,
+            wrong_sentences: practice.wrong_sentences,
+            total: practice.sentences.len(),
+            spend: practice.spend,
+        };
+        let envelope = crate::domain::article::ArticleCacheEnvelope {
+            practice_data: cache,
+            stat_store_data: None,
+        };
+        if let Err(err) = self.store.save_practice_article(Some(&envelope)) {
+            self.toast(NoticeLevel::Error, format!("保存文章练习进度失败: {err}"));
+        }
+        self.pending_article_save = None;
+    }
+
+    /// 排一次延迟保存（防抖）。
+    fn schedule_article_save(&mut self) {
+        self.pending_article_save = Some(timer::now_ms() + 500);
+    }
+
+    /// 恢复上次的文章跟打进度。
+    ///
+    /// 对齐上游 `TypingArticle.vue` 的 `init()`：读到缓存就跳到记录的句子
+    /// 与用时，读不到才从头开始。缓存里的文章 id 与当前书目对不上时
+    /// （换了书、资源更新）直接丢弃，不硬套。
+    pub fn try_restore_article_practice(&mut self) {
+        let loaded = self.store.load_practice_article();
+        if let Some(notice) = loaded.notice() {
+            self.toast(NoticeLevel::Warning, notice);
+        }
+        let Some(envelope) = loaded.value else {
+            return;
+        };
+        let cache = envelope.practice_data;
+        if cache.article_id <= 0 || cache.total == 0 {
+            return;
+        }
+        // 书本与文章都是懒加载的——启动时列表还是空的，得先载入才能按
+        // id 找回那篇文章。
+        if self.article_books.is_empty() {
+            let Some(paths) = self.paths.clone() else {
+                return;
+            };
+            match crate::domain::article::load_books(&paths) {
+                Ok(books) => self.article_books = books,
+                Err(_) => return,
+            }
+        }
+        let Some(article) = self.find_article_by_id(cache.article_id) else {
+            return;
+        };
+        let mut sentences: Vec<crate::domain::article::Sentence> = Vec::new();
+        for section in &article.sections {
+            sentences.extend(section.iter().cloned());
+        }
+        if sentences.is_empty() {
+            return;
+        }
+        let index = cache.sentence_index.min(sentences.len() - 1);
+        self.article_practice = Some(ArticlePracticeState {
+            article_id: article.id,
+            title: article.title.clone(),
+            sentences,
+            index,
+            typing: Default::default(),
+            finished: cache.finished,
+            wrong_sentences: cache.wrong_sentences,
+            spend: cache.spend,
+        });
+        self.screen = Screen::ArticlePractice;
+        self.stat = PracticeState::default();
+        self.last_timer_tick = timer::now_ms();
+        self.toast(NoticeLevel::Info, "已恢复上次文章跟打进度");
+    }
+
+    /// 按 id 在全部书本里找文章。
+    fn find_article_by_id(&self, id: i64) -> Option<crate::domain::article::Article> {
+        if let Some(article) = self.article_list.iter().find(|item| item.id == id) {
+            return Some(article.clone());
+        }
+        let paths = self.paths.clone()?;
+        for book in &self.article_books {
+            if let Ok(articles) = crate::domain::article::load_articles(&paths, book)
+                && let Some(article) = articles.iter().find(|item| item.id == id)
+            {
+                return Some(article.clone());
+            }
+        }
+        None
+    }
+
     /// 朗读当前句子。
     fn speak_current_sentence(&mut self) {
         let Some(practice) = self.article_practice.as_ref() else {
@@ -2022,6 +2215,9 @@ impl App {
             self.finish_article_practice();
             return;
         }
+        // 每完成一句就排一次保存——跟打随时可能被中断，句级粒度才不会
+        // 丢掉已完成的部分。
+        self.schedule_article_save();
         self.speak_current_sentence();
     }
 
@@ -2069,6 +2265,10 @@ impl App {
         // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。
         self.screen = Screen::Home;
+        // 整篇练完了，断点缓存没有意义——删掉，否则下次启动会「恢复」
+        // 一篇已经练完的文章。
+        let _ = self.store.remove_practice_article();
+        self.pending_article_save = None;
     }
 
     // ── 词条管理 ─────────────────────────────────────────────────────────
@@ -3056,6 +3256,10 @@ impl App {
         {
             self.last_timer_tick = now;
             practice.spend += 1000;
+            // 每 30 秒整点兜底保存一次，防止进程被直接杀掉时丢掉整段进度。
+            if practice.spend % 30_000 == 0 {
+                self.schedule_article_save();
+            }
         }
 
         // 单词测试页同理：它没有练习会话，用时单独记。
@@ -3100,6 +3304,12 @@ impl App {
             && now >= deadline
         {
             self.save_practice_now();
+        }
+
+        if let Some(deadline) = self.pending_article_save
+            && now >= deadline
+        {
+            self.save_article_practice_now();
         }
     }
 

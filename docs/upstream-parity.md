@@ -48,7 +48,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 运行环境 | 浏览器（含移动端）或 Windows 桌面窗口 | 终端（Windows Terminal 等），最小 60 × 20 |
 | 代码共享 | 与 TUI 不共享代码 | 不复制上游 TS/Vue 实现，只沿用资源格式、字段命名与行为约定 |
 | 词库资源 | `public/list/word.json` + `public/dicts/<lang>/word/*.json`（另有 article 目录） | 同布局的 `assets/`（当前仅 CET-4），可 `--assets` 替换、`tw import-dict` 扩展 |
-| 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 3 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 |
+| 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 4 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 / 1 |
 | 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 默认无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测；「有道发音」可选，用系统 `curl` 下载 mp3 |
 | 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 6 组集成测试 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
 | 分发 | 静态站 + Tauri NSIS 安装包 | GitHub Release 的 Windows zip（`tw.exe`、`assets/`、`docs/`、README、LICENSE、SHA256） |
@@ -64,10 +64,10 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | `(words)/dict.vue` | 单词管理：增删改、批量、导入导出、复制词库 | 无 |
 | `(words)/practice-words/[id].vue` | 单词练习页 | 练习页 `src/ui/practice.rs` |
 | `(words)/words-test/[id].vue` | 单词测试（4 选 1） | 无 |
-| `(articles)/articles.vue` | 文章学习主页 | 无 |
-| `(articles)/book-list.vue` | 书籍目录 | 无 |
-| `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无 |
-| `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 无 |
+| `(articles)/articles.vue` | 文章学习主页 | 文章页 `src/ui/articles.rs`（书本 + 文章列表，合并上游的两级页面） |
+| `(articles)/book-list.vue` | 书籍目录 | 无（与文章页合并） |
+| `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无（与文章页合并；音频用系统 TTS 替代） |
+| `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 文章跟打页 `src/ui/articles.rs` |
 | `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 30 行） |
 | `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
 | `doc.vue` | 英语学习资源分享 | 无 |
@@ -82,7 +82,8 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 | 分组 | 功能 | 上游（页面/文件） | TUI 现状 | 状态 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分 | 当前词库、今日任务、统计、我的词典、推荐齐全；无日历、任务词表预览、改学习进度入口 |
+| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分 | 当前词库、今日任务、统计、我的词典、推荐齐全；无月历、任务词表预览、改学习进度入口、「上次任务」标题 |
+| 外观 | 侧栏一级导航 | `app/layouts/default.vue`（单词 / 文章 / 反馈 / 文档 / 帮助 / 设置） | `src/ui/shell.rs` | 部分 | 单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6 连续；无反馈、文档、资源分享（与学习无关，且上游页面本身无对应实现） |
 | 主页 | 营销落地页 | `index.vue` | 无 | 不适用 | 终端客户端不需要网站首页 |
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
@@ -123,6 +124,9 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 交互 | 拖拽 / 悬停 | 列表拖拽排序、hover 显示单词 | 无拖拽、无 hover | 缺失 | 终端鼠标没有悬停语义 |
 | 交互 | 文本选择与复制 | 浏览器原生选择 | 鼠标捕获下用 `Shift+拖拽` | 行为不同 | 见 [使用手册](usage.md) 的鼠标一节 |
 | 断点 | 本地练习缓存 | `PracticeSaveWord` v2 | `practice-word.json` v2 | 已对齐 | 同构 compact 结构（含 `sessionSnapshot`） |
+| 断点 | 同一次运行内续练 | `words.vue` 的 `systemPractice()` 传 `practiceData` | `try_resume_saved_practice` | 已对齐 | 非自由模式按 Enter 接着上次的断点；自由练习与换模式时重开一轮 |
+| 断点 | 主页的断点提示 | `isSaveData ? '上次任务' : '今日任务'` | `home.rs` 的标题与按钮文案 | 已对齐 | 有缓存时标题变「上次任务」、按钮变「继续学习」 |
+| 断点 | 文章跟打缓存 | `PracticeSaveArticle` v1 | `practice-article.json` v1 | 部分 | 句子进度与用时接得上；上游记段落/句/词三级游标，TUI 记扁平句子下标 |
 | 断点 | v1 缓存升级 | `checkAndUpgradePracticeWordCache` | 仅接受 v2 | 部分 | v1 缓存直接忽略，文件在下一次保存时覆盖 |
 | 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失 | 无网络与远端比较 |
 | 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 句子跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
@@ -231,7 +235,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 ### 4.7 数据存储
 
-上游用 `idb-keyval` 把 4 类数据存进 IndexedDB，老版本 localStorage 会自动迁移；Pinia `$subscribe` 防抖 1 秒自动保存，并叠加 Supabase 推送/拉取与冲突检测，解析失败时用 hash 快照兜底。TUI 用 3 个 JSON 文件：同目录临时文件 + fsync + rename 原子写，解析失败重命名为 `*.corrupt-<时间戳>.json` 并回退默认值，版本过高时 `dict.json` 与 `setting.json` 都只读不覆盖，练习缓存版本不受支持时忽略（详见 [存档与数据格式](persistence.md)）。
+上游用 `idb-keyval` 把 4 类数据存进 IndexedDB，老版本 localStorage 会自动迁移；Pinia `$subscribe` 防抖 1 秒自动保存，并叠加 Supabase 推送/拉取与冲突检测，解析失败时用 hash 快照兜底。TUI 用 4 个 JSON 文件：同目录临时文件 + fsync + rename 原子写，解析失败重命名为 `*.corrupt-<时间戳>.json` 并回退默认值，版本过高时 `dict.json` 与 `setting.json` 都只读不覆盖，练习缓存版本不受支持时忽略（详见 [存档与数据格式](persistence.md)）。
 
 TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::shake_common_dict`，对应上游 `shakeCommonDict`），因此 `dict.json` 不会把 4.5 MB 的 CET-4 词表写进去；官方词库在启动时按 `url` 从 `assets/` 重新加载。上游的保存是「整份 store 状态」，TUI 是「显式调用 + 延迟保存」。
 
@@ -248,7 +252,7 @@ TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::sha
 | `dict.json` | `typing-word-dict` | 4 | 字段同名；系统词典与当前词库进度可搬运 |
 | `setting.json` | `typing-word-setting` | 23 | TUI 建模 28 个字段，其余透传 |
 | `practice-word.json` | `PracticeSaveWord` | 2 | compact v2；TUI 额外要求 `sessionSnapshot` |
-| 无 | `PracticeSaveArticle` | 1 | 文章与音频没有对应实现，迁移时直接丢弃 |
+| `practice-article.json` | `PracticeSaveArticle` | 1 | 已接入：句子进度与用时接得上；`practiceData` 记扁平句子下标（上游记段落/句/词三级游标），音频无对应实现 |
 
 ### 5.2 Web 备份结构与迁移方向
 
@@ -260,7 +264,7 @@ Web 备份 data.json                       TUI 数据目录
   dict:            <信封 version 4>  ->    dict.json
   setting:         <信封 version 23> ->    setting.json
   PracticeSaveWord:<信封 version 2>  ->    practice-word.json
-  PracticeSaveArticle: <信封 v1>         (丢弃)
+  PracticeSaveArticle: <信封 v1>         → practice-article.json
   type-words-app-version: 4              (丢弃)
 } }                                      themes/*.json（仅 TUI）
 ```

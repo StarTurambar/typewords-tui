@@ -228,19 +228,25 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
     // 数字切页只在没有会话、且当前页不占用数字键时生效
     let digits_are_page_switches = matches!(
         app.screen,
-        Screen::Home | Screen::DictPicker | Screen::Stats | Screen::Settings | Screen::Help
+        Screen::Home
+            | Screen::DictPicker
+            | Screen::Stats
+            | Screen::Settings
+            | Screen::Help
+            | Screen::Articles
     );
     if app.session.is_none()
         && digits_are_page_switches
         && key.modifiers.is_empty()
-        && let KeyCode::Char(character @ '1'..='5') = key.code
+        && let KeyCode::Char(character @ '1'..='6') = key.code
     {
         let screen = match character {
             '1' => Screen::Home,
-            '2' => Screen::DictPicker,
-            '3' => Screen::Stats,
-            '4' => Screen::Settings,
-            _ => Screen::Help,
+            '2' => Screen::Articles,
+            '3' => Screen::DictPicker,
+            '4' => Screen::Stats,
+            '5' => Screen::Help,
+            _ => Screen::Settings,
         };
         return Some(Action::Navigate(screen));
     }

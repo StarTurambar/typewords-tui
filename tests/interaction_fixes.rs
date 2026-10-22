@@ -591,12 +591,18 @@ fn the_word_test_options_follow_rebinding() {
 
 // ── 一致性：统计不能丢 ──────────────────────────────────────────────────
 
-/// 中途退出练习，学习时长要落进词典统计。
+/// 中途退出练习，学习时长不能丢。
 ///
 /// 统计只在会话正常结束的 `settle()` 里写，中途 `Ctrl+C` 退出时
-/// 这段时长会跟着断点缓存一起消失。
+/// 这段时长会跟着断点缓存一起走——但它并没有消失，而是留在缓存里，
+/// 等这一轮真正结算时才落盘。
+///
+/// 对齐上游：`flushStatToStore` 只在结算（`settleLocalPractice`）与
+/// 重置缓存（`resetCacheData`）两处调用，中途退出后**继续练**时
+/// 统计是不落盘的。早期实现一退出就重新生成任务（等于重置缓存），
+/// 于是落盘时机被提前到了「开新一轮」。
 #[test]
-fn leaving_practice_early_records_the_time_spent() {
+fn leaving_practice_early_keeps_the_time_spent() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     app.start_practice();
@@ -607,14 +613,46 @@ fn leaving_practice_early_records_the_time_spent() {
     }
     assert_eq!(app.stat.spend, 10_000, "练习应累计 10 秒");
 
-    // 中途退出：先退出练习，再开新一轮（断点缓存被丢弃）
+    // 中途退出：统计留在断点缓存里，还没落盘。
     app.leave_practice();
+    let totals = typewords_tui::ui::insights::totals(&app.boot.base);
+    assert_eq!(totals.spend, 0, "中途退出时统计应留在缓存里，还没落盘");
+
+    // 续练：接着上次那一轮，累计的用时不能归零。
     app.start_practice();
+    assert_eq!(app.stat.spend, 10_000, "续练时断点里的用时应当保留");
+}
+
+/// 练完一整轮（结算）后，中途退出攒下的时长要落进词典统计。
+#[test]
+fn a_resumed_round_records_its_whole_time_on_settle() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.start_practice();
+    let mut now = typewords_tui::domain::timer::now_ms();
+    for _ in 0..10 {
+        now += 1000;
+        app.on_tick(now);
+    }
+    app.leave_practice();
+
+    // 续练并把这轮练完——结算时统计一次性落盘。
+    app.start_practice();
+    for _ in 0..60 {
+        if app.summary.is_some() {
+            break;
+        }
+        app.on_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+    assert!(app.summary.is_some(), "应弹出结算");
 
     let totals = typewords_tui::ui::insights::totals(&app.boot.base);
     assert!(
         totals.spend >= 10_000,
-        "中途退出的学习时长应落进词典统计，实际 {}",
+        "结算后学习时长应落进词典统计，实际 {}",
         totals.spend
     );
 }

@@ -191,17 +191,29 @@ fn daily_target_keys_adjust_and_persist() {
 fn number_shortcuts_navigate_shell_screens() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
-    press(&mut app, KeyCode::Char('3'));
-    assert_eq!(app.screen, app::Screen::Stats);
-    press(&mut app, KeyCode::Char('2'));
-    assert_eq!(app.screen, app::Screen::DictPicker);
     press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, app::Screen::Stats);
+    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.screen, app::Screen::DictPicker);
+    press(&mut app, KeyCode::Char('6'));
     assert_eq!(app.screen, app::Screen::Settings);
+    // 帮助页的“任意键返回”优先，所以它必须最后一个测
     press(&mut app, KeyCode::Char('5'));
     assert_eq!(app.screen, app::Screen::Help);
-    // Help 的“任意键返回”优先
     press(&mut app, KeyCode::Char('1'));
     assert_eq!(app.screen, app::Screen::Home);
+}
+
+/// 数字键要能切到文章页。
+///
+/// 文章是已实现的完整功能，但早期只在主页用 `a` 进入，不在数字键序列里——
+/// 用户按 `2` 到不了文章页，只能靠记忆键位。
+#[test]
+fn number_shortcut_reaches_the_articles_page() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('2'));
+    assert_eq!(app.screen, app::Screen::Articles);
 }
 
 #[test]

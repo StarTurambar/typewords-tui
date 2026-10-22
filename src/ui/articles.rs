@@ -63,7 +63,7 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
 
 /// 书本 / 文章列表页。
 pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
+    shell::render(app, frame, area, theme, Nav::Articles, |frame, content| {
         let layout = layout(content);
         let columns = [layout.books, layout.articles];
 
