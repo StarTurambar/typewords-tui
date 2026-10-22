@@ -62,12 +62,12 @@
 | `Practice` | 练习页（全屏，不套外壳） | — | 无（练习中数字属于键入/自测） |
 | `WordTest` | 单词测试页（一题 4 选 1） | `Nav::Home` | 无（数字用于选答案） |
 | `Words` | 词条管理页（搜索 / 编辑 / 增删 / 批量标记） | `Nav::Dicts` | —（由词库页进入） |
-| `Articles` | 文章背诵页（书本列表 + 文章列表） | `Nav::Home` | —（由主页进入） |
+| `Articles` | 文章背诵页（书本列表 + 文章列表） | `Nav::Articles` | 2（也可由主页 `a` 进入） |
 | `ArticlePractice` | 文章跟打页（全屏，不套外壳） | — | 无 |
 | `Flows` | 练习流程页（内置 + 自建流程） | `Nav::Home` | —（由主页 `Ctrl+F` 进入） |
-| `DictPicker` | 词库页 | `Nav::Dicts` | 2 |
-| `Stats` | 统计页 | `Nav::Stats` | 3 |
-| `Settings` | 设置页 | `Nav::Settings` | 4 |
+| `DictPicker` | 词库页 | `Nav::Dicts` | 3 |
+| `Stats` | 统计页 | `Nav::Stats` | 4 |
+| `Settings` | 设置页 | `Nav::Settings` | 6 |
 | `Shortcuts` | 快捷键编辑页 | `Nav::Settings` | —（由设置页进入） |
 | `Help` | 帮助页 | `Nav::Help` | 5 |
 
@@ -231,12 +231,13 @@ app.save_all()
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
-| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker/Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作。离开 `WordTest` 时清掉 `word_test` 状态——否则切回来会显示上一轮的题目与分数 |
+| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker/Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作。`Articles` 转交 `open_articles`——文章资源是懒加载的，光切 `screen` 会得到一个右边空空的文章页。离开 `WordTest` 时清掉 `word_test` 状态——否则切回来会显示上一轮的题目与分数 |
 | `Back` | 依次关闭 confirm/edit/summary；否则按屏返回 Home（Settings 先保存设置；Help 走 `help_back`） |
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
 | `AdjustDaily(delta)` | 每日词数 `±delta` 并夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
 | `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
+| `OpenArticles` | 打开文章页：载入书本与当前书本的文章（见 6.3）。主页 `a` 键用它；侧栏 / 数字键走 `Navigate(Articles)`，两者最终落到同一个方法 |
 | `DictMove(delta)` | 词库光标移动并夹在有效范围 |
 | `SelectDict(i)` / `SelectSetting(i)` | 只移动光标（越界忽略） |
 | `ActivateDict(i)` | 切换当前学习词库：保存词典、回主页、刷新任务与 Toast |
@@ -276,6 +277,14 @@ app.save_all()
                              summary 结算弹层
                         Enter 继续 · r 重学 · q/Esc 主页
 ```
+
+### 6.3 文章页的进入路径
+
+文章页有多个入口：主页按 `a`、侧栏 / 顶栏点「文章」、数字键 `2`。**它们必须走同一个方法**——`open_articles`。文章资源是懒加载的（书本在 `assets/list/article.json`、文章在 `assets/dicts/en/article/*.json`），`App` 启动时这两个列表都是空的；`open_articles` 负责载入书本、重置两个光标，再调 `load_selected_book` 载入当前书本的文章。
+
+> 早期只有主页 `a` 那条路径（`Action::OpenArticles` → `open_articles`）会载入资源，侧栏与数字键走 `navigate_to`——那条路径只切了 `screen`，进去是个右栏空空的页面。同一个页面的两个入口给出不同结果，是最难察觉的一类缺陷。
+
+`navigate_to(Screen::Articles)` 因此转交给 `open_articles`；`Action::OpenArticles` 保留给主页的 `a` 键，两者最终落到同一处。
 
 ## 7. 练习会话集成
 

@@ -92,6 +92,71 @@ fn the_article_list_is_loaded_on_first_entry() {
     );
 }
 
+/// 侧栏 / 顶栏点进文章页，也必须列出当前书本的文章。
+///
+/// 早期只有主页按 `a` 走 `open_articles`（会载入书本与文章），侧栏与数字
+/// 键走 `navigate_to`——那条路径只切了 `screen`，没载入任何资源，右边
+/// 空空如也。同一页面的两个入口必须给出同样的结果。
+#[test]
+fn the_article_list_is_loaded_when_navigating_from_the_shell() {
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    // 侧栏 / 顶栏的「文章」入口
+    app.apply_action(app::Action::Navigate(app::Screen::Articles));
+    assert_eq!(app.screen, app::Screen::Articles);
+    assert!(
+        !app.article_books.is_empty(),
+        "从侧栏进文章页也应读到书本列表"
+    );
+    assert!(
+        !app.article_list.is_empty(),
+        "从侧栏进文章页也应列出当前书本的文章"
+    );
+
+    // 数字键 2 是同一个入口
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('2'));
+    assert_eq!(app.screen, app::Screen::Articles);
+    assert!(
+        !app.article_list.is_empty(),
+        "按数字键进文章页也应列出当前书本的文章"
+    );
+}
+
+/// 鼠标点侧栏的「文章」入口，也要列出当前书本的文章。
+#[test]
+fn clicking_the_articles_nav_item_loads_the_article_list() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    let area = Rect::new(0, 0, 120, 40);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::Navigate(app::Screen::Articles))
+        .expect("侧栏应有「文章」入口");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.screen, app::Screen::Articles);
+    assert!(
+        !app.article_list.is_empty(),
+        "点侧栏进文章页也应列出当前书本的文章"
+    );
+}
+
 /// 文章跟打结束后要落在能操作的页面上。
 ///
 /// 文章练习没有单词练习会话，结算后停在 `Screen::Practice` 会渲染成一个
