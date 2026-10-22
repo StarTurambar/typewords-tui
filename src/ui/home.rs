@@ -465,9 +465,13 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
         row(3),
     );
 
+    // 按钮文案：词典学到一半、或有未完成的一轮，都显示「继续」。
+    // 词典进度用 `last_learn_index` 判断——它是「学过多少」的累计值；
+    // 断点缓存则是「有一轮没练完」，两者是不同的语义，可以同时成立。
     let continue_learning = dict
         .map(|dict| dict.last_learn_index > 0 || dict.complete)
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || app.has_saved_practice();
     let primary_label = if continue_learning {
         "Enter  继续学习 →"
     } else {
@@ -493,11 +497,19 @@ fn render_hero_right(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &
     if right.width < 8 || right.height < 4 {
         return;
     }
+    // 有未完成的练习缓存时，标题从「今日任务」变成「上次任务」——
+    // 对齐上游 `words.vue` 的 `isSaveData ? '上次任务' : '今日任务'`：
+    // 数字卡里显示的是缓存里那份任务，不是新生成的今日任务。
+    let title = if app.has_saved_practice() {
+        "上次任务"
+    } else {
+        "今日任务"
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("◆ ", Style::default().fg(theme.warn)),
             Span::styled(
-                "今日任务",
+                title,
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
         ])),

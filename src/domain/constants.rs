@@ -109,3 +109,5 @@ pub const DICT_STATE_VERSION: u32 = 4;
 pub const SETTING_VERSION: u32 = 23;
 /// 练习缓存版本（Web 的 PRACTICE_WORD_CACHE.version）。
 pub const PRACTICE_CACHE_VERSION: u32 = 2;
+/// 文章练习缓存版本（Web 的 PRACTICE_ARTICLE_CACHE.version）。
+pub const PRACTICE_ARTICLE_CACHE_VERSION: u32 = 1;

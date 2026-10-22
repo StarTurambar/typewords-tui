@@ -80,7 +80,7 @@ cargo build --release --locked         # 发布构建，产物 target/release/tw
 | Linux | `$XDG_DATA_HOME/typewords-tui`，缺省 `~/.local/share/typewords-tui` |
 | macOS | `~/Library/Application Support/typewords-tui` |
 
-目录里会出现 `dict.json`（词典与学习进度、FSRS 卡片、系统词典、统计）、`setting.json`（设置）和 `practice-word.json`（断点缓存，随练习生成）；`themes/`、`dicts/`、`list/` 用于自定义主题与用户导入词库。字段细节见 [存档与数据格式](persistence.md)。
+目录里会出现 `dict.json`（词典与学习进度、FSRS 卡片、系统词典、统计）、`setting.json`（设置）和 `practice-word.json`（断点缓存，随练习生成）；文章跟打另存 `practice-article.json`；`themes/`、`dicts/`、`list/` 用于自定义主题与用户导入词库。字段细节见 [存档与数据格式](persistence.md)。
 
 首次启动没有存档时使用默认设置，并自动选择内置词库（优先 `cet4`，否则第一本）。退出程序：回到主页按 `q`（或点侧栏「退出」）并确认；正常退出会保存词典、设置与未结算的练习缓存。
 
@@ -128,7 +128,7 @@ tw             # 2. 启动界面
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 额外接受 `smart`（= system）与中文别名；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
 | `--seed N` | 固定随机种子（复现问题用） | 影响洗牌、选择题与随机复习；日常可省略 |
-| `--reset-practice` | 启动前清空练习缓存 | 只清 `practice-word.json`，不动词典与设置；对 `doctor`/`task` 无效 |
+| `--reset-practice` | 启动前清空练习缓存 | 清 `practice-word.json` 与 `practice-article.json`，不动词典与设置；对 `doctor`/`task` 无效 |
 | `-h` / `--help`、`-V` / `--version` | 帮助与版本 | 由 clap 生成，`--version` 输出 `tw 0.1.0` |
 
 ### 子命令
@@ -148,7 +148,7 @@ tw             # 2. 启动界面
 - 备份版本高于 5 时**拒绝导入**并提示升级。
 - 逐项检查存档版本：`dict`(4) / `setting`(23) / `PracticeSaveWord`(2) 中任何一项版本过高就**跳过该项**，其余照常导入。
 - 导入是**原样落盘**，上游存档里本程序没建模的字段不会丢。
-- `PracticeSaveArticle`（文章练习缓存）会被报告为「已丢弃」——文章背诵已实现，但跟打进度的断点缓存尚未接入。
+- `PracticeSaveArticle`（文章练习缓存）会导入成 `practice-article.json`——文章跟打的句子进度与用时接得上。
 
 ### 环境变量与目录查找顺序
 
@@ -245,6 +245,8 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 - 输完整句自动进入下一句，下方同时显示中文译文供对照。
 - `Ctrl+P` 用系统 TTS 朗读当前句，`Esc` 返回。
 - 全部句子完成后给结算，并把用时、正确率与文章标题写进当前词典的学习记录。
+
+**断点续学**：跟打中途按 `Esc` 返回或直接退出程序，句子进度与用时会存进 `practice-article.json`；下次进文章页会自动跳回上次那句继续。整篇练完后缓存自动清除。
 
 文章资源在 `assets/dicts/en/article/`，书目在 `assets/list/article.json`（目前内置《新概念英语1》）。断句规则与网页版一致：先归一化智能引号，再依次匹配「货币+数字」「数字」「带点缩写」「单词」「单个符号」。
 
@@ -376,8 +378,11 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 
 - 练习中每次推进后约 500ms 防抖保存，每累计 30 秒学习时间再保存一次，`Ctrl+C`、退出程序或切回主页时立即保存。
 - 重启后若缓存存在且词库、流程、词表都匹配，会直接回到练习页的同一词、同一阶段，并提示「已恢复上次练习进度」。
+- **同一次运行内也接着练**：退出练习页回主页后，再按 `Enter` 是接着上次的断点继续，而不是重开一轮。自由练习（`f`）例外——它明确要开一轮新的。换了练习模式也不续（流程阶段对不上）。
 - 恢复失败会丢弃缓存并从新会话开始：换过词库、词已不在当前词库、游标与流程不匹配时静默；缓存版本不是 2 时启动会弹告警后丢弃。
-- `--reset-practice` 或设置页「清空当前练习进度」只清断点缓存；学习进度、统计、FSRS 卡片不受影响。要连学习记录一起清，用设置页「清除所有数据」。
+- 有断点时主页的标题从「今日任务」变成「上次任务」、主按钮从「开始学习」变成「继续学习」——数字卡里显示的是缓存里那份任务。
+- 统计的落盘时机：中途退出时这段时间留在缓存里，**练完结算时才写进 `dict.json`**（与网页版一致）。练完一轮缓存自动删除。
+- `--reset-practice` 或设置页「清空当前练习进度」清掉两个断点缓存（`practice-word.json` 与 `practice-article.json`）；学习进度、统计、FSRS 卡片不受影响。要连学习记录一起清，用设置页「清除所有数据」。
 - 计时在 3 分钟无操作后自动暂停，按 `Ctrl+,` 恢复；暂停期间不计学习时长。
 
 ### 每日词数、跳过、收藏、已掌握与错词
@@ -519,7 +524,7 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 - **进入**：主页按 `s` 或 `4`，或点击侧栏「设置」。练习中不能进入设置页，先回主页。
 - **选择与修改**：`↑` / `↓`（别名 `j` / `k`）移动；`Enter` 或空格修改——开关类直接切换，模式 / 主题 / 音标循环切换，数字类弹出输入框（只接受数字与 `Backspace`，最多 6 位，`Enter` 保存、`Esc` 取消，留空按 0 处理再按范围收敛），「清空当前练习进度」与「清除所有数据」弹确认。
 - **保存时机**：每次修改立即写入 `setting.json`；`Esc` / `q` 返回主页时再保存一次。
-- **清空当前练习进度**：只删 `practice-word.json`（断点缓存），学习记录与设置不变。
+- **清空当前练习进度**：删掉 `practice-word.json` 与 `practice-article.json`（两个断点缓存），学习记录与设置不变。
 - **清除所有数据**：`dict.json` 与 `setting.json` 一起恢复默认，并删掉断点缓存——统计记录、FSRS 卡片、错词 / 收藏 / 已掌握、词典选择、练习进度与全部设置都归零（**不可撤销**，清完会重新选一本学习词典）。与上游 Web 的「设置 → 数据 → 清除所有数据」一致；只重置单项设置仍需退出程序后手工编辑 `setting.json`。
 - 设置页共 30 行（28 个配置项 + 2 个动作项），按「通用 / 音频 / 复习 / 键入 / 显示 / FSRS / 其他」分区；每项的配置键、默认值、取值范围、生效方式，以及无 UI 的透传字段，见 [设置项参考](settings.md)。
 
@@ -542,11 +547,12 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 | `<home>/dict.json` | 词典元数据与词表、学习进度、FSRS 卡片、收藏 / 错词 / 已掌握、统计 |
 | `<home>/setting.json` | 设置项（与主题选择） |
 | `<home>/practice-word.json` | 断点练习缓存（单词、游标、统计快照） |
+| `<home>/practice-article.json` | 文章跟打断点缓存（句子进度、用时） |
 | `<home>/themes/*.json` | 自定义主题 |
 | `<home>/dicts/en/word/*.json` | `import-dict` 导入的词条文件 |
 | `<home>/list/word.json` | 用户词库目录（与内置目录合并） |
 
-- **备份**：退出程序后复制整个数据目录即可（三份 JSON + 主题 + 导入词库）。
+- **备份**：退出程序后复制整个数据目录即可（四份 JSON + 主题 + 导入词库）。
 - **恢复 / 迁移**：把备份目录放回原路径，或用 `--home` / `TYPEWORDS_HOME` 指向备份目录；换机器同理。
 - **重置**：删除 `practice-word.json` 只清断点缓存；删除 `setting.json` 恢复默认设置；删除 `dict.json` 会丢失学习进度、统计、FSRS 卡片与三本系统词典（谨慎）。`--reset-practice` 等价于只清断点缓存；设置页「清除所有数据」等价于把 `dict.json` 与 `setting.json` 一起恢复默认（还额外删掉断点缓存），不需要手工删文件。
 - **损坏与版本**：存档损坏会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；版本过高的 `dict.json` / `setting.json` 本次运行只读、不覆盖原文件；练习缓存版本不符会被忽略。恢复细节见 [存档与数据格式](persistence.md)。

@@ -15,6 +15,7 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 | `<home>/dict.json` | 读写 | 词典状态 `BaseState`，版本 4 |
 | `<home>/setting.json` | 读写 | 设置 `SettingState`，版本 23 |
 | `<home>/practice-word.json` | 读写/删除 | 断点练习缓存 `PracticeCacheCompact`，版本 2 |
+| `<home>/practice-article.json` | 读写/删除 | 文章跟打断点缓存 `ArticleCacheEnvelope`，版本 1 |
 | `<home>/flows.json` | 读写 | 自建练习流程 `FlowStore`（无版本号，见 [领域逻辑 · 流程](domain.md)） |
 | `<home>/themes/*.json` | 启动时只读 | 自定义主题（格式见 [主题系统](themes.md)） |
 | `<home>/dicts/<language>/word/<url>` | 导入时写、运行时读 | `import-dict` 导入的用户词库 |
@@ -360,6 +361,59 @@ article.bookList 中 system == false 的词典                        → articl
 - 只有 `version == 2` 被接受，其余（包括 Web 的 v1）一律视为不支持：`load_practice` 返回 `LoadStatus::UnsupportedVersion { found, expected: 2 }`，启动弹 Warning「存档版本不受支持（…），已忽略；下次保存会覆盖」并忽略缓存；文件**不会**被移动或删除，下一次保存练习缓存时被覆盖。TUI 不提供 v1→v2 升级（上游 Web 有，见 `checkAndUpgradePracticeWordCache`）。
 - `val` 为 `null` 的信封被当作「没有缓存」（`Loaded(null)`），不算损坏。
 - JSON 解析失败时文件被隔离为 `practice-word.json.corrupt-<时间戳>.json`，启动提示「练习缓存损坏，已丢弃」，随后按无缓存启动。
+
+### 5.4bis. 同一次运行内的「继续」
+
+除了启动时自动恢复，同一次运行内退出练习页再按 `Enter` 也会**接着上次那一轮**练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`：
+
+```ts
+function systemPractice() {
+  const currentMode = settingStore.wordPracticeMode
+  const isFree = currentMode === WordPracticeMode.Free
+  startPractice(isFree ? WordPracticeMode.System : currentMode, isFree)
+}
+```
+
+- `resetCache` 只有在**自由模式**下为 `true`——自由练习明确要开一轮新的，不接上次的断点。
+- 其余模式 `resetCache=false`，主页把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。
+- 续练要求**模式一致**：断点里的 flow 模式与当前模式不同就不恢复（`try_resume_saved_practice`），否则流程阶段对不上。
+- 统计的落盘时机随之改变：上游的 `flushStatToStore` 只在**结算**与**重置缓存**两处调用，中途退出后继续练时统计留在缓存里不落盘。TUI 同此。
+
+因此主页的标题与按钮文案也跟着变（对齐上游的 `isSaveData`）：
+
+| 状态 | 标题 | 主按钮 |
+| --- | --- | --- |
+| 没有断点缓存 | 今日任务 | Enter 开始学习 → |
+| 有断点缓存 | 上次任务 | Enter 继续学习 → |
+
+## 5ter. `practice-article.json`（`ArticleCacheEnvelope`，版本 1）
+
+文章跟打的断点缓存，对应上游 IndexedDB 的 `PracticeSaveArticle` 键（版本 1）。
+
+```json
+{
+  "val": {
+    "practiceData": {
+      "articleId": 11,
+      "sentenceIndex": 3,
+      "finished": 3,
+      "wrongSentences": 0,
+      "total": 72,
+      "spend": 45000
+    },
+    "statStoreData": null
+  },
+  "version": 1,
+  "updated_at": "..."
+}
+```
+
+- **与单词练习缓存分文件存**：两者的进度互不相干，混在一个文件里会让「清空练习进度」误删文章的跟打进度。
+- `practiceData` 的字段名与上游不同：上游记「段落 / 句 / 词」三级游标（`sectionIndex` / `sentenceIndex` / `wordIndex`），TUI 的文章在 `gen_sections` 后把段落展开成扁平句子列表，跟打也按扁平下标推进，因此只存一个 `sentenceIndex`。`statStoreData` 保留字段名以对齐上游信封，但 TUI 不用它（用时记在 `practiceData.spend`）。
+- **保存时机**：每完成一句排一次 500ms 延迟保存（防抖），另有 30 秒整点兜底，防止进程被直接杀掉时丢掉整段进度；退出文章页（`Esc`）与退出程序时立即保存。
+- **恢复时机**：启动时自动恢复（`try_restore_article_practice`），跳到记录的句子并带上用时；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接丢弃，不硬套。
+- **整篇练完**时缓存被删除——否则下次启动会「恢复」一篇已经练完的文章。
+- 损坏时隔离为 `practice-article.json.corrupt-<时间戳>.json`，提示「文章练习缓存损坏，已丢弃」，不阻断启动。
 
 ## 5bis. `flows.json`（`FlowStore`，无版本号）
 

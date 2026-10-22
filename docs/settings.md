@@ -57,7 +57,7 @@
 | FSRS | `fsrs_good_limit` | FSRS Good 阈值 | 整数 | 3 | 0~20 | 超过 Easy 阈值且 ≤ 本阈值 → Good；结算时生效 |
 | FSRS | `fsrs_hard_limit` | FSRS Hard 阈值 | 整数 | 6 | 0~20 | 超过 Good 阈值且 ≤ 本阈值 → Hard，更大 → Again；结算时生效 |
 | FSRS | `fsrsParameters.request_retention`（`request_retention` 行） | 目标留存率 | 整数 % | 90 | 50~99 | 传给 FSRS 的期望留存率（文件内为小数）；结算时生效 |
-| 其他 | `reset_practice_progress` | 清空当前练习进度 | 动作 | — | — | 确认后删除 `practice-word.json`；立即生效 |
+| 其他 | `reset_practice_progress` | 清空当前练习进度 | 动作 | — | — | 确认后删除 `practice-word.json` 与 `practice-article.json`；立即生效 |
 | 其他 | `clear_all_data` | 清除所有数据 | 动作 | — | — | 确认后 `dict.json` 与 `setting.json` 一起恢复默认并删除 `practice-word.json`；立即生效 |
 
 ## 重点项详解
@@ -101,13 +101,13 @@
 
 ### 清空当前练习进度
 
-- 确认后只删除 `practice-word.json`（断点缓存），不修改 `dict.json` 的学习进度、统计、FSRS 卡片与三本系统词典。
+- 确认后删除两个断点缓存：`practice-word.json`（单词练习）与 `practice-article.json`（文章跟打），不修改 `dict.json` 的学习进度、统计、FSRS 卡片与三本系统词典。
 - 与启动参数 `--reset-practice` 等价；下次进入练习会重新生成任务。
 
 ### 清除所有数据
 
 - 确认文案为「该操作将会清除所有数据，确认继续？」，确认后提示「清除成功」。**不可撤销**。
-- 清掉的内容 = `BaseState::default()` + `SettingState::default()` + 删除 `practice-word.json`：统计记录、FSRS 卡片、笔记、错词 / 收藏 / 已掌握三本系统词典、当前学习词典的选择、练习进度，以及**全部设置**（主题、练习模式、FSRS 阈值、复习比例……）都回到默认值。
+- 清掉的内容 = `BaseState::default()` + `SettingState::default()` + 删除 `practice-word.json` 与 `practice-article.json`：统计记录、FSRS 卡片、笔记、错词 / 收藏 / 已掌握三本系统词典、当前学习词典的选择、练习进度，以及**全部设置**（主题、练习模式、FSRS 阈值、复习比例……）都回到默认值。
 - 与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）一致：两端都是把 dict 与 setting 两份状态整体 `setState(getDefault*())` 并清空练习缓存，即「恢复出厂」。上游把该按钮放在「数据」分区，TUI 放在设置页「其他」分区。
 - 清完会按全新安装的路径重新选一本学习词典（`catalog` 里有 `cet4` 就用它，否则用词库列表第一本），所以清完能直接开练，不需要再手选词典。
 - `dict.json` 或 `setting.json` 的 `version` 高于程序支持版本时本次运行是只读的，此时**不清也不落盘**，只提示「存档版本高于当前程序，只读模式无法清除」，避免界面报成功而重启后数据原样回来。

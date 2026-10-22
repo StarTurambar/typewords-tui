@@ -438,17 +438,39 @@ impl SentenceTyping {
 }
 
 /// 文章练习的断点缓存（对应上游 `PracticeSaveArticle` v1）。
+///
+/// 上游的 `practiceData` 记的是「段落 / 句 / 词」三级游标；TUI 的文章
+/// 在 `gen_sections` 后把段落展开成扁平句子列表，跟打时也按扁平下标推进，
+/// 因此这里只存一个句子下标——够用且不会因段落结构变化而失效。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ArticleCache {
     /// 文章 id
     pub article_id: i64,
-    /// 当前句子的下标
+    /// 当前句子的下标（扁平后的全局下标）
     pub sentence_index: usize,
     /// 已完成的句子数
     pub finished: usize,
+    /// 出现错误的句子数
+    pub wrong_sentences: usize,
     /// 总句子数
     pub total: usize,
     /// 累计时长（毫秒）
     pub spend: i64,
+}
+
+/// 文章练习缓存的落盘格式（对齐上游 `PracticeSaveArticle` 的信封内容）。
+///
+/// 上游是 `{ practiceData: { sectionIndex, sentenceIndex, wordIndex },
+/// statStoreData: PracticeState }`；TUI 的字段更少，但外层信封
+/// （`{ val, version, updated_at }`）与 key 名保持一致，便于将来互通。
+///
+/// 不派生 `PartialEq`：`PracticeState` 没实现它（`PracticeCacheCompact`
+/// 同理），`Option<PracticeState>` 也就没法比较。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ArticleCacheEnvelope {
+    pub practice_data: ArticleCache,
+    /// 与上游同名的统计字段；TUI 只用 `spend`，其余留空。
+    pub stat_store_data: Option<crate::domain::types::PracticeState>,
 }

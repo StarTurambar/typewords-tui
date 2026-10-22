@@ -341,6 +341,8 @@ impl App {
             Screen::Articles => self.navigate_to(Screen::Home),
             Screen::Flows => self.navigate_to(Screen::Home),
             Screen::ArticlePractice => {
+                // 中途退出要保住进度：写一次断点缓存再回文章列表。
+                self.save_article_practice_now();
                 self.article_practice = None;
                 self.navigate_to(Screen::Articles);
             }
