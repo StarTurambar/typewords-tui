@@ -292,9 +292,10 @@ impl App {
                 self.words_marked.clear();
             }
             Screen::Articles => {
-                self.screen = Screen::Articles;
-                self.article_book_cursor = 0;
-                self.article_cursor = 0;
+                // 走 `open_articles`：文章资源是懒加载的，光切 `screen`
+                // 会得到一个右边空空的文章页（早期只有主页按 `a` 的那条
+                // 路径会载入，侧栏与数字键进去都是空的）。
+                self.open_articles();
             }
             Screen::Flows => {
                 self.screen = Screen::Flows;

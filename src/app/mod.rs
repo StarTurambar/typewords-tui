@@ -1954,22 +1954,32 @@ impl App {
     // ── 文章背诵 ─────────────────────────────────────────────────────────
 
     /// 打开文章书本列表。
+    ///
+    /// 这是进入文章页的**唯一**入口：主页按 `a`、侧栏 / 顶栏点「文章」、
+    /// 数字键 `2` 都走它。文章资源是懒加载的——不在这儿把书本与文章载入，
+    /// 右边的文章列表就是空的（早期只有 `a` 那条路径会载入，其余入口
+    /// 进去是个空页）。
     pub fn open_articles(&mut self) {
+        // 先切页再载入：读取失败时也留在文章页并提示，而不是把用户
+        // 留在原地、让人以为点击没生效。
+        self.screen = Screen::Articles;
+        self.article_book_cursor = 0;
+        self.article_cursor = 0;
+        self.article_books.clear();
+        self.article_list.clear();
         let Some(paths) = self.paths.clone() else {
             return;
         };
         match crate::domain::article::load_books(&paths) {
             Ok(books) => {
                 self.article_books = books;
-                self.article_book_cursor = 0;
-                self.article_cursor = 0;
-                self.article_list.clear();
-                self.screen = Screen::Articles;
                 // 立刻载入第一本书的文章——早期实现只在移动书本光标时才载入，
                 // 第一次进文章页右边是空的，看不到任何文章。
                 self.load_selected_book();
             }
-            Err(err) => self.toast(NoticeLevel::Error, format!("读取文章目录失败: {err}")),
+            Err(err) => {
+                self.toast(NoticeLevel::Error, format!("读取文章目录失败: {err}"));
+            }
         }
     }
 
