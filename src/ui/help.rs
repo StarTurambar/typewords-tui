@@ -213,10 +213,11 @@ fn render_scroll_indicators(
     }
 }
 
-/// 帮助页的鼠标目标：滚动指示器。
+/// 帮助页的鼠标目标：只有右侧的滚动指示器。
 ///
-/// 正文区整体是「点击返回上一层」，但滚动指示器要能滚动——早期实现
-/// 两者共用同一块矩形，点 `↓` 反而退出了帮助页。
+/// 正文是只读文本，点哪里都不产生动作——早期实现把整块内容区映射成
+/// `HelpBack`，任何一次点击（聚焦窗口、点空白、选文字）都会退出帮助页。
+/// 返回由 `Esc` / 键盘「任意键返回」与侧栏导航负责。
 pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     use crate::ui::target::Target;
     let mut result = Vec::new();

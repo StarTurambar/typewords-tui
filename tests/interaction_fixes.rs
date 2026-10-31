@@ -6,7 +6,9 @@ mod common;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use typewords_tui::app::{self, Action, Screen};
 use typewords_tui::domain::shortcut::{BaseKey, ShortcutAction, ShortcutKey};
@@ -423,6 +425,33 @@ fn the_two_column_help_page_can_scroll_to_the_bottom() {
         .flat_map(|row| row.iter().map(|(c, _)| *c))
         .collect();
     assert!(text.contains("Ctrl+C"), "两栏模式滚到底应能看到 Ctrl+C");
+}
+
+/// 帮助页正文是只读文本，点任何位置都不该退出页面。
+///
+/// 早期实现把整块内容区注册成 `HelpBack`：点终端窗口聚焦、点空白、
+/// 点文字换行都会直接跳回主页，帮助页根本没法停留阅读。
+#[test]
+fn clicking_the_help_body_does_not_leave_the_page() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, Screen::Help);
+
+    let area = Rect::new(0, 0, 120, 40);
+    let rows = logical_rows(&app, 120, 40);
+    let (column, row) = find_text(&rows, "字母").expect("帮助页应渲染正文");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.screen, Screen::Help, "点击帮助正文不应退出帮助页");
+    assert_eq!(app.help_scroll, 0, "点击正文不应改变滚动位置");
 }
 
 /// 帮助页点滚动指示器是滚动，不是退出。

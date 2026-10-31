@@ -62,20 +62,13 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
         Screen::Settings => targets.extend(super::settings::targets(app, shell.content)),
         Screen::Shortcuts => targets.extend(super::shortcuts::targets(app, shell.content)),
         Screen::Words => targets.extend(super::words::targets(app, shell.content)),
-        // 帮助页正文整体可点返回，但要让出右侧的滚动指示器——
-        // 早期实现两者共用同一块矩形，点 `↓` 反而退出了帮助页。
-        Screen::Help => {
-            let indicator = super::help::targets(app, shell.content);
-            let content = Rect::new(
-                shell.content.x,
-                shell.content.y,
-                shell.content.width.saturating_sub(1),
-                shell.content.height,
-            );
-            // 指示器先注册：命中测试取第一个，指示器优先。
-            targets.extend(indicator);
-            targets.push(Target::new(content, Action::HelpBack));
-        }
+        // 帮助页正文是只读说明，只有右侧的滚动指示器可点。
+        //
+        // 早期实现把整块内容区注册成 `HelpBack`：点终端窗口聚焦、点空白、
+        // 点文字都会直接跳回主页，帮助页根本留不住——鼠标点击应当只作用于
+        // 画出来的控件，和设置页 / 词库页的约定一致。键盘的「任意键返回」
+        // 仍由 keymap 提供，不经过命中检测。
+        Screen::Help => targets.extend(super::help::targets(app, shell.content)),
         Screen::Stats => targets.extend(super::stats::targets(app, shell.content)),
         Screen::Flows => targets.extend(super::flows::targets(app, shell.content)),
         Screen::Articles => targets.extend(super::articles::targets(app, shell.content)),

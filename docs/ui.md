@@ -261,7 +261,7 @@ ui::render(app, frame)
 - 内容宽度 `>= 78` 且高度 `>= 20` 时两栏：左「练习」、右「导航/查看」，中间 1 列 `│` 分隔线 + 1 列留白；左栏过窄（`< 26`）时回退单栏。
 - 单栏把两个分区顺序拼接并追加鼠标说明（「鼠标：侧栏/按钮/列表可点击，滚轮滚动；Shift+拖拽选择文本」按 3 条短行渲染），`help_scroll` 被夹到最大偏移，右侧画 `↑`/`↓`。
 - 条目三种：分区标题、按键（`key_hint`：按键 `accent_alt` bold + 说明 `muted`）、说明（`dim`，按宽度折行并缩进 1 列）。按键内容以帮助页常量表为准，键位语义见 [应用层 · 输入路由](app.md#5-输入路由)。
-- `targets`：整块内容区 → `HelpBack`，因此点击页面任意处都能返回。窄屏可滚动，截图见 [帮助页](screenshots/help-120x40-dark.png)。
+- `targets`：只注册右侧的 `↑` / `↓` 滚动指示器；正文是只读文本，点击不产生动作。早期把整块内容区映射成 `HelpBack`，点空白、点窗口聚焦都会退出帮助页。返回走键盘 `Esc` / 「任意键返回」，或侧栏 / 顶栏导航。窄屏可滚动，截图见 [帮助页](screenshots/help-120x40-dark.png)。
 
 ## 9. 通用部件（widgets.rs）
 
@@ -300,7 +300,7 @@ ui::render(app, frame)
   1. 有弹层时只返回 `overlays::targets`；
   2. **独占整屏**的页面（`Practice`、`ArticlePractice`）不画侧栏，也不注册侧栏 target——早期实现按 shell 布局注册了导航，点屏幕上什么都没画的位置会突然跳回主页；
   3. 外壳：收集侧栏/顶栏导航 target，以及（宽屏）`quit_target`；
-  4. 页面 target：`Home`、`DictPicker`、`Settings`、`Shortcuts`、`Words`、`Stats`、`Flows`、`Articles`、`WordTest` 的页面内按钮/列表；`Help` 是「滚动指示器 + 整块内容区 → `HelpBack`」。
+  4. 页面 target：`Home`、`DictPicker`、`Settings`、`Shortcuts`、`Words`、`Stats`、`Flows`、`Articles`、`WordTest` 的页面内按钮/列表；`Help` 只有右侧滚动指示器（正文不做点击，返回由键盘或导航负责）。
 - `action_at` 用 `find` 返回第一个包含坐标的 target；因此导航优先于页面内按钮，页面内又按 `targets()` 的 push 顺序（例如主页：开始按钮 → 自由练习 → 目标 +/- → d 词库 → d 更多）。
   **重叠的 target 要靠注册顺序让位**：设置页 / 词库页的滚动指示器画在内容区最右一列，行 target 必须让出这一列，否则点 `↓` 会误触行 target。
 - `wheel_action`：有弹层返回 `None`；词库页 → `DictMove(delta)`、设置页 → `SettingsMove(delta)`、统计页 → `StatsScroll(delta)`、帮助页 → `HelpScroll(delta)`、词条页 → `WordsMove(delta)`、快捷键页 → `ShortcutMove(delta)`、流程页 → `FlowMove(delta)`、文章页 → `ArticleBookMove(delta)`，其它页面 `None`；`delta` 由滚轮方向给出（上 `-1`、下 `1`）。
