@@ -4,12 +4,14 @@
 //! 统一的音频通道，这里用三种可降级的方式对齐：
 //!
 //! - **键音 / 对错音** → 终端响铃（BEL）。零延迟、零资源，代价是听不出差别。
-//! - **发音 / 朗读** → 系统自带的 TTS：Windows 用 `System.Speech`（PowerShell），
-//!   macOS 用 `say`，Linux 用 `espeak-ng` / `spd-say`。
+//! - **发音 / 朗读** → 系统自带的 TTS：Windows 用一个**常驻**的 PowerShell 会话
+//!   调 `System.Speech`（见 `tts` 的模块文档），macOS 用 `say`，Linux 用
+//!   `espeak-ng` / `spd-say`。
 //! - **有道发音**（可选）→ 下载 mp3 后交给外部播放器（`ffplay` / `mpv` / `vlc`），
 //!   失败自动降级回系统 TTS。
 //!
-//! 所有播放都是**即发即忘**的：子进程启动后不等待，界面不会被卡住。
+//! 所有播放都不阻塞界面：Windows 的朗读只往常驻会话的 stdin 写一行，其余播放
+//! 与外部命令都是**即发即忘**的子进程，启动后不等待。
 
 pub mod bell;
 pub mod player;
