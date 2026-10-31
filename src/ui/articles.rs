@@ -179,10 +179,24 @@ struct ArticleLine {
 }
 
 /// 把整篇文章按句子折行成「同一页」的行列表。
-fn article_lines(practice: &ArticlePracticeState, width: usize) -> Vec<ArticleLine> {
+///
+/// 折行恰好落在词间空格上时，这个空格通常丢掉，避免下一行以空格开头；
+/// 但如果它属于当前句、且此刻在这个空格上打错了（`ignore_case` 参与比较），
+/// 就必须保留到下一行行首——否则空格位置的红字会被折行吞掉，错误看不见。
+fn article_lines(
+    practice: &ArticlePracticeState,
+    width: usize,
+    ignore_case: bool,
+) -> Vec<ArticleLine> {
     let width = width.max(1);
     let mut lines: Vec<ArticleLine> = Vec::new();
     for (index, sentence) in practice.sentences.iter().enumerate() {
+        // 只有当前句会留下折行处的错字，其它句不必生成跟打目标。
+        let target: Vec<char> = if index == practice.index {
+            sentence.typing_target()
+        } else {
+            Vec::new()
+        };
         // 段落之间空一行，保留原文的分段结构。
         if index > 0 && practice.section_starts.contains(&index) {
             lines.push(ArticleLine {
@@ -204,8 +218,14 @@ fn article_lines(practice: &ArticlePracticeState, width: usize) -> Vec<ArticleLi
                 });
                 first = false;
                 used = 0;
-                // 折行处的空格丢掉，避免下一行以空格开头。
-                if cell.ch == ' ' {
+                // 折行处的空白通常丢掉，避免下一行以空格开头；但当前句在这个
+                // 空格上打错时，红字要留到下一行行首，不能被折行吞掉。
+                let keep_wrong_space = index == practice.index
+                    && cell.ch.is_whitespace()
+                    && cell.target.is_some_and(|position| {
+                        practice.typing.is_mismatch(position, &target, ignore_case)
+                    });
+                if cell.ch.is_whitespace() && !keep_wrong_space {
                     continue;
                 }
             }
@@ -242,7 +262,9 @@ fn cursor_line(lines: &[ArticleLine], practice: &ArticlePracticeState) -> usize 
 /// 纵向视口自动跟随当前光标（渲染期计算滚动位置，不写状态）；已经打完的
 /// 句子用 `muted`、未来句用 `fg`，当前句的目标字符（字母、数字与词间
 /// 空格）按「绿 = 打对了 / 红 = 打错了（显示实际按下的字符）/ selection 底
-/// = 光标」着色，标点与多余空白用 `dim` 表示不用输入。
+/// = 光标」着色，标点与多余空白用 `dim` 表示不用输入。空格是跟打内容：
+/// 在这个位置上按错了别的字符时，红字显示实际按下的字符并加下划线，提示
+/// 这里本该是一个词间空格。
 pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let Some(practice) = app.article_practice.as_ref() else {
         // 防御：正常路径不会进入这个组合（跟打页只在状态存在时进入）；
@@ -308,7 +330,9 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
     // 正文：整篇文章一页显示，视口跟着光标走
     let inner_width = chunks[1].width.saturating_sub(2) as usize;
     let viewport = chunks[1].height.saturating_sub(2) as usize;
-    let lines = article_lines(practice, inner_width.saturating_sub(2));
+    let ignore_case = app.boot.settings.ignore_case;
+    // 折行也要知道大小写规则：折行处的空格在本句打错时不能丢。
+    let lines = article_lines(practice, inner_width.saturating_sub(2), ignore_case);
     let offset = cursor_line(&lines, practice)
         .saturating_sub(1)
         .min(lines.len().saturating_sub(viewport));
@@ -317,7 +341,6 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
         .get(index)
         .map(|sentence| sentence.typing_target())
         .unwrap_or_default();
-    let ignore_case = app.boot.settings.ignore_case;
     let rendered: Vec<Line<'static>> = lines
         .iter()
         .skip(offset)
@@ -361,7 +384,7 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
     // 底部提示
     let (hint, color) = if practice.typing.wrong {
         (
-            " 红色 = 打错的字符，按 Backspace 退格改正 · 打完一整句自动进入下一句",
+            " 红色 = 打错的字符 · 下划线 = 空格处按错 · Backspace 改正",
             theme.warn,
         )
     } else {
@@ -381,6 +404,10 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
 }
 
 /// 渲染正文的一行：行首 gutter + 按跟打进度逐字符着色。
+///
+/// 当前句已输入的位置显示实际按下的字符：打对用 `good`，打错用 `bad` 并
+/// 显示按下的那个字符；如果目标单元本身是空白（词间空格），再用下划线标出，
+/// 让「空格处按错」与「字母打错」在视觉上区分开。
 fn article_line(
     line: &ArticleLine,
     practice: &ArticlePracticeState,
@@ -421,12 +448,15 @@ fn article_line(
             Some(position) if line.sentence == practice.index => {
                 if position < cursor {
                     let typed = practice.typing.typed_char(position).unwrap_or(cell.ch);
-                    let color = if practice.typing.is_mismatch(position, target, ignore_case) {
-                        theme.bad
-                    } else {
-                        theme.good
-                    };
-                    (typed.to_string(), Style::default().fg(color))
+                    let mismatch = practice.typing.is_mismatch(position, target, ignore_case);
+                    let color = if mismatch { theme.bad } else { theme.good };
+                    // 空格位置打错时显示实际按下的字符并加下划线：这里本该是
+                    // 一个词间空格。字母 / 数字位置的错字只标红。
+                    let mut style = Style::default().fg(color);
+                    if mismatch && cell.ch.is_whitespace() {
+                        style = style.add_modifier(Modifier::UNDERLINED);
+                    }
+                    (typed.to_string(), style)
                 } else if position == cursor {
                     (
                         cell.ch.to_string(),

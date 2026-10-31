@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Modifier;
 use typewords_tui::app;
 use unicode_width::UnicodeWidthStr;
 
@@ -386,6 +387,11 @@ fn a_wrong_character_is_marked_red_at_its_own_position() {
         theme.bad,
         "打错的字符应使用主题 bad 色"
     );
+    let x_cell = buffer.cell((x_column, x_row)).unwrap();
+    assert!(
+        !x_cell.modifier.contains(Modifier::UNDERLINED),
+        "字母位置打错只标红，不加下划线（下划线只用于空格位置的错字）"
+    );
 
     // 继续正确输入后续字母：错误标记不跟着光标前移。
     type_text(&mut app, "llo");
@@ -406,6 +412,116 @@ fn a_wrong_character_is_marked_red_at_its_own_position() {
         buffer.cell((h_column, h_row)).unwrap().fg,
         theme.good,
         "正确输入的字符应使用主题 good 色"
+    );
+}
+
+/// 光标停在词间空格上时按了别的字符：错字记在空格位置，红色 + 下划线。
+///
+/// 早期实现把这种按键一律当成「漏打空格」：自动补一个空格，再把按键用于
+/// 下一个目标字符，于是红色错字出现在下一个字母的位置上。新语义是：只有
+/// 按下的字符正好等于下一个目标字符时才按漏打空格处理，否则把字符记在
+/// 空格本身上，光标前进一位，后面的字母仍与目标对齐。
+#[test]
+fn a_wrong_character_at_a_word_space_is_marked_red_and_underlined_at_the_space() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+    let target = current_target(&app);
+
+    // 打到 "Hello"，光标停在词间空格上；'z' 不等于下一个目标字符 't'。
+    type_text(&mut app, "Hello");
+    assert_ne!(target[6], 'z', "测试前提：下一个目标字符不是 z");
+    press(&mut app, KeyCode::Char('z'));
+
+    let practice = app.article_practice.as_ref().expect("练习状态");
+    assert_eq!(practice.typing.cursor(), 6, "空格位置上的错字应推进光标");
+    assert_eq!(
+        practice.typing.typed_char(5),
+        Some('z'),
+        "空格位置应记下实际按下的字符"
+    );
+    assert!(
+        practice.typing.is_mismatch(5, &target, true),
+        "空格位置上按下的 'z' 应算打错"
+    );
+    assert!(practice.typing.wrong, "空格位置打错应留下错误标记");
+
+    // 渲染：'z' 必须落在空格那一列（'H' 所在列 + 5），而不是下一个字母列。
+    let theme = app.theme();
+    let buffer = render_buffer(&app, 120, 40);
+    let (h_column, h_row) = find_symbol(&buffer, 'H').expect("应显示已正确输入的 'H'");
+    let (z_column, z_row) = find_symbol(&buffer, 'z').expect("应显示空格位置上的错字 'z'");
+    assert_eq!(
+        (z_column, z_row),
+        (h_column + 5, h_row),
+        "错字应留在空格那一列，不能跳到下一个字母的位置"
+    );
+    let cell = buffer.cell((z_column, z_row)).expect("错字所在单元");
+    assert_eq!(cell.fg, theme.bad, "空格位置的错字应使用主题 bad 色");
+    assert!(
+        cell.modifier.contains(Modifier::UNDERLINED),
+        "空格位置的错字应带下划线"
+    );
+
+    // 后面照常按目标输入：字母仍与目标对齐，整句完成且只记一次错误句。
+    type_text(&mut app, "there");
+    let practice = app.article_practice.as_ref().expect("练习状态");
+    assert_eq!(practice.finished, 1, "空格位置打错不该卡住整句完成");
+    assert_eq!(practice.index, 1, "打完整句应自动进入下一句");
+    assert_eq!(practice.wrong_sentences, 1, "本句出现过错误，错误句数应 +1");
+}
+
+/// 折行恰好落在会被打错的词间空格上时，错字移到下一行行首继续显示。
+///
+/// `article_lines` 在折行处通常会丢掉空格，避免下一行以空格开头；但如果
+/// 那是当前句的词间空格、且此刻在那里打错了，丢掉就等于把红字吞掉。渲染层
+/// 要把这种单元保留到下一行行首。60 列的正文宽度是 56（终端宽 - 边框 - 行首
+/// gutter），因此用 56 个 'a' + 一个词间空格 + 'b' 制造折行边界。
+#[test]
+fn a_wrong_character_at_a_wrapped_word_space_stays_visible_on_the_next_line() {
+    use typewords_tui::domain::article::{Sentence, SentenceTyping, parse_sentence};
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+
+    // 只留一句：56 个 'a' + 词间空格 + 'b'，空格正好落在第一行行尾的折行边界。
+    let text = format!("{} b", "a".repeat(56));
+    let practice = app.article_practice.as_mut().expect("练习状态");
+    practice.sentences = vec![Sentence {
+        text: text.clone(),
+        translate: String::new(),
+        words: parse_sentence(&text),
+    }];
+    practice.section_starts = vec![0];
+    practice.index = 0;
+    practice.typing = SentenceTyping::default();
+
+    type_text(&mut app, &"a".repeat(56));
+    press(&mut app, KeyCode::Char('z'));
+
+    let theme = app.theme();
+    let buffer = render_buffer(&app, 60, 20);
+    let (a_column, a_row) = find_symbol(&buffer, 'a').expect("应显示第一行的 'a'");
+    let (z_column, z_row) = find_symbol(&buffer, 'z').expect("折行后的错字仍应可见");
+    assert!(
+        z_row > a_row,
+        "折行边界上的错字应移到下一行，而不是被折行吞掉"
+    );
+    assert_eq!(
+        z_column, a_column,
+        "错字应落在下一行行首（与上一行正文同列）"
+    );
+    let cell = buffer.cell((z_column, z_row)).expect("错字所在单元");
+    assert_eq!(cell.fg, theme.bad, "折行处的空格错字仍应是主题 bad 色");
+    assert!(
+        cell.modifier.contains(Modifier::UNDERLINED),
+        "折行处的空格错字仍应带下划线"
+    );
+    assert_eq!(
+        buffer.cell((z_column + 1, z_row)).map(|next| next.symbol()),
+        Some("b"),
+        "错字后面应紧跟下一个目标字符 'b'，说明它落在下一行行首"
     );
 }
 

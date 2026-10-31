@@ -504,6 +504,66 @@ mod tests {
     }
 
     #[test]
+    fn a_wrong_character_at_a_word_space_is_kept_on_the_space() {
+        let target: Vec<char> = "Hello there".chars().collect();
+        let mut typing = SentenceTyping::default();
+        for character in "Hello".chars() {
+            assert_eq!(typing.input(&target, character, true), Some(true));
+        }
+        // 光标停在词间空格上，按下的 'z' 既不是空格也不是下一个字母 't'：
+        // 错字记在空格位置上，不跳到下一个字母。
+        assert_eq!(typing.input(&target, 'z', true), Some(false));
+        assert_eq!(typing.cursor(), 6);
+        assert_eq!(typing.typed_char(5), Some('z'));
+        assert!(typing.is_mismatch(5, &target, true));
+        assert!(typing.wrong);
+        // 后面的字母仍从下一个目标位置开始，不会整体错位。
+        for character in "there".chars() {
+            assert_eq!(typing.input(&target, character, true), Some(true));
+        }
+        assert!(typing.is_done(target.len()));
+        for index in 0..target.len() {
+            if index != 5 {
+                assert!(
+                    !typing.is_mismatch(index, &target, true),
+                    "第 {index} 位不该是错字"
+                );
+            }
+        }
+        assert!(typing.is_mismatch(5, &target, true));
+    }
+
+    #[test]
+    fn a_space_typo_can_be_backspaced() {
+        let target: Vec<char> = "Hi you".chars().collect();
+        let mut typing = SentenceTyping::default();
+        for character in "Hi".chars() {
+            assert_eq!(typing.input(&target, character, true), Some(true));
+        }
+        assert_eq!(typing.input(&target, 'z', true), Some(false));
+        assert_eq!(typing.cursor(), 3);
+        // 退格删掉空格位置上的错字，光标回到空格上；本句的错字标记不清。
+        typing.backspace();
+        assert_eq!(typing.cursor(), 2);
+        assert_eq!(typing.typed_char(2), None);
+        assert!(!typing.is_mismatch(2, &target, true));
+        assert!(typing.wrong, "本句出现过错误，退格也不该抹掉");
+    }
+
+    #[test]
+    fn punctuation_at_a_word_space_is_ignored() {
+        let target: Vec<char> = "Hi you".chars().collect();
+        let mut typing = SentenceTyping::default();
+        for character in "Hi".chars() {
+            assert_eq!(typing.input(&target, character, true), Some(true));
+        }
+        // 空格位置上的标点仍不是跟打内容：忽略，不推进也不计错。
+        assert_eq!(typing.input(&target, ',', true), None);
+        assert_eq!(typing.cursor(), 2);
+        assert!(!typing.wrong);
+    }
+
+    #[test]
     fn typing_records_wrong_letters_at_their_own_position() {
         let target: Vec<char> = "Hello".chars().collect();
         let mut typing = SentenceTyping::default();
@@ -631,6 +691,11 @@ pub fn chars_match(typed: char, expected: char, ignore_case: bool) -> bool {
 /// 与旧模型的区别：旧模型只记「已正确输入的字符数」，打错时既不前进也不
 /// 留痕，红色只能钉在进度最前面。现在每次按键都记到光标处（打错也前移），
 /// 错误标记留在它真正发生的位置上，界面据此显示实际打出的字符。
+///
+/// 词间空格本身也是一个跟打目标：光标停在空格上时按了别的字符，错字就记在
+/// 空格自己身上（界面画成带下划线的红字），不会跳到下一个字母；只有按下的
+/// 正好是下一个目标字符时，才按「漏打空格」补一个空格并把这次按键留给下一
+/// 个位置，保证后面的字母不错位。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SentenceTyping {
     /// 实际按下的字符（含打错的字符），长度即当前光标位置
@@ -653,6 +718,12 @@ impl SentenceTyping {
     /// - 字母与数字记到光标处并前移，返回 `Some(是否与目标一致)`。
     ///
     /// 打错也照样前移：错误只在原位置标红，不把光标钉在进度最前面。
+    ///
+    /// 光标停在词间空格上时按了别的字符，分两种情况：按下的是下一个目标字符
+    /// 时仍按「漏打空格」处理——补一个空格并记错，这次按键留给下一个位置，
+    /// 后面的字母因此保持对齐；否则就把这个字符记在空格位置上（返回
+    /// `Some(false)`，界面画成红色 + 下划线），光标前移一格，不消费下一个
+    /// 目标位置。
     pub fn input(&mut self, target: &[char], character: char, ignore_case: bool) -> Option<bool> {
         let position = self.input.len();
         if position >= target.len() {
@@ -668,11 +739,21 @@ impl SentenceTyping {
             if !is_typing_char(character) {
                 return None;
             }
-            // 漏打词间空格：补上空缺并记一次错误，再把这次按键用于下一个
-            // 目标字符，避免后面的字母全部错位。
-            self.input.push(' ');
+            // 按下的正好是下一个目标字符：漏打词间空格，补上空缺并记一次
+            // 错误，再把这次按键用于下一个目标字符，避免后面的字母全部错位。
+            let fills_next = target
+                .get(position + 1)
+                .is_some_and(|next| chars_match(character, *next, ignore_case));
+            if fills_next {
+                self.input.push(' ');
+                self.wrong = true;
+                return self.input(target, character, ignore_case);
+            }
+            // 否则错字就记在空格自己身上：不递归、不消费下一个目标位置，
+            // 界面把它画成带下划线的红字。
+            self.input.push(character);
             self.wrong = true;
-            return self.input(target, character, ignore_case);
+            return Some(false);
         }
         // 字母 / 数字位置：多余的空格不是目标内容，忽略。
         if character.is_whitespace() {
