@@ -35,6 +35,75 @@ pub struct Sentence {
     pub words: Vec<ArticleWord>,
 }
 
+/// 句子里的一个字符与它的跟打下标。
+///
+/// `target` 为 `Some` 的字符需要逐个输入：字母、数字，以及词与词之间
+/// 的那一个空格。标点、符号与多余空白为 `None`——只显示、不跟打，按下
+/// 了也忽略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypingCell {
+    pub ch: char,
+    pub target: Option<usize>,
+}
+
+impl Sentence {
+    /// 逐字符的跟打映射：渲染与键入共用同一份「哪些字符要打」的规则。
+    ///
+    /// 规则：字母与数字是跟打内容；两段内容之间只要有空白，就要求输入
+    /// 一个空格（落在该空白的第一个字符上）。句首 / 句尾的空白与连续
+    /// 空白里的多余空格不跟打，标点与符号一律不跟打。
+    pub fn typing_cells(&self) -> Vec<TypingCell> {
+        let chars: Vec<char> = self.text.chars().collect();
+        let mut cells: Vec<TypingCell> = chars
+            .iter()
+            .map(|character| TypingCell {
+                ch: *character,
+                target: None,
+            })
+            .collect();
+        let mut next_target = 0usize;
+        let mut previous: Option<usize> = None;
+        for (index, character) in chars.iter().enumerate() {
+            if !character.is_alphanumeric() {
+                continue;
+            }
+            if let Some(end) = previous {
+                let gap_start = end + 1;
+                if gap_start < index
+                    && let Some(offset) =
+                        (gap_start..index).find(|position| chars[*position].is_whitespace())
+                {
+                    cells[offset].target = Some(next_target);
+                    next_target += 1;
+                }
+            }
+            cells[index].target = Some(next_target);
+            next_target += 1;
+            previous = Some(index);
+        }
+        cells
+    }
+
+    /// 这句话的跟打目标：字母、数字与词间空格按顺序排成的字符序列。
+    ///
+    /// 标点与符号不会出现在目标里；一句话可能没有任何可跟打内容
+    /// （纯标点 / 空白），调用方需要跳过这种句子。
+    pub fn typing_target(&self) -> Vec<char> {
+        self.typing_cells()
+            .into_iter()
+            .filter_map(|cell| {
+                cell.target.map(|_| {
+                    if cell.ch.is_whitespace() {
+                        ' '
+                    } else {
+                        cell.ch
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
 /// 一篇文章（与资源 JSON 同构）。
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -338,6 +407,154 @@ mod tests {
         assert_eq!(article.sections[0][0].translate, "对不起");
         assert_eq!(article.sections[1][0].translate, "什么事？");
     }
+
+    #[test]
+    fn typing_target_keeps_word_spaces_and_drops_punctuation() {
+        let mut article = Article {
+            text: "Hello, world! It's 3.14%.".to_string(),
+            ..Article::default()
+        };
+        gen_sections(&mut article);
+        let target: String = article.sections[0][0].typing_target().into_iter().collect();
+        assert_eq!(target, "Hello world Its 314");
+    }
+
+    #[test]
+    fn typing_cells_mark_punctuation_and_extra_space_as_not_typed() {
+        let mut article = Article {
+            text: "Hi,  you!".to_string(),
+            ..Article::default()
+        };
+        gen_sections(&mut article);
+        let cells = article.sections[0][0].typing_cells();
+        let indices: Vec<Option<usize>> = cells.iter().map(|cell| cell.target).collect();
+        // H i , 空格 空格 y o u !：只有一个词间空格跟打，
+        // 逗号、感叹号与连续空白里的多余空格都不跟打。
+        assert_eq!(
+            indices,
+            vec![
+                Some(0),
+                Some(1),
+                None,
+                Some(2),
+                None,
+                Some(3),
+                Some(4),
+                Some(5),
+                None
+            ]
+        );
+        let target: String = article.sections[0][0].typing_target().into_iter().collect();
+        assert_eq!(target, "Hi you");
+    }
+
+    #[test]
+    fn spaces_between_words_are_part_of_the_typing_target() {
+        let mut article = Article {
+            text: "Hello there.".to_string(),
+            ..Article::default()
+        };
+        gen_sections(&mut article);
+        let target = article.sections[0][0].typing_target();
+        assert_eq!(target.iter().collect::<String>(), "Hello there");
+
+        let mut typing = SentenceTyping::default();
+        for character in "Hello".chars() {
+            assert_eq!(typing.input(&target, character, true), Some(true));
+        }
+        // 句点不用打：忽略，光标停在空格前。
+        assert_eq!(typing.input(&target, '.', true), None);
+        assert_eq!(typing.cursor(), 5);
+        // 空格是跟打内容：必须输入才继续。
+        assert_eq!(typing.input(&target, ' ', true), Some(true));
+        assert_eq!(typing.cursor(), 6);
+        for character in "there".chars() {
+            typing.input(&target, character, true);
+        }
+        assert!(typing.is_done(target.len()));
+        assert!(!typing.wrong);
+    }
+
+    #[test]
+    fn a_missing_word_space_counts_a_mistake_without_shifting_later_letters() {
+        let target: Vec<char> = "Hello there".chars().collect();
+        let mut typing = SentenceTyping::default();
+        // 一口气打完、中间漏掉空格：补一次错误，但后面的字母不应全部错位。
+        for character in "Hellothere".chars() {
+            typing.input(&target, character, true);
+        }
+        assert!(typing.wrong);
+        assert!(typing.is_done(target.len()));
+        assert_eq!(typing.cursor(), target.len());
+        // 自动补上的空格是正确位置，其余字母都不算错。
+        assert!(!typing.is_mismatch(5, &target, true));
+    }
+
+    #[test]
+    fn an_extra_space_is_ignored() {
+        let target: Vec<char> = "Hi you".chars().collect();
+        let mut typing = SentenceTyping::default();
+        assert_eq!(typing.input(&target, 'H', true), Some(true));
+        assert_eq!(typing.input(&target, 'i', true), Some(true));
+        assert_eq!(typing.input(&target, ' ', true), Some(true));
+        // 字母位置上的多余空格不是目标内容：忽略，不推进也不计错。
+        assert_eq!(typing.input(&target, ' ', true), None);
+        assert_eq!(typing.cursor(), 3);
+        assert!(!typing.wrong);
+    }
+
+    #[test]
+    fn typing_records_wrong_letters_at_their_own_position() {
+        let target: Vec<char> = "Hello".chars().collect();
+        let mut typing = SentenceTyping::default();
+        assert_eq!(typing.input(&target, 'H', true), Some(true));
+        assert_eq!(typing.input(&target, 'x', true), Some(false));
+        assert_eq!(typing.cursor(), 2);
+        assert!(typing.wrong);
+        assert!(typing.is_mismatch(1, &target, true));
+        assert!(!typing.is_mismatch(0, &target, true));
+
+        // 继续正确输入后续字符，错误标记仍留在它发生的位置，不跟着光标走。
+        assert_eq!(typing.input(&target, 'l', true), Some(true));
+        assert_eq!(typing.input(&target, 'l', true), Some(true));
+        assert_eq!(typing.input(&target, 'o', true), Some(true));
+        assert!(typing.is_mismatch(1, &target, true));
+        assert_eq!(typing.typed_char(1), Some('x'));
+        assert!(typing.is_done(target.len()));
+    }
+
+    #[test]
+    fn punctuation_keys_are_ignored() {
+        let target: Vec<char> = "Hello".chars().collect();
+        let mut typing = SentenceTyping::default();
+        assert_eq!(typing.input(&target, ',', true), None);
+        assert_eq!(typing.input(&target, '.', true), None);
+        assert_eq!(typing.input(&target, '\'', true), None);
+        assert_eq!(typing.cursor(), 0);
+        assert!(!typing.wrong);
+    }
+
+    #[test]
+    fn backspace_steps_back_but_keeps_the_wrong_mark() {
+        let target: Vec<char> = "Hi".chars().collect();
+        let mut typing = SentenceTyping::default();
+        typing.input(&target, 'H', true);
+        typing.input(&target, 'x', true);
+        typing.backspace();
+        assert_eq!(typing.cursor(), 1);
+        assert!(typing.wrong, "本句出现过错误，退格也不该抹掉");
+        assert_eq!(typing.input(&target, 'i', true), Some(true));
+        assert!(typing.is_done(target.len()));
+    }
+
+    #[test]
+    fn ignore_case_applies_to_input_comparison() {
+        let target: Vec<char> = "Hi".chars().collect();
+        let mut typing = SentenceTyping::default();
+        assert_eq!(typing.input(&target, 'h', true), Some(true));
+        assert_eq!(typing.input(&target, 'I', true), Some(true));
+        assert!(!typing.wrong);
+    }
 }
 
 // ── 资源加载 ───────────────────────────────────────────────────────────────
@@ -393,47 +610,112 @@ pub fn load_articles(paths: &Paths, book: &ArticleBook) -> Result<Vec<Article>> 
 
 // ── 句子跟打 ───────────────────────────────────────────────────────────────
 
-/// 句子跟打状态：逐字符比对。
+/// 判断一个字符是否可能成为跟打内容（字母、数字、空格）。
+///
+/// 标点与符号不是跟打内容，按下直接忽略；空格是跟打内容，只有出现在
+/// 词与词之间时才要求输入（见 `Sentence::typing_cells`）。
+pub fn is_typing_char(character: char) -> bool {
+    character.is_alphanumeric() || character.is_whitespace()
+}
+
+/// 字符比较：`ignore_case` 时按小写比较。
+pub fn chars_match(typed: char, expected: char, ignore_case: bool) -> bool {
+    if typed == expected {
+        return true;
+    }
+    ignore_case && typed.to_lowercase().eq(expected.to_lowercase())
+}
+
+/// 句子跟打状态：记录实际按下的字符序列。
+///
+/// 与旧模型的区别：旧模型只记「已正确输入的字符数」，打错时既不前进也不
+/// 留痕，红色只能钉在进度最前面。现在每次按键都记到光标处（打错也前移），
+/// 错误标记留在它真正发生的位置上，界面据此显示实际打出的字符。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SentenceTyping {
-    /// 已正确输入的字符数
-    pub typed: usize,
-    /// 本句是否出现过错误
+    /// 实际按下的字符（含打错的字符），长度即当前光标位置
+    pub input: Vec<char>,
+    /// 本句是否出现过错误（打错后即使退格修正也算出现过）
     pub wrong: bool,
 }
 
 impl SentenceTyping {
-    /// 输入一个字符。
+    /// 当前光标位置（已输入的字符数）。
+    pub fn cursor(&self) -> usize {
+        self.input.len()
+    }
+
+    /// 记录一次按键。
     ///
-    /// 返回 `true` 表示正确推进（`typed` 加一），`false` 表示输错了
-    /// （`wrong` 置位，光标不前进）。
-    pub fn input(&mut self, expected: &str, character: char, ignore_case: bool) -> bool {
-        let Some(target) = expected.chars().nth(self.typed) else {
-            return false;
-        };
-        let matched = if ignore_case {
-            character.eq_ignore_ascii_case(&target)
-                || character.to_lowercase().eq(target.to_lowercase())
-        } else {
-            character == target
-        };
-        if matched {
-            self.typed += 1;
-            true
-        } else {
+    /// - 标点 / 符号不是跟打内容：任何位置都直接忽略，返回 `None`；
+    /// - 空格是跟打内容：该按时没按会被记一次错误，并自动补空格继续，
+    ///   不至于让后面的字母全部错位；不该按时按了则忽略；
+    /// - 字母与数字记到光标处并前移，返回 `Some(是否与目标一致)`。
+    ///
+    /// 打错也照样前移：错误只在原位置标红，不把光标钉在进度最前面。
+    pub fn input(&mut self, target: &[char], character: char, ignore_case: bool) -> Option<bool> {
+        let position = self.input.len();
+        if position >= target.len() {
+            return None;
+        }
+        let expected = target[position];
+        if expected.is_whitespace() {
+            if character.is_whitespace() {
+                self.input.push(' ');
+                return Some(true);
+            }
+            // 标点不是跟打内容：忽略，光标留在空格上。
+            if !is_typing_char(character) {
+                return None;
+            }
+            // 漏打词间空格：补上空缺并记一次错误，再把这次按键用于下一个
+            // 目标字符，避免后面的字母全部错位。
+            self.input.push(' ');
             self.wrong = true;
-            false
+            return self.input(target, character, ignore_case);
+        }
+        // 字母 / 数字位置：多余的空格不是目标内容，忽略。
+        if character.is_whitespace() {
+            return None;
+        }
+        // 标点不是跟打内容：按错位置时忽略，不推进也不计错。
+        if !is_typing_char(character) {
+            return None;
+        }
+        let matched = chars_match(character, expected, ignore_case);
+        self.input.push(character);
+        if !matched {
+            self.wrong = true;
+        }
+        Some(matched)
+    }
+
+    /// 退格：删掉最后输入的字符；本句的 `wrong` 标记不因此清除。
+    pub fn backspace(&mut self) {
+        self.input.pop();
+    }
+
+    /// 是否已经输完整句（输入长度达到目标长度，打错也算完成）。
+    pub fn is_done(&self, target_len: usize) -> bool {
+        self.input.len() >= target_len
+    }
+
+    /// 第 `index` 个目标位置实际打出的字符。
+    pub fn typed_char(&self, index: usize) -> Option<char> {
+        self.input.get(index).copied()
+    }
+
+    /// 第 `index` 个目标位置是否打错（尚未输入或输入正确都返回 false）。
+    pub fn is_mismatch(&self, index: usize, target: &[char], ignore_case: bool) -> bool {
+        match (self.input.get(index), target.get(index)) {
+            (Some(typed), Some(expected)) => !chars_match(*typed, *expected, ignore_case),
+            _ => false,
         }
     }
 
-    /// 是否已经输完整句。
-    pub fn is_done(&self, expected: &str) -> bool {
-        self.typed >= expected.chars().count()
-    }
-
-    /// 已输入的内容（用于界面回显）。
-    pub fn typed_text(&self, expected: &str) -> String {
-        expected.chars().take(self.typed).collect()
+    /// 清空本句的输入状态。
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 }
 

@@ -79,6 +79,8 @@ pub struct ArticlePracticeState {
     pub title: String,
     /// 全部句子（段落展开后按顺序）
     pub sentences: Vec<crate::domain::article::Sentence>,
+    /// 每个段落在 `sentences` 里的起始下标（渲染分段用）
+    pub section_starts: Vec<usize>,
     /// 当前句下标
     pub index: usize,
     /// 跟打状态
@@ -2101,11 +2103,27 @@ impl App {
             return;
         };
         let mut sentences: Vec<crate::domain::article::Sentence> = Vec::new();
+        let mut section_starts: Vec<usize> = Vec::new();
         for section in &article.sections {
+            if section.is_empty() {
+                continue;
+            }
+            section_starts.push(sentences.len());
             sentences.extend(section.iter().cloned());
         }
         if sentences.is_empty() {
             self.toast(NoticeLevel::Warning, "这篇文章没有可练习的句子");
+            return;
+        }
+        // 跟打内容是字母、数字与词间空格：整篇都是标点 / 空白时没有可打的内容。
+        if sentences
+            .iter()
+            .all(|sentence| sentence.typing_target().is_empty())
+        {
+            self.toast(
+                NoticeLevel::Warning,
+                "这篇文章没有可跟打的内容（只有标点或空白）",
+            );
             return;
         }
         // 缓存命中同一篇文章时从断点句子续打；其余文章从头开始。
@@ -2117,11 +2135,11 @@ impl App {
             .filter(|cache| cache.article_id == article.id)
             .cloned();
         let total = sentences.len();
-        let start_index = resume
+        let mut start_index = resume
             .as_ref()
             .map(|cache| cache.sentence_index.min(total - 1))
             .unwrap_or(0);
-        let finished = resume
+        let mut finished = resume
             .as_ref()
             .map(|cache| cache.finished.min(total))
             .unwrap_or(0);
@@ -2131,10 +2149,24 @@ impl App {
             .unwrap_or(0);
         let spend = resume.as_ref().map(|cache| cache.spend).unwrap_or(0);
         let resumed = resume.is_some();
+        // 落点句子可能没有跟打内容（旧缓存 / 纯标点句）：向后跳到最近的
+        // 一句有内容的位置，跳过的句子按已完成计。
+        while start_index < total && sentences[start_index].typing_target().is_empty() {
+            start_index += 1;
+            finished += 1;
+        }
+        if start_index >= total {
+            // 极端情况：断点落在篇尾的纯标点句之后，回退到最后一个有内容的句子。
+            start_index = (0..total)
+                .rev()
+                .find(|position| !sentences[*position].typing_target().is_empty())
+                .unwrap_or(0);
+        }
         self.article_practice = Some(ArticlePracticeState {
             article_id: article.id,
             title: article.title.clone(),
             sentences,
+            section_starts,
             index: start_index,
             typing: Default::default(),
             finished,
@@ -2216,35 +2248,35 @@ impl App {
     }
 
     /// 处理文章跟打的一个按键。
+    ///
+    /// 跟打内容是字母、数字与词间空格；标点、符号按下后直接忽略（不计错
+    /// 也不前进）。空格是内容：该按空格时没按会被记为错误。打错的字符同样
+    /// 会记录并前移，错误标记留在它真正发生的位置上，而不是钉在进度最前面。
     fn article_typing_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        let ignore_case = self.boot.settings.ignore_case;
         let Some(practice) = self.article_practice.as_mut() else {
             return;
         };
         let Some(sentence) = practice.sentences.get(practice.index) else {
             return;
         };
-        let expected = sentence.text.clone();
+        let target = sentence.typing_target();
+        if target.is_empty() {
+            return;
+        }
         match key.code {
             KeyCode::Char(character)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                let ignore_case = self.boot.settings.ignore_case;
-                practice.typing.input(&expected, character, ignore_case);
+                practice.typing.input(&target, character, ignore_case);
             }
-            KeyCode::Backspace => {
-                practice.typing.typed = practice.typing.typed.saturating_sub(1);
-            }
+            KeyCode::Backspace => practice.typing.backspace(),
             _ => {}
         }
-        // 整句输完 → 下一句
-        let done = practice
-            .sentences
-            .get(practice.index)
-            .map(|sentence| practice.typing.is_done(&sentence.text))
-            .unwrap_or(false);
-        if done {
+        // 整句输完 → 下一句（打错的字符不影响推进，本句会记一次错误）
+        if practice.typing.is_done(target.len()) {
             self.finish_article_sentence();
         }
     }
@@ -2259,15 +2291,39 @@ impl App {
         }
         practice.finished += 1;
         practice.index += 1;
-        practice.typing = Default::default();
+        practice.typing.reset();
+        // 纯标点 / 空白的句子没有跟打内容，直接跳过；
+        // 如果跳过后已经到篇尾，这里会直接结算。
+        self.advance_over_empty_article_sentences();
+        if self.article_practice.is_some() {
+            // 每完成一句就排一次保存——跟打随时可能被中断，句级粒度才不会
+            // 丢掉已完成的部分。
+            self.schedule_article_save();
+            self.speak_current_sentence();
+        }
+    }
+
+    /// 跳过没有跟打内容的句子（纯标点 / 空白），把它们记成已完成。
+    ///
+    /// 跟打目标只含字母、数字与词间空格，所以这类句子永远不可能被「打」到；
+    /// 不跳过的话光标会停在它上面、每次按键都被忽略。全部句子都跳过时直接
+    /// 结算。
+    fn advance_over_empty_article_sentences(&mut self) {
+        let Some(practice) = self.article_practice.as_mut() else {
+            return;
+        };
+        while practice.index < practice.sentences.len()
+            && practice.sentences[practice.index]
+                .typing_target()
+                .is_empty()
+        {
+            practice.finished += 1;
+            practice.index += 1;
+            practice.typing.reset();
+        }
         if practice.index >= practice.sentences.len() {
             self.finish_article_practice();
-            return;
         }
-        // 每完成一句就排一次保存——跟打随时可能被中断，句级粒度才不会
-        // 丢掉已完成的部分。
-        self.schedule_article_save();
-        self.speak_current_sentence();
     }
 
     /// 文章练习结束，写统计并给结算。
