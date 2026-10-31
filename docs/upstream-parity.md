@@ -129,7 +129,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 断点 | 文章跟打缓存 | `PracticeSaveArticle` v1 | `practice-article.json` v1 | 部分 | 句子进度与用时接得上；上游记段落/句/词三级游标，TUI 记扁平句子下标 |
 | 断点 | v1 缓存升级 | `checkAndUpgradePracticeWordCache` | 仅接受 v2 | 部分 | v1 缓存直接忽略，文件在下一次保存时覆盖 |
 | 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失 | 无网络与远端比较 |
-| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 句子跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
+| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 整篇单页逐句跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
 | 音频 | 发音与键盘音效 | `hooks/sound.ts`、`base/Audio.vue`、`components/article/ArticleAudio.vue` | `src/audio/` | 部分 | 不打包音频资源：键音 / 对错音用终端响铃，单词自动发音（换词 / 单词测试切题）+ `Ctrl+P`、文章朗读走系统 TTS，可选有道 mp3；无音量 / 声色选择与逐句音频时间轴 |
 | 查词 | 练习中查词与在线翻译 | `WordLookupPopover.vue`、`libs/translate/*`、`public.word/query` | 无 | 缺失 | 离线设计目标 |
 | 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑，存 `noteData` | 已对齐 | 词库页的笔记字段仍只有练习页这一处入口 |

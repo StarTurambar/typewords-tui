@@ -174,7 +174,8 @@ app.save_all()
 1. 更新 `last_activity = now_ms()`（供空闲暂停使用）。
 2. 若 `edit`/`confirm`/`summary` 任一存在：调 `keymap::overlay_action`，有返回值就 `apply_action`，然后**直接返回**——弹层是模态的，未识别的键被吞掉；优先级 `edit` → `confirm` → `summary`。
 3. `screen == Practice` 时进入 `on_practice_key`（练习页键盘不经过 `Action`）。
-4. 其它屏幕调 `keymap::screen_action`，返回 `Action` 后交给 `apply_action`。
+4. `screen == ArticlePractice` 时先截下 `Esc`（`back` 返回文章列表）与 `Ctrl+P`（朗读当前句），其余按键交给 `article_typing_key`——跟打键入同样不经过 `Action`。
+5. 其它屏幕调 `keymap::screen_action`，返回 `Action` 后交给 `apply_action`。
 
 `screen_action` 先处理 Help（「任意键返回」优先），再判断数字切页：`session.is_none()`、无修饰键、按 `1`~`5` 时直接产生 `Navigate(Home/DictPicker/Stats/Settings/Help)`。
 
@@ -201,7 +202,23 @@ app.save_all()
 
 `Ctrl+J` 是 `Shift+→` 的 ASCII 别名；部分终端会吞掉 `Ctrl+方向键` 或 `Alt+数字`，帮助页也提示了这一点。
 
-### 5.3 其它屏幕键位（`screen_action`）
+### 5.3 文章跟打页键位（`article_typing_key`）
+
+跟打页和练习页一样不经过 `screen_action`：`App::on_key` 先处理 `Esc` 与 `Ctrl+P`，其余交给 `App::article_typing_key`。
+
+| 键 | 行为 |
+| --- | --- |
+| 字母、数字 | 记到当前句的光标位置（`SentenceTyping::input`）；打错也照样前进，错误标记留在打错的位置 |
+| 空格 | 词与词之间的空格是跟打内容：该按没按会记一次错误并自动补空格，然后把这次按键用于下一个目标字符（不会让后面全部错位）；不该按时按的空格被忽略；光标会停在待输入的空格上 |
+| 标点、符号 | 不是跟打内容（`is_typing_char` 为假）：忽略，不计错也不前进 |
+| `Backspace` | `SentenceTyping::backspace` 删除最后输入的字符；本句的 `wrong` 标记不因此清除 |
+| `Ctrl+P` | `speak_current_sentence` 用系统 TTS 朗读当前句 |
+| `Esc` | `back()` 保存文章断点并返回文章列表 |
+| 其它（含 `Ctrl` / `Alt` 组合） | 忽略 |
+
+输入长度达到当前句 `typing_target`（字母、数字与词间空格按顺序排成的字符序列，见 `Sentence::typing_cells`）的字符数就调用 `finish_article_sentence`：本句出现过错误时 `wrong_sentences += 1`，然后推进句子下标、排一次防抖保存并朗读下一句；`advance_over_empty_article_sentences` 会跳过没有跟打内容的纯标点 / 空白句（按已完成计），跳过之后到篇尾则直接结算。
+
+### 5.4 其它屏幕键位（`screen_action`）
 
 | 屏幕 | 键 → `Action` |
 | --- | --- |
@@ -213,7 +230,7 @@ app.save_all()
 
 无会话的非练习页上，无修饰的 `1`~`5` 切到对应页面。
 
-### 5.4 弹层键位
+### 5.5 弹层键位
 
 | 弹层 | 键 → `Action` |
 | --- | --- |
@@ -221,13 +238,13 @@ app.save_all()
 | 确认 `confirm` | `y`/`Y`/`Enter`→`ConfirmAccept`；**其它任意键**→`ConfirmCancel` |
 | 结算 `summary` | `Enter`/`Space`→`SummaryContinue`；`r`→`SummaryRelearn`；`q`/`Esc`→`SummaryHome`；其它忽略 |
 
-### 5.5 键入映射与鼠标
+### 5.6 键入映射与鼠标
 
 `key_to_input` 把终端按键压成 `KeyInput`：`Backspace`→`Backspace`、`Char(' ')`→`Space`、其它 `Char(c)`→`Char(c)`，其余返回 `None`。带 `Control` 或 `Alt` 修饰的按键一律返回 `None`，所以组合键不会误输入字符；`Shift` 不排除，大写字母与符号可正常键入。
 
 `App::on_mouse` 先更新 `last_activity`，然后左键按下 → `ui::hit::action_at` 命中则 `apply_action`；滚轮上/下 → `wheel_action(..., -1/+1)`；其它鼠标事件忽略。命中区域与优先级见 [渲染层 · 鼠标命中](ui.md#11-鼠标命中)。
 
-### 5.6 `Action` 全表
+### 5.7 `Action` 全表
 
 `Action` 的 86 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
 
@@ -289,6 +306,8 @@ app.save_all()
 > 早期只有主页 `a` 那条路径（`Action::OpenArticles` → `open_articles`）会载入资源，侧栏与数字键走 `navigate_to`——那条路径只切了 `screen`，进去是个右栏空空的页面。同一个页面的两个入口给出不同结果，是最难察觉的一类缺陷。
 
 `navigate_to(Screen::Articles)` 因此转交给 `open_articles`；`Action::OpenArticles` 保留给主页的 `a` 键，两者最终落到同一处。
+
+跟打页的状态是 `ArticlePracticeState`：`sentences` 是 `gen_sections` 之后按段落展开的扁平句子列表，`section_starts` 记录每个段落首句在其中的下标（渲染分段用；跟打仍按扁平顺序逐句推进），`index` 是当前句，`typing: SentenceTyping` 记录实际按下的字符与实际错误，另有 `finished`、`wrong_sentences`、`spend`。跟打目标由 `Sentence::typing_cells` 决定：字母、数字与词间空格是目标字符，标点、符号与多余空白不是（`typing_target` 即这些目标按顺序排成的字符序列）。`start_article_practice` 构造它：命中同一篇文章的断点缓存时把下标 clamp 到当前句数内续打，否则从头开始；落点句子没有跟打内容（纯标点 / 空白）时自动向后跳到最近的有内容句子并按已完成计，整篇都没有可跟打内容时只弹 Warning、不进入跟打页。`finish_article_sentence` 在每句输满目标长度后推进，`advance_over_empty_article_sentences` 负责跳过没有内容的句子，全部完成后 `finish_article_practice` 写统计、给结算并删除断点缓存。
 
 ## 7. 练习会话集成
 
