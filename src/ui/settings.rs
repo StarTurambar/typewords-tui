@@ -20,7 +20,7 @@ use crate::ui::widgets::{self, display_width, fit_text};
 const SECTIONS: &[(&str, &str)] = &[
     ("word_practice_mode", "通用"),
     ("keyboard_sound", "音频"),
-    ("word_review_ratio", "复习"),
+    ("daily_words", "复习"),
     ("auto_next_word", "键入"),
     ("show_word_question", "显示"),
     ("fsrs_easy_limit", "FSRS"),

@@ -465,7 +465,12 @@ impl App {
                 return;
             };
             let max = dict.words.len().max(1) as i64;
-            let current = dict.per_day_study_number as i64;
+            // 用 `Dict::per_day()` 的夹取结果作基准，而不是原始字段：
+            // 主页「每日目标」显示的是夹取后的值，原始目标大于词库词数时
+            // （例如 12 个词的词库存着 20），按 - 只是把原始值夹回显示值
+            // （20 - 5 = 15 → 夹到 12），界面数字不动，看起来像按键失灵，
+            // 而原始值已经被悄悄改掉了。
+            let current = dict.per_day() as i64;
             let next = (current + delta).clamp(1, max);
             if next == current {
                 None

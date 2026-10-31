@@ -233,6 +233,8 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         SettingKind::Number(EditTarget::WordSoundSpeed),
     ),
     // 复习
+    // 每日词数：主页/词库页的 +/- 只能按 5 步进，这里提供精确输入入口。
+    ("daily_words", SettingKind::Number(EditTarget::PerDay)),
     ("word_review_ratio", SettingKind::Number(EditTarget::Ratio)),
     ("auto_random_review", SettingKind::Bool),
     ("ignore_simple_word", SettingKind::Bool),

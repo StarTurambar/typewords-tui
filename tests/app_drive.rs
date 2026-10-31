@@ -189,6 +189,76 @@ fn daily_target_keys_adjust_and_persist() {
     let _ = app;
 }
 
+/// 设置页可以直接输入每日词数——主页/词库页的 +/- 只能跳 5，
+/// 无法输入 7 这类任意值。
+#[test]
+fn daily_words_can_be_set_exactly_in_settings() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('s'));
+    assert_eq!(app.screen, app::Screen::Settings);
+
+    goto_setting(&mut app, "daily_words");
+    press(&mut app, KeyCode::Enter);
+    let edit = app.edit.as_ref().expect("「每日词数」行应打开输入框");
+    assert_eq!(edit.target, app::EditTarget::PerDay);
+    assert_eq!(edit.buffer, "12", "输入框初值应是主页显示的每日词数");
+
+    // 清空输入框后精确输入一个不是 5 的倍数的值
+    while app
+        .edit
+        .as_ref()
+        .is_some_and(|edit| !edit.buffer.is_empty())
+    {
+        press(&mut app, KeyCode::Backspace);
+    }
+    type_str(&mut app, "7");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.edit.is_none(), "保存后应关闭输入框");
+    assert_eq!(app.boot.base.study_dict().unwrap().per_day_study_number, 7);
+    assert_eq!(app.setting_number_value(app::EditTarget::PerDay), 7);
+
+    let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(
+        reloaded
+            .boot
+            .base
+            .study_dict()
+            .unwrap()
+            .per_day_study_number,
+        7,
+        "每日词数应持久化"
+    );
+}
+
+/// 主页按「-」应以界面显示的夹取值为基准。
+///
+/// 词库词数小于原始目标时，用原始字段作基准则 `-` 只是把原始值夹回显示值，
+/// 界面数字不动，看起来像按键失灵。启动加载会把原始值夹到词库词数以内，
+/// 这里直接构造「原始值大于词库词数」的词典状态来复现。
+#[test]
+fn daily_minus_starts_from_clamped_value() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 12 个词，原始目标 20：主页显示被夹到 12
+    app.boot.base.study_dict_mut().unwrap().per_day_study_number = 20;
+    assert_eq!(app.boot.base.study_dict().unwrap().per_day(), 12);
+
+    press(&mut app, KeyCode::Char('-'));
+    assert_eq!(
+        app.boot.base.study_dict().unwrap().per_day(),
+        7,
+        "按一次「-」应从显示的 12 减到 7"
+    );
+    press(&mut app, KeyCode::Char('+'));
+    assert_eq!(
+        app.boot.base.study_dict().unwrap().per_day(),
+        12,
+        "按「+」应回到 12"
+    );
+}
+
 #[test]
 fn number_shortcuts_navigate_shell_screens() {
     let fixture = common::Fixture::new();
