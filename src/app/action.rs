@@ -343,9 +343,21 @@ impl App {
             Screen::Flows => self.navigate_to(Screen::Home),
             Screen::ArticlePractice => {
                 // 中途退出要保住进度：写一次断点缓存再回文章列表。
-                self.save_article_practice_now();
-                self.article_practice = None;
-                self.navigate_to(Screen::Articles);
+                //
+                // 这里直接切页，不走 `navigate_to`——后者在存在单词练习
+                // 会话时会静默返回，留下「屏幕是跟打页、状态已清空」的
+                // 空白死页（既画不出内容，也没有任何按键能退出去）。
+                if self.article_practice.is_some() {
+                    self.save_article_practice_now();
+                    self.article_practice = None;
+                }
+                self.refresh_article_resume();
+                if self.article_list.is_empty() {
+                    // 防御：极少数情况下列表没载入过，补一次加载再落地。
+                    self.open_articles();
+                } else {
+                    self.screen = Screen::Articles;
+                }
             }
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
         }
@@ -360,7 +372,11 @@ impl App {
     }
 
     fn summary_home(&mut self) {
-        self.clear_practice_cache();
+        // 结算路径（`finish_session` / `finish_article_practice`）已经删掉
+        // 本轮自己的缓存，这里只清定时器状态。早先这里调 `clear_practice_cache`
+        // 会把**另一轮**的断点（尤其是文章跟打）一起删掉。
+        self.pending_practice_save = None;
+        self.pending_article_save = None;
         self.session = None;
         self.summary = None;
         self.screen = Screen::Home;

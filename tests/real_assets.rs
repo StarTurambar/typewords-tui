@@ -73,7 +73,13 @@ fn real_dict_session_saves_and_reloads() {
     assert!(app.session.is_some(), "free 模式应能基于真实词库开始练习");
     app.save_practice_now();
 
-    let restored = typewords_tui::app::build_for_test(paths, cli).expect("app");
+    let mut restored = typewords_tui::app::build_for_test(paths, cli).expect("app");
+    assert_eq!(
+        restored.screen,
+        typewords_tui::app::Screen::Home,
+        "启动应停在主页"
+    );
+    restored.start_practice();
     assert_eq!(restored.screen, typewords_tui::app::Screen::Practice);
     assert!(restored.session.is_some());
 }

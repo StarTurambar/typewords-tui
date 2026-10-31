@@ -212,8 +212,10 @@ fn a_custom_flow_practice_resumes_after_a_restart() {
         "缓存应记录自建流程 id，实际：{text}"
     );
 
-    // 重启后应恢复会话
-    let app2 = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 重启后停在主页；显式开始练习才恢复会话。
+    let mut app2 = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert_eq!(app2.screen, app::Screen::Home, "启动应停在主页");
+    app2.start_practice_with_mode(typewords_tui::domain::types::WordPracticeMode::Custom);
     let session = app2.session.as_ref().expect("重启后应恢复会话");
     assert_eq!(session.flow().id, flow_id, "恢复的应是自建流程");
 }

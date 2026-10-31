@@ -81,7 +81,9 @@ fn practice_progress_persists_and_resumes() {
         app.save_practice_now();
     }
 
-    let app = app::build_for_test(paths, fixture.cli()).unwrap();
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    assert_eq!(app.screen, app::Screen::Home, "启动应停在主页");
+    press(&mut app, KeyCode::Enter);
     assert_eq!(app.screen, app::Screen::Practice);
     let session = app.session.as_ref().expect("session restored");
     assert!(session.data.index >= 1);

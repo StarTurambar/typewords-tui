@@ -336,23 +336,24 @@ article.bookList 中 system == false 的词典                        → articl
 | `Ctrl+C` | 立即保存，随后离开练习 |
 | `Ctrl+Enter`（重学本组） | 新会话建立后立即保存缓存 |
 | 退出程序（事件循环结束/确认退出） | `save_all`：若仍有未结算会话则立即保存 |
-| 结算 `finish_session` | 删除缓存（结算弹层出现后不再有断点） |
-| 结算后回主页、设置页「清空当前练习进度」 | 删除缓存 |
+| 结算 `finish_session` | 删除 `practice-word.json`（不动文章跟打缓存；结算弹层出现后不再有单词断点） |
+| 结算后回主页 | 不删文件（两个缓存已由各自的结算路径处理） |
+| 设置页「清空当前练习进度」 | 删除两份断点缓存 |
 | 设置页「清除所有数据」 | 删除缓存，并把 `dict.json` 与 `setting.json` 一起恢复默认（见第 9 节） |
-| 启动参数 `--reset-practice` | 启动恢复前删除缓存并 Toast「已清空练习进度」 |
+| 启动参数 `--reset-practice` | 启动时删除两份缓存并 Toast「已清空练习进度」 |
 
 删除即 `fs::remove_file`；删除后 `practice_exists()` 为 false。文件写入失败会弹 Error Toast（`保存练习进度失败: ...`），不会中断练习。
 
 ### 5.3 恢复流程
 
-启动时（未指定 `--reset-practice`）`App::try_restore_practice` 依次检查，任一步不满足就静默放弃恢复（**不删文件**，等下一次保存覆盖）：
+主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）时，`App::try_resume_saved_practice` → `restore_practice_from_cache` 依次检查，任一步不满足就静默放弃恢复（**不删文件**，等下一次保存覆盖）。启动时**不**走这条路径，只停在主页：
 
 1. `load_practice` 读到 `version == 2` 的值（否则走 5.4 的提示与忽略逻辑）；
 2. 当前学习词典存在，且已有词表；
 3. `cache_from_compact` 能用当前词典的 `words` 还原出任务词表——按单词字符串**精确匹配**，匹配不到的词被丢弃；任务词表全空则放弃；
 4. 缓存同时包含 `practiceData`、`statStoreData`、`sessionSnapshot`；
 5. `PracticeFlowCursor` 校验通过：`flowId` 必须是已知内置流程，节点/步骤下标存在，错词清空索引与循环区间合法（`Navigator::restore_snapshot`）。校验失败会回滚并放弃；
-6. 恢复成功后进入练习页、重置键入并 Toast「已恢复上次练习进度」；计时若未暂停从当前时刻继续。
+6. 恢复成功后进入练习页、重置键入并 Toast「已继续上次练习」；计时若未暂停从当前时刻继续。
 
 因此**切换词库后旧缓存通常无法恢复**（任务词不在新词库中）；缓存词表与 flow 都匹配时才能回到同一词、同一阶段。
 
@@ -364,7 +365,7 @@ article.bookList 中 system == false 的词典                        → articl
 
 ### 5.4bis. 同一次运行内的「继续」
 
-除了启动时自动恢复，同一次运行内退出练习页再按 `Enter` 也会**接着上次那一轮**练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`：
+启动不再自动恢复；主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）会**接着上次那一轮**练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`：
 
 ```ts
 function systemPractice() {
@@ -411,8 +412,8 @@ function systemPractice() {
 - **与单词练习缓存分文件存**：两者的进度互不相干，混在一个文件里会让「清空练习进度」误删文章的跟打进度。
 - `practiceData` 的字段名与上游不同：上游记「段落 / 句 / 词」三级游标（`sectionIndex` / `sentenceIndex` / `wordIndex`），TUI 的文章在 `gen_sections` 后把段落展开成扁平句子列表，跟打也按扁平下标推进，因此只存一个 `sentenceIndex`。`statStoreData` 保留字段名以对齐上游信封，但 TUI 不用它（用时记在 `practiceData.spend`）。
 - **保存时机**：每完成一句排一次 500ms 延迟保存（防抖），另有 30 秒整点兜底，防止进程被直接杀掉时丢掉整段进度；退出文章页（`Esc`）与退出程序时立即保存。
-- **恢复时机**：启动时自动恢复（`try_restore_article_practice`），跳到记录的句子并带上用时；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接丢弃，不硬套。
-- **整篇练完**时缓存被删除——否则下次启动会「恢复」一篇已经练完的文章。
+- **恢复时机**：启动时只读取（`refresh_article_resume`）用于列表标记，**不**进入跟打页；进入文章页后，缓存对应的文章行标出「上次第 N 句」，选中它按 `Enter` 才从记录的句子续打并带上用时。选别的文章从头开始；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接忽略，不硬套。
+- **整篇练完**时缓存被删除——否则下次进文章页会「恢复」一篇已经练完的文章。
 - 损坏时隔离为 `practice-article.json.corrupt-<时间戳>.json`，提示「文章练习缓存损坏，已丢弃」，不阻断启动。
 
 ## 5bis. `flows.json`（`FlowStore`，无版本号）

@@ -217,6 +217,7 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 - 上游保留 v1→v2 升级路径（`resolveLegacyPracticeWordCursor` 按旧 stage 反推游标）；TUI 只接受 `version == 2`，其余视为不支持并忽略缓存，不移动文件，下一次保存覆盖。
 - TUI 要求 `taskWords` + `practiceData` + `statStoreData` + `sessionSnapshot` 齐全才恢复；上游允许只有 `taskWordsStr` 的「未开始」缓存。
 - 上游在浏览器隐藏/可见、远程数据更新、组件卸载时都会保存或重载；TUI 在推进/后退/跳过/错误后 500 ms 防抖保存、每 30 秒保存、`Ctrl+C`/`Ctrl+Enter` 与退出时保存，没有跨设备重载。
+- TUI 启动固定回主页，断点只在显式操作（主页 `Enter`、文章列表选中该文章）时使用；上游 Web 刷新后同样先回主页（`isSaveData` 只影响主页文案），这一点两端一致。
 
 ### 4.5 统计口径
 

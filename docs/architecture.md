@@ -99,7 +99,7 @@ docs/                   本文档目录
    - `bootstrap::load()` 读取三份存档（`FileStore`）、加载词库目录（`Catalog`）、加载主题（`ThemeRegistry`），把损坏/版本过高的通知暂存为 notices；
    - 应用 `--mode` / `--theme` 覆盖；生成或使用 `--seed` 随机源；
    - notices 转成 Toast；主题不存在时追加回退提示；
-   - `--reset-practice` 清空练习缓存，否则尝试从 `practice-word.json` 恢复上次会话；
+   - `--reset-practice` 清空两份断点缓存；否则只读入文章断点做列表标记、停在主页，续练由主页 `Enter` 或文章列表选中显式触发；
    - `ensure_study_dict()` 确保当前学习词库已加载词表（必要时回退到 `cet4` 或第一本词库）；
    - 刷新今日统计与今日任务预览；
    - 词库加载失败则记录 `fatal`，此时 `app::run` 在进入终端前 `bail!`，不留下半初始化界面。

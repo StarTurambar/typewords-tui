@@ -71,10 +71,9 @@ fn home_shows_the_saved_round_when_a_cache_exists() {
         assert_eq!(app.screen, app::Screen::Home);
     }
 
+    // 启动固定在主页：有缓存时直接就是「有断点但不在练习中」的状态。
     let app = app::build_for_test(paths, fixture.cli()).unwrap();
-    // 恢复练习后停在练习页，这里要看的是「有缓存但不在练习中」的状态。
-    let mut app = app;
-    app.screen = app::Screen::Home;
+    assert_eq!(app.screen, app::Screen::Home);
     let text = render_text(&app, 120, 40);
     assert!(
         text.contains("上次任务"),

@@ -109,19 +109,21 @@
 2. 应用 CLI 覆盖：`--mode` 经 `cli::parse_mode` 写 `settings.word_practice_mode`（未知模式返回错误）；`--theme` 直接覆盖 `settings.theme` 字符串。
 3. 随机种子取 `cli.seed`，缺省 `rng::random_seed()`；构造 `rng::seeded(seed)`；组装 `App`（`screen = Home`、无会话、空 Toast、工具栏显示、词表面板与例句开关的默认值）。
 4. `notices` 逐条转 `Warning` Toast；再次 `ThemeRegistry::resolve`，发生回退时追加 Warning「主题 X 不存在，已回退到深色」。
-5. `--reset-practice` 删除 `practice-word.json` 并提示「已清空练习进度」，否则 `try_restore_practice()` 与 `try_restore_article_practice()`（见 3.3）。
+5. `--reset-practice` 删除两份断点缓存并提示「已清空练习进度」；否则只调用 `refresh_article_resume()` 把文章断点读进内存（损坏/版本不支持时提示），**不切换页面**（见 3.3）。
 6. `ensure_study_dict()`：当前词典缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库；失败写 `fatal = "加载词库失败: ..."`。
 7. `refresh_stats()` 与 `refresh_task_preview()` 计算主页缓存，返回 `App`。
 
 ### 3.3 恢复练习缓存与 fatal
 
-`try_restore_practice`：读 `practice-word.json`，有损坏/版本不受支持的通知则弹 Warning；无缓存静默返回；有缓存时要求学习词典已有词表且 `cache_from_compact` 能还原，然后用缓存里的 `flow_id` 反查模式、新建 `PracticeSession`、把当前词典全部单词洗牌后交给 `apply_cache`。成功则 `screen = Practice`、重置键入、提示「已恢复上次练习进度」；失败静默丢弃（不删文件，等待下一次练习覆盖）。
+启动时**不恢复会话、也不切换页面**：`App::bootstrap` 只调用 `refresh_article_resume()` 把 `practice-article.json` 读进内存（损坏/版本不支持时弹 Warning 并忽略），因此首个画面稳定落在 `Home`。早期实现会在启动时直接调 `try_restore_practice` / `try_restore_article_practice`：初始画面取决于磁盘上残留了哪个缓存；两份缓存同时存在时还会叠成「单词会话 + 文章练习」，按 `Esc` 后停在一张没有状态的空白跟打页。
 
-恢复逻辑抽在 `restore_practice_from_cache`（返回是否成功）里，供两处复用：启动时用它决定要不要弹「已恢复」，按 `Enter` 时用它决定是接着练还是重开一轮。
+单词练习的恢复逻辑抽在 `restore_practice_from_cache`（返回是否成功）：要求学习词典已有词表且 `cache_from_compact` 能还原，然后用缓存里的 `flow_id` 反查模式、新建 `PracticeSession`、把当前词典全部单词洗牌后交给 `apply_cache`。成功则 `screen = Practice`、重置键入；失败静默丢弃（不删文件，等待下一次练习覆盖）。
 
-`try_resume_saved_practice`：**同一次运行内**退出练习页再按 `Enter` 时，若有断点缓存就接着上次的练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`——它只在自由模式下 `resetCache=true`，其余模式把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。要求断点里的 flow 模式与当前模式一致，否则不恢复（流程阶段对不上）。
+`try_resume_saved_practice`：主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）时，若有断点缓存就接着上次的练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`——它只在自由模式下 `resetCache=true`，其余模式把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。要求断点里的 flow 模式与当前模式一致，否则不恢复（流程阶段对不上）；自由练习显式开新一轮。
 
-`try_restore_article_practice`：读 `practice-article.json` 恢复文章跟打进度。文章资源是懒加载的——启动时书本与文章列表都还是空的，得先 `load_books` 载入才能按 id 找回那篇文章；找不到就放弃恢复。恢复后跳到记录的句子并带上已用时与已完成句数。
+文章跟打：`refresh_article_resume` 在启动与 `open_articles` 时读取缓存；文章列表把缓存对应的那一行标成「上次第 N 句」，`start_article_practice` 发现选中文章的 id 与缓存一致时从记录的句子续打（下标会 clamp 到当前句数内），否则从头开始。缓存里的文章 id 在当前书目里找不到时直接忽略，不硬套。
+
+状态不变量：`session` 与 `article_practice` 不会同时为 `Some`；`Screen::ArticlePractice` 只在 `article_practice` 存在时进入。`back()` 从跟打页返回时直接切到 `Screen::Articles`，不经过会被会话拦下的 `navigate_to`；渲染层在缺少状态时也会画出「没有进行中的文章练习 / Esc 返回」而不是空白页。
 
 > **统计落盘时机**：上游的 `flushStatToStore` 只在**结算**与**重置缓存**两处调用，中途退出后继续练时统计留在缓存里不落盘。TUI 同此——`flush_practice_stats` 的调用点也相应调整。
 
@@ -281,6 +283,8 @@ app.save_all()
 ### 6.3 文章页的进入路径
 
 文章页有多个入口：主页按 `a`、侧栏 / 顶栏点「文章」、数字键 `2`。**它们必须走同一个方法**——`open_articles`。文章资源是懒加载的（书本在 `assets/list/article.json`、文章在 `assets/dicts/en/article/*.json`），`App` 启动时这两个列表都是空的；`open_articles` 负责载入书本、重置两个光标，再调 `load_selected_book` 载入当前书本的文章。
+
+`open_articles` 还会刷新 `article_resume`：有跟打断点时，缓存对应的那篇文章会标出「上次第 N 句」，选中它按 `Enter` 从断点句子继续；选其他文章则从头开始。启动时不会自动进入跟打页——跟打的恢复只发生在这个显式入口。
 
 > 早期只有主页 `a` 那条路径（`Action::OpenArticles` → `open_articles`）会载入资源，侧栏与数字键走 `navigate_to`——那条路径只切了 `screen`，进去是个右栏空空的页面。同一个页面的两个入口给出不同结果，是最难察觉的一类缺陷。
 

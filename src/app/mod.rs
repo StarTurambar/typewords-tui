@@ -378,6 +378,11 @@ pub struct App {
     pub article_cursor: usize,
     /// 进行中的文章练习
     pub article_practice: Option<ArticlePracticeState>,
+    /// 文章跟打的断点缓存（启动/进入文章页时读入，离开时刷新）。
+    ///
+    /// 只用于在文章列表里标出「上次跟到第几句」、并在选中同一篇时续打；
+    /// 启动时不会凭它把用户直接丢进跟打页。`None` 表示没有可续的缓存。
+    pub article_resume: Option<crate::domain::article::ArticleCache>,
     /// 自定义练习流程存档
     pub flow_store: crate::domain::flow::store::FlowStore,
     /// 流程列表的光标
@@ -506,6 +511,7 @@ impl App {
             article_book_cursor: 0,
             article_cursor: 0,
             article_practice: None,
+            article_resume: None,
             flow_store: Default::default(),
             flow_cursor: 0,
             flow_editing: false,
@@ -553,8 +559,14 @@ impl App {
             let _ = app.store.remove_practice_article();
             app.toast(NoticeLevel::Success, "已清空练习进度");
         } else {
-            app.try_restore_practice();
-            app.try_restore_article_practice();
+            // 启动固定在主页：断点缓存只作为「继续」入口的数据源，
+            // 由用户按键（主页 Enter / 文章列表 Enter）触发恢复。
+            //
+            // 早期实现会在启动时直接恢复练习或文章跟打，初始画面取决于
+            // 磁盘上残留了哪个缓存：单词练习可能停在默写子步骤（大字全是
+            // 占位框），两份缓存同时存在时还会叠成「单词会话 + 文章练习」
+            // 的非法状态，按 Esc 后没有任何页面能画出来。
+            app.refresh_article_resume();
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -565,16 +577,10 @@ impl App {
         Ok(app)
     }
 
-    fn try_restore_practice(&mut self) {
-        if self.restore_practice_from_cache() {
-            self.toast(NoticeLevel::Info, "已恢复上次练习进度");
-        }
-    }
-
     /// 从断点缓存恢复练习会话。
     ///
-    /// 返回是否恢复成功——启动时用它决定要不要提示「已恢复」，
-    /// 按 Enter 时用它决定是接着练还是重新生成任务。
+    /// 返回是否恢复成功——主页按 Enter（启动后第一次，或在同一次运行内）
+    /// 用它决定是接着练还是重新生成任务。
     fn restore_practice_from_cache(&mut self) -> bool {
         let loaded = self.store.load_practice();
         if let Some(notice) = loaded.notice() {
@@ -683,6 +689,7 @@ impl App {
         let _ = self.store.remove_practice_article();
         self.pending_practice_save = None;
         self.pending_article_save = None;
+        self.article_resume = None;
     }
 
     /// 清除所有数据：`dict.json` 与 `setting.json` 都回到默认值，并删掉断点缓存。
@@ -946,10 +953,15 @@ impl App {
         }
         session.update_question(&mut self.rng);
         self.identify_select = None;
-        if session.complete {
+        let complete = session.complete;
+        if complete {
             self.finish_session();
         }
-        self.schedule_practice_save();
+        // 结算已经删掉本轮断点：不能再排一次防抖保存，否则 500ms 后
+        // `save_practice_now` 会把刚删掉的缓存重新写回来。
+        if !complete {
+            self.schedule_practice_save();
+        }
     }
 
     /// 空闲自动暂停后，用户一有输入就恢复计时（对齐上游 `usePracticeIdleTimer`）。
@@ -1031,7 +1043,10 @@ impl App {
             week_days,
         });
         self.save_dict_now();
-        self.clear_practice_cache();
+        // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
+        // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
+        self.pending_practice_save = None;
+        let _ = self.store.remove_practice();
         self.refresh_stats();
         self.refresh_task_preview();
     }
@@ -1968,6 +1983,8 @@ impl App {
         self.article_cursor = 0;
         self.article_books.clear();
         self.article_list.clear();
+        // 列表上的「上次第 N 句」标记来自磁盘上的断点缓存，每次进页都刷新。
+        self.refresh_article_resume();
         let Some(paths) = self.paths.clone() else {
             return;
         };
@@ -2043,18 +2060,45 @@ impl App {
             self.toast(NoticeLevel::Warning, "这篇文章没有可练习的句子");
             return;
         }
+        // 缓存命中同一篇文章时从断点句子续打；其余文章从头开始。
+        // 缓存里的文章 id 与当前书目对不上（换了书、资源更新）时干脆不用，
+        // 避免把旧进度硬套到另一篇文章上。
+        let resume = self
+            .article_resume
+            .as_ref()
+            .filter(|cache| cache.article_id == article.id)
+            .cloned();
+        let total = sentences.len();
+        let start_index = resume
+            .as_ref()
+            .map(|cache| cache.sentence_index.min(total - 1))
+            .unwrap_or(0);
+        let finished = resume
+            .as_ref()
+            .map(|cache| cache.finished.min(total))
+            .unwrap_or(0);
+        let wrong_sentences = resume
+            .as_ref()
+            .map(|cache| cache.wrong_sentences.min(finished))
+            .unwrap_or(0);
+        let spend = resume.as_ref().map(|cache| cache.spend).unwrap_or(0);
+        let resumed = resume.is_some();
         self.article_practice = Some(ArticlePracticeState {
             article_id: article.id,
             title: article.title.clone(),
             sentences,
-            index: 0,
+            index: start_index,
             typing: Default::default(),
-            finished: 0,
-            wrong_sentences: 0,
-            spend: 0,
+            finished,
+            wrong_sentences,
+            spend,
         });
         self.screen = Screen::ArticlePractice;
         self.stat = PracticeState::default();
+        self.last_timer_tick = timer::now_ms();
+        if resumed {
+            self.toast(NoticeLevel::Info, "已继续上次文章跟打");
+        }
         self.speak_current_sentence();
     }
 
@@ -2066,6 +2110,7 @@ impl App {
         let Some(practice) = self.article_practice.as_ref() else {
             let _ = self.store.remove_practice_article();
             self.pending_article_save = None;
+            self.article_resume = None;
             return;
         };
         let cache = crate::domain::article::ArticleCache {
@@ -2091,75 +2136,20 @@ impl App {
         self.pending_article_save = Some(timer::now_ms() + 500);
     }
 
-    /// 恢复上次的文章跟打进度。
+    /// 读取文章断点缓存到 `article_resume`（只读，不切换页面）。
     ///
-    /// 对齐上游 `TypingArticle.vue` 的 `init()`：读到缓存就跳到记录的句子
-    /// 与用时，读不到才从头开始。缓存里的文章 id 与当前书目对不上时
-    /// （换了书、资源更新）直接丢弃，不硬套。
-    pub fn try_restore_article_practice(&mut self) {
+    /// 启动时调一次，用于提示损坏/版本不支持的缓存；进入文章页时再调一次，
+    /// 保证列表上的「上次第 N 句」标记与磁盘一致。缓存里的文章 id 在当前
+    /// 书目里找不到时只影响「能否续打」，标记自然也不会出现——不硬套。
+    fn refresh_article_resume(&mut self) {
         let loaded = self.store.load_practice_article();
         if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
-        let Some(envelope) = loaded.value else {
-            return;
-        };
-        let cache = envelope.practice_data;
-        if cache.article_id <= 0 || cache.total == 0 {
-            return;
-        }
-        // 书本与文章都是懒加载的——启动时列表还是空的，得先载入才能按
-        // id 找回那篇文章。
-        if self.article_books.is_empty() {
-            let Some(paths) = self.paths.clone() else {
-                return;
-            };
-            match crate::domain::article::load_books(&paths) {
-                Ok(books) => self.article_books = books,
-                Err(_) => return,
-            }
-        }
-        let Some(article) = self.find_article_by_id(cache.article_id) else {
-            return;
-        };
-        let mut sentences: Vec<crate::domain::article::Sentence> = Vec::new();
-        for section in &article.sections {
-            sentences.extend(section.iter().cloned());
-        }
-        if sentences.is_empty() {
-            return;
-        }
-        let index = cache.sentence_index.min(sentences.len() - 1);
-        self.article_practice = Some(ArticlePracticeState {
-            article_id: article.id,
-            title: article.title.clone(),
-            sentences,
-            index,
-            typing: Default::default(),
-            finished: cache.finished,
-            wrong_sentences: cache.wrong_sentences,
-            spend: cache.spend,
-        });
-        self.screen = Screen::ArticlePractice;
-        self.stat = PracticeState::default();
-        self.last_timer_tick = timer::now_ms();
-        self.toast(NoticeLevel::Info, "已恢复上次文章跟打进度");
-    }
-
-    /// 按 id 在全部书本里找文章。
-    fn find_article_by_id(&self, id: i64) -> Option<crate::domain::article::Article> {
-        if let Some(article) = self.article_list.iter().find(|item| item.id == id) {
-            return Some(article.clone());
-        }
-        let paths = self.paths.clone()?;
-        for book in &self.article_books {
-            if let Ok(articles) = crate::domain::article::load_articles(&paths, book)
-                && let Some(article) = articles.iter().find(|item| item.id == id)
-            {
-                return Some(article.clone());
-            }
-        }
-        None
+        self.article_resume = loaded
+            .value
+            .map(|envelope| envelope.practice_data)
+            .filter(|cache| cache.article_id > 0 && cache.total > 0);
     }
 
     /// 朗读当前句子。
@@ -2276,10 +2266,11 @@ impl App {
         // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。
         self.screen = Screen::Home;
-        // 整篇练完了，断点缓存没有意义——删掉，否则下次启动会「恢复」
+        // 整篇练完了，断点缓存没有意义——删掉，否则下次进文章页会「恢复」
         // 一篇已经练完的文章。
         let _ = self.store.remove_practice_article();
         self.pending_article_save = None;
+        self.article_resume = None;
     }
 
     // ── 词条管理 ─────────────────────────────────────────────────────────

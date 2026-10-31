@@ -504,7 +504,7 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::Articles => &[
             ("↑↓", "选书本"),
             ("←→", "选文章"),
-            ("enter", "开始"),
+            ("enter", "开始/继续"),
             ("esc", "返回"),
         ],
         Screen::ArticlePractice => &[("输入", "跟打"), ("ctrl+p", "朗读"), ("esc", "返回")],

@@ -1,7 +1,7 @@
 //! 文章背诵页：书本 / 文章列表，以及句子跟打练习。
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
@@ -129,6 +129,7 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                             }),
                     ),
                     Span::styled(format!("  {sentences} 句"), Style::default().fg(theme.dim)),
+                    saved_line(app, article.id, theme),
                 ]))
             })
             .collect();
@@ -137,6 +138,24 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
             columns[1],
         );
     });
+}
+
+/// 列表行里「上次跟到这里」的标记：只有当前断点正好属于这一篇文章时才显示。
+///
+/// 续打是显式操作：看到标记后选中并按 Enter 才会从断点句子继续，
+/// 而不是启动时自动跳进跟打页。
+fn saved_line(app: &App, article_id: i64, theme: &Theme) -> Span<'static> {
+    let Some(cache) = app
+        .article_resume
+        .as_ref()
+        .filter(|cache| cache.article_id == article_id)
+    else {
+        return Span::raw("");
+    };
+    Span::styled(
+        format!("  · 上次第 {} 句", cache.sentence_index + 1),
+        Style::default().fg(theme.accent_alt),
+    )
 }
 
 /// 句子跟打练习页的鼠标目标。
@@ -149,6 +168,20 @@ pub fn practice_targets(_app: &App, _area: Rect) -> Vec<crate::ui::target::Targe
 /// 句子跟打练习页。
 pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let Some(practice) = app.article_practice.as_ref() else {
+        // 防御：正常路径不会进入这个组合（跟打页只在状态存在时进入）；
+        // 万一将来状态错位，也留一句可操作的提示，而不是整屏只剩背景色。
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "没有进行中的文章练习",
+                Style::default().fg(theme.muted),
+            )),
+            Line::from(Span::styled(
+                "Esc 返回文章列表",
+                Style::default().fg(theme.dim),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
         return;
     };
     let chunks = Layout::default()
