@@ -212,6 +212,7 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ("keyboard_sound", SettingKind::Bool),
     ("effect_sound", SettingKind::Bool),
     ("word_sound", SettingKind::Bool),
+    ("article_sound", SettingKind::Bool),
     ("tts_source", SettingKind::AudioSource),
     (
         "word_sound_speed",
@@ -3174,6 +3175,7 @@ impl App {
             "keyboard_sound" => settings.keyboard_sound = !settings.keyboard_sound,
             "effect_sound" => settings.effect_sound = !settings.effect_sound,
             "word_sound" => settings.word_sound = !settings.word_sound,
+            "article_sound" => settings.article_sound = !settings.article_sound,
             _ => {}
         }
     }

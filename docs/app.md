@@ -80,12 +80,12 @@
 
 ### 2.4 设置表与 `SettingKind`
 
-`SETTING_ROWS` 是设置页唯一数据源，共 30 行（28 个配置项 + 2 个动作项），数组顺序即渲染顺序。
+`SETTING_ROWS` 是设置页唯一数据源，共 31 行（29 个配置项 + 2 个动作项），数组顺序即渲染顺序。
 
 | `SettingKind` | `SETTING_ROWS` 中的 key（按出现顺序） |
 | --- | --- |
 | `Mode` / `Theme` / `SoundType` / `AudioSource` | `word_practice_mode` / `theme` / `sound_type` / `tts_source` |
-| `Bool` | `big_word`、`keyboard_sound`、`effect_sound`、`word_sound`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
+| `Bool` | `big_word`、`keyboard_sound`、`effect_sound`、`word_sound`、`article_sound`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
 | `Number` | `word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
 | `Shortcuts` / `Action(ConfirmAction)` | `shortcut_settings`（跳到快捷键编辑页）、`reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
 

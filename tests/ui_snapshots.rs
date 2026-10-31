@@ -184,6 +184,12 @@ fn settings_rows_follow_their_documented_sections() {
         audio < row_of("单词发音") && row_of("单词发音") < review,
         "单词发音应在音频分区"
     );
+    assert!(
+        audio < row_of("文章朗读")
+            && row_of("单词发音") < row_of("文章朗读")
+            && row_of("文章朗读") < review,
+        "文章朗读应在音频分区，且排在单词发音之后"
+    );
 }
 
 #[test]

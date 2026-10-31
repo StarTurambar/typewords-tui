@@ -53,7 +53,7 @@ main.rs
 | 主题配置层 | `src/theme/` | 颜色/主题模型、内置主题、`<home>/themes/*.json` 加载与校验 | 不依赖 ratatui，也不依赖 `ui` |
 | 应用层 | `src/app/` | `App` 状态机、Action、键鼠映射、事件循环、保存时机 | 依赖 `domain`/`store`/`bootstrap`/`cli`/`paths`，渲染入口调用 `ui` |
 | 渲染层 | `src/ui/` | ratatui 布局与绘制、主题→颜色映射、鼠标命中区域 | 读 `app::App` 与 `domain` 数据，**不修改**状态 |
-| 音频层 | `src/audio/` | 终端响铃、系统 TTS、外部播放器 | 只依赖 `domain` 的设置；子进程即发即忘，不阻塞事件循环 |
+| 音频层 | `src/audio/` | 终端响铃、系统 TTS、外部播放器 | 只依赖 `domain` 的设置；除 Windows 的常驻 TTS 会话外，子进程即发即忘，都不阻塞事件循环 |
 | 底层原语 | `src/fs.rs` | 原子写（临时文件 + fsync + rename） | 只依赖 `std`，`domain` 与 `store` 都用它，避免两层互相依赖 |
 | 入口/装配 | `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs` | 解析参数、解析路径、装载初始状态、分发子命令 | 最外层，可依赖所有层 |
 
@@ -266,14 +266,14 @@ Catalog(assets) ───────┘                                      �
 - 深色/浅色主题输出 24-bit RGB，需要终端支持 truecolor（`COLORTERM=truecolor`）；不支持时可用纯 ANSI 的「高对比」主题。
 - 程序启动时开启鼠标捕获，因此终端原生文本选择/右键菜单失效，需要 Shift+拖拽选择（个别终端用 Alt）。
 - 安装 panic hook：panic 时关闭鼠标捕获并恢复终端，避免终端留在备用屏幕或鼠标捕获状态。
-- CI 在 Linux 与 Windows 上运行测试；macOS 未在 CI 覆盖，源码未使用平台特定 API（数据目录由 `dirs` 处理）。
+- CI 在 Linux 与 Windows 上运行测试；macOS 未在 CI 覆盖，源码除 Windows TTS 的进程创建标志（`std::os::windows::process::CommandExt`）外不使用平台特定 API（数据目录由 `dirs` 处理）。
 
 ## 12. 安全与隐私
 
 - **默认不联网**：依赖树中没有 HTTP/WebSocket 客户端，程序自身不发网络请求；无遥测、无账号、无云同步。唯一的例外是设置里把「发音来源」切到「有道发音」时，会用系统 `curl` 下载 mp3（用户主动开启，可随时关掉）。
 - **纯本地数据**：存档是可读 JSON，位于用户数据目录；备份/迁移即复制文件。
 - **输入校验**：词库、存档、主题都是 serde 反序列化；主题文件校验失败只跳过该文件并告警；存档损坏会被隔离而不是覆盖。
-- **子进程仅限音频**：发音用系统自带的 TTS（Windows `System.Speech`、macOS `say`、Linux `espeak-ng`/`spd-say`）与可选的外部播放器（`ffplay`/`mpv`/`vlc`），全部**即发即忘**，不阻塞界面；不执行其他外部命令（scripts/ 下的 Node/PowerShell 只在维护者本机用于同步词库与打包，不随程序运行）。
+- **子进程仅限音频**：发音用系统自带的 TTS（Windows `System.Speech`、macOS `say`、Linux `espeak-ng`/`spd-say`）与可选的外部播放器（`ffplay`/`mpv`/`vlc`），不阻塞界面。Windows 的 TTS 是**一个常驻 PowerShell 会话**（首次朗读时启动，stdin 逐行投喂，EOF 自退；被安全软件拦截时本轮静默且不重试），其余播放与外部播放器仍是即发即忘的子进程；不执行其他外部命令（scripts/ 下的 Node/PowerShell 只在维护者本机用于同步词库与打包，不随程序运行）。
 - **许可证**：GPL-3.0；词库数据来自上游 TypeWords 仓库，遵循同一许可证，再分发时需保留 LICENSE。
 
 ## 13. 已知限制与技术债
@@ -284,13 +284,13 @@ Catalog(assets) ───────┘                                      �
 | --- | --- |
 | app ↔ ui 耦合 | `App` 直接调用 `ui::render`，各页面直接读 `App`；未来拆视图层需要先引入只读 ViewState。 |
 | 界面文案硬编码 | `domain/i18n.rs` 是一张中文映射表，键名对齐上游 i18n，但没有语言切换；新增文案需同时改代码。 |
-| 设置项只建模一部分 | `SettingState` 建模 43 个具名字段，设置页覆盖 28 个配置项 + 2 个动作（30 行）；其余上游字段原样透传保存。FSRS 参数（`w` / `request_retention` / `maximum_interval` / `enable_fuzz` / `enable_short_term` / 两组步进）均已生效，详见 [settings.md](settings.md)。 |
+| 设置项只建模一部分 | `SettingState` 建模 43 个具名字段，设置页覆盖 29 个配置项 + 2 个动作（31 行）；其余上游字段原样透传保存。FSRS 参数（`w` / `request_retention` / `maximum_interval` / `enable_fuzz` / `enable_short_term` / 两组步进）均已生效，详见 [settings.md](settings.md)。 |
 | 键位不可配置 | 固定键位；`Ctrl+P` 从上游的发音改为暂停计时。 |
 | 练习缓存只支持 v2 | v1 缓存直接丢弃（上游有 v1→v2 升级）。 |
 | （已消除） | FSRS 已改为逐条移植上游 ts-fsrs 5.4.1，同一张卡在两端得到相同的下次复习时间；`tests/fsrs_parity.rs` 用上游生成的黄金样本锁定。 |
 | 无运行日志 | 程序不写日志文件；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤（panic 回溯走 stderr）。 |
 | 无存档迁移框架 | 旧版本缺失字段靠 `#[serde(default)]` 兼容；不提供像 Web 那样的逐版本升级代码（当前版本号 4 / 23 / 2）。 |
-| 未覆盖 macOS CI | 代码未用平台特定 API，但未在 macOS 上持续验证。 |
+| 未覆盖 macOS CI | 除 Windows TTS 的进程创建标志外未用平台特定 API，但未在 macOS 上持续验证。 |
 | 文档链接检查 | 依赖仓库测试校验（见 [development.md](development.md#10-文档维护)），新增文档后需同步索引。 |
 
 ## 14. 扩展点

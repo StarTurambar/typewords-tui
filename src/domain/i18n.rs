@@ -121,6 +121,7 @@ pub fn tr(key: &str) -> String {
         "keyboard_sound" => "键音",
         "effect_sound" => "对错提示音",
         "word_sound" => "单词发音",
+        "article_sound" => "文章朗读",
         "tts_source" => "发音来源",
         "word_sound_speed" => "发音倍速(%)",
         "show_word_question" => "自测选择题",

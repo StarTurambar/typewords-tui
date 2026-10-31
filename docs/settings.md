@@ -1,10 +1,10 @@
 # 设置项参考
 
-本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、30 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
+本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、31 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
 
 设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。本文所有数值都以这两处与 `src/domain/constants.rs` 为准。
 
-> 适用范围：设置页全部 30 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
+> 适用范围：设置页全部 31 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
 
 ## 设置文件与保存时机
 
@@ -21,7 +21,7 @@
 - **修改与返回**：`Enter` / 空格修改——开关类直接切换；模式 / 主题 / 音标循环；数字类弹输入框（只接受 ASCII 数字与 `Backspace`，最多 6 位，留空按 0 解析后按范围收敛，`Enter` 保存、`Esc` 取消）；「清空当前练习进度」与「清除所有数据」弹确认；`Esc` / `q` 保存并回主页。
 
 - **恢复默认只有整体入口**：设置页没有单项重置；「清除所有数据」会把全部设置连同学习记录一起恢复默认（见下文「清除所有数据」）。想只重置某一项，只能删除或手工编辑 `setting.json`（删除后下次启动使用 `SettingState::default`）。
-- **分区与顺序**：通用（5 行）→ 音频（5 行）→ 复习（3 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 30 行 = 28 个配置项 + 2 个动作项。
+- **分区与顺序**：通用（5 行）→ 音频（6 行）→ 复习（3 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 31 行 = 29 个配置项 + 2 个动作项。
 
 ## 分区总表
 
@@ -37,6 +37,7 @@
 | 音频 | `keyboardSound`（`keyboard_sound` 行） | 键音 | 布尔 | 开启 | 开启 / 关闭 | 每次敲键响一声（终端响铃）；立即生效 |
 | 音频 | `effectSound`（`effect_sound` 行） | 对错提示音 | 布尔 | 开启 | 开启 / 关闭 | 答对 / 答错各响一声；立即生效 |
 | 音频 | `wordSound`（`word_sound` 行） | 单词发音 | 布尔 | 开启 | 开启 / 关闭 | 用系统 TTS 朗读当前词；立即生效 |
+| 音频 | `articleSound`（`article_sound` 行） | 文章朗读 | 布尔 | 开启 | 开启 / 关闭 | 文章跟打每完成一句自动朗读下一句；关闭后自动朗读与文章页 `Ctrl+P` 都不再触发 TTS；立即生效 |
 | 音频 | `ttsSource`（`tts_source` 行） | 发音来源 | 枚举 | 系统 TTS | 系统 TTS / 有道发音 | 有道发音需要网络，失败自动降级回系统 TTS；立即生效 |
 | 音频 | `wordSoundSpeed`（`word_sound_speed` 行） | 发音倍速 | 整数 % | 100 | 50~300 | 朗读语速；立即生效 |
 | 复习 | `word_review_ratio` | 复习比例 | 整数 | 3 | 0~10 | 复习上限 = 每日词数 × 比例；0 表示平时不抽到期复习（词库学完或末组时仍按 1 处理）；下次生成任务生效 |
@@ -69,6 +70,14 @@
 - 主题一行按 `auto` → 深色 → 浅色 → 高对比 → 自定义主题（按文件名排序）循环；`auto` 渲染为「自动（深色）」；自定义主题的新增与修改需要重启进程。主题格式见 [主题系统](themes.md)。
 - 音标只影响练习页音标行（`Word::phonetic`：英式取 `phonetic0`，美式取 `phonetic1`），不影响出题、判分或复习调度。
 - 「大字单词」只控制练习页 5×7 点阵是否允许 2 倍像素放大；关闭后仍显示 1 倍点阵。即使开启，窗口正文高 < 20 行或本轮最长单词放不下时也会自动用 1 倍。
+
+### 音频
+
+- **键音 / 对错提示音**：都走终端响铃（BEL），音色由终端决定，设置里的音量字段不参与。
+- **单词发音**：练习页按 `Ctrl+P`（键位可在快捷键页改绑）朗读当前词；关闭「单词发音」后该键不再出声。
+- **文章朗读**：文章跟打每完成一句自动朗读下一句，默认开启；关闭后自动朗读与文章页的 `Ctrl+P` 都不再触发 TTS。
+- **系统 TTS 的实现**：Windows 上由一个常驻 PowerShell 会话（`System.Speech`）承担，首次朗读时启动、之后复用同一个进程，退出程序时随 stdin 关闭而结束。若该进程被安全软件（如「系统加固 / 敏感动作防护」里的「隐藏执行 PowerShell」规则）拦截，本次运行后续朗读会静默放弃、不再重试，重启程序后恢复；需要朗读时请在安全软件里对 `tw.exe` 放行一次。
+- **发音来源**只影响单词发音：切成「有道发音」时会先尝试下载 mp3，失败自动降级回系统 TTS；文章句子始终走系统 TTS。
 
 ### 复习比例与随机填充
 
@@ -191,13 +200,13 @@
 
 | 类别 | 字段 |
 | --- | --- |
-| 有 UI 且生效（22 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`shortcut_key_map`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`fsrs_easy_limit`、`fsrs_good_limit`、`fsrs_hard_limit`、`fsrsParameters.request_retention` |
+| 有 UI 且生效（28 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`shortcut_key_map`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`keyboardSound`（`keyboard_sound` 行）、`effectSound`（`effect_sound` 行）、`wordSound`（`word_sound` 行）、`articleSound`（`article_sound` 行）、`ttsSource`（`tts_source` 行）、`wordSoundSpeed`（`word_sound_speed` 行）、`fsrs_easy_limit`、`fsrs_good_limit`、`fsrs_hard_limit`、`fsrsParameters.request_retention` |
 | 有 UI、条件生效 | `repeat_custom_count`（仅 `repeat_count == 100` 时参与计算） |
 | 无 UI、但内部会读取 | `fsrsParameters.maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`、`fsrsParameters.enable_short_term`、`fsrsParameters.learning_steps`、`fsrsParameters.relearning_steps` |
 | 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段都原样保存在这里，保存时写回 |
 
-`SettingState` 共建模 43 个具名字段 + `extra`，设置页覆盖其中 28 个配置项（外加 2 个动作项：清空练习进度、清除所有数据；快捷键页是独立入口）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
+`SettingState` 共建模 43 个具名字段 + `extra`，设置页覆盖其中 29 个配置项（外加 2 个动作项：清空练习进度、清除所有数据；快捷键页是独立入口）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
 
 ## 未生效 / 半生效设置项清单
 

@@ -290,6 +290,7 @@ fn setting_bool(app: &App, key: &str) -> bool {
         "keyboard_sound" => settings.keyboard_sound,
         "effect_sound" => settings.effect_sound,
         "word_sound" => settings.word_sound,
+        "article_sound" => settings.article_sound,
         _ => false,
     }
 }

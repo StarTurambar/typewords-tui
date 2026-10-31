@@ -1102,6 +1102,10 @@ fn audio_settings_toggle_and_persist() {
     press(&mut app, KeyCode::Enter);
     assert!(!app.boot.settings.word_sound, "单词发音应被关闭");
 
+    goto_setting(&mut app, "article_sound");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.boot.settings.article_sound, "文章朗读应被关闭");
+
     goto_setting(&mut app, "tts_source");
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.boot.settings.tts_source, "youdao", "应切到有道发音");
@@ -1110,6 +1114,7 @@ fn audio_settings_toggle_and_persist() {
     let reloaded = app::build_for_test(paths, fixture.cli()).unwrap();
     assert!(!reloaded.boot.settings.keyboard_sound);
     assert!(!reloaded.boot.settings.word_sound);
+    assert!(!reloaded.boot.settings.article_sound);
     assert_eq!(reloaded.boot.settings.tts_source, "youdao");
 }
 
