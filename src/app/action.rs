@@ -82,6 +82,8 @@ pub enum Action {
     WordTestChoose(usize),
     WordTestNext,
     WordTestExit,
+    /// 播放当前题的单词发音（键位表里的 `PlayWordPronunciation`）。
+    WordTestSpeak,
     // 练习模式
     OpenModePicker,
     ModeMove(i32),
@@ -203,6 +205,7 @@ impl App {
             Action::WordTestChoose(index) => self.word_test_choose(index),
             Action::WordTestNext => self.word_test_next(),
             Action::WordTestExit => self.leave_word_test(),
+            Action::WordTestSpeak => self.word_test_speak(),
             Action::OpenModePicker => self.open_mode_picker(),
             Action::ModeMove(delta) => self.move_mode_cursor(delta),
             Action::ModeSelect => self.select_practice_mode(),

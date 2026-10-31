@@ -149,6 +149,20 @@ pub struct WordTestState {
     pub wrong: usize,
 }
 
+impl WordTestState {
+    /// 当前题的答案词（朗读当前词时用）。
+    ///
+    /// 对齐上游 `words-test/[id].vue` 的 `currentWord`：取
+    /// `candidates[correctIndex]`，也就是正在被测试的那个词。
+    pub fn answer_word(&self) -> Option<&str> {
+        let question = self.question.as_ref()?;
+        question
+            .candidates
+            .get(question.correct_index)
+            .map(|candidate| candidate.word.word.as_str())
+    }
+}
+
 /// 「收藏到指定词典」弹层的状态。
 #[derive(Clone, Debug)]
 pub struct CollectPickerState {
@@ -612,6 +626,8 @@ impl App {
         self.typing.reset();
         // 恢复的是上一轮的统计快照，本轮尚未落盘——与新开一轮同理。
         self.stats_recorded = false;
+        // 上游打开练习页时单词 watch 立即触发 NewWord 朗读；续练同理。
+        self.auto_pronounce_current_word();
         true
     }
 
@@ -886,6 +902,9 @@ impl App {
         self.last_activity = timer::now_ms();
         self.last_timer_tick = timer::now_ms();
         self.after_advance();
+        // `initialize_task` 里已经 `refresh()` 过一次，`after_advance` 这次看不到
+        // `word_changed`；首词要显式朗读（上游进入练习页时 NewWord 也会立即播放）。
+        self.auto_pronounce_current_word();
         self.save_practice_now();
         self.refresh_stats();
     }
@@ -957,6 +976,11 @@ impl App {
         if complete {
             self.finish_session();
         }
+        // 新词出现（含同词重置）时自动朗读，对齐上游 NewWord / ResetSameWord
+        // 触发；默写阶段由 `PracticeSession::auto_pronounce_word` 过滤。
+        if !complete && (word_changed || reset_word) {
+            self.auto_pronounce_current_word();
+        }
         // 结算已经删掉本轮断点：不能再排一次防抖保存，否则 500ms 后
         // `save_practice_now` 会把刚删掉的缓存重新写回来。
         if !complete {
@@ -966,7 +990,7 @@ impl App {
 
     /// 空闲自动暂停后，用户一有输入就恢复计时（对齐上游 `usePracticeIdleTimer`）。
     ///
-    /// 只有「因空闲自动暂停」才会自动恢复；手动暂停（`Ctrl+P`）保持暂停。
+    /// 只有「因空闲自动暂停」才会自动恢复；手动暂停（`Ctrl+,`）保持暂停。
     fn resume_after_idle(&mut self) {
         if self.screen != Screen::Practice || self.session.is_none() {
             return;
@@ -1556,41 +1580,61 @@ impl App {
         self.last_timer_tick = timer::now_ms();
         self.screen = Screen::WordTest;
         self.summary = None;
+        // 对齐上游 `words-test/[id].vue` 的 `init()`：开着「单词自动发音」
+        // 时，进入测试就朗读当前题。
+        self.word_test_speak();
     }
 
     /// 回答当前题。
+    ///
+    /// 答对 / 答错各响一声提示音（对齐上游 `words-test/[id].vue` 的
+    /// `playCorrect()` / `playBeep()`），答错时把答案记进错词本。
     fn word_test_choose(&mut self, index: usize) {
-        let Some(state) = self.word_test.as_mut() else {
-            return;
-        };
-        if state.selected.is_some() {
-            return;
-        }
-        let Some(question) = state.question.as_ref() else {
-            return;
-        };
-        if index >= question.candidates.len() {
-            return;
-        }
-        state.selected = Some(index);
-        if index == question.correct_index {
-            state.correct += 1;
-            return;
-        }
-        state.wrong += 1;
-        // 答错：把正确答案放进错词本
-        let answer = question.candidates[question.correct_index].word.clone();
-        if let Some(wrong) = self.boot.base.wrong_mut() {
-            if !wrong
-                .words
-                .iter()
-                .any(|item| item.word.eq_ignore_ascii_case(&answer.word))
-            {
-                wrong.words.push(answer);
+        let (correct, answer) = {
+            let Some(state) = self.word_test.as_mut() else {
+                return;
+            };
+            if state.selected.is_some() {
+                return;
             }
-            wrong.length = wrong.words.len();
+            let Some(question) = state.question.as_ref() else {
+                return;
+            };
+            if index >= question.candidates.len() {
+                return;
+            }
+            state.selected = Some(index);
+            let correct = index == question.correct_index;
+            if correct {
+                state.correct += 1;
+                (true, None)
+            } else {
+                state.wrong += 1;
+                // 答错：把正确答案放进错词本
+                (
+                    false,
+                    Some(question.candidates[question.correct_index].word.clone()),
+                )
+            }
+        };
+        if correct {
+            crate::audio::play_correct(&self.boot.settings);
+            return;
         }
-        self.save_dict_now();
+        crate::audio::play_wrong(&self.boot.settings);
+        if let Some(answer) = answer {
+            if let Some(wrong) = self.boot.base.wrong_mut() {
+                if !wrong
+                    .words
+                    .iter()
+                    .any(|item| item.word.eq_ignore_ascii_case(&answer.word))
+                {
+                    wrong.words.push(answer);
+                }
+                wrong.length = wrong.words.len();
+            }
+            self.save_dict_now();
+        }
     }
 
     /// 下一题；答完最后一题时给结算。
@@ -1611,6 +1655,8 @@ impl App {
             crate::domain::question::build_question(word, &state.pool, &mut self.rng, 4)
         });
         state.question = question;
+        // 切题后朗读新题（对齐上游 `next()` 里的 `playCurrentWord(false)`）。
+        self.word_test_speak();
     }
 
     /// 单词测试结算。
@@ -3081,7 +3127,7 @@ impl App {
         }
     }
 
-    /// 朗读当前单词。
+    /// 朗读当前单词（手动：练习页 `Ctrl+P`）。
     fn pronounce_current_word(&mut self) {
         if let Some(word) = self
             .session
@@ -3091,6 +3137,29 @@ impl App {
         {
             crate::audio::pronounce(&self.boot.settings, &word);
         }
+    }
+
+    /// 新词出现时自动朗读当前词。
+    ///
+    /// 对齐上游 `TypeWord.playWord`：单词变化或同词重置时朗读，是否出声由
+    /// `word_sound` 控制；默写阶段不朗读（见
+    /// [`crate::domain::session::PracticeSession::auto_pronounce_word`]）。
+    fn auto_pronounce_current_word(&self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let Some(word) = session.auto_pronounce_word() else {
+            return;
+        };
+        crate::audio::pronounce(&self.boot.settings, word);
+    }
+
+    /// 朗读单词测试当前题的答案词（进入题目 / 切题自动触发，或 `Ctrl+P`）。
+    fn word_test_speak(&self) {
+        let Some(word) = self.word_test.as_ref().and_then(WordTestState::answer_word) else {
+            return;
+        };
+        crate::audio::pronounce(&self.boot.settings, word);
     }
 
     /// TUI 专有键位：上游没有对应动作，或功能尚未实现。
@@ -3401,7 +3470,12 @@ pub fn run(paths: Paths, cli: Cli) -> Result<()> {
 }
 
 /// 供测试使用：不进入终端，直接创建应用。
+///
+/// 会顺手把朗读静音：练习页现在换词即自动朗读，不静音的话 `cargo test`
+/// 会真的启动系统 TTS 念出几十个单词。测试可以再用
+/// [`crate::audio::record_speech`] 记录朗读内容做断言。
 pub fn build_for_test(paths: Paths, cli: Cli) -> Result<App> {
+    crate::audio::mute_speech();
     App::bootstrap(paths, cli)
 }
 

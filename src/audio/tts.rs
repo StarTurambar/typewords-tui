@@ -51,14 +51,20 @@ fn protocol_line(rate: i32, text: &str) -> String {
 /// 常驻会话脚本：读 stdin、逐行朗读，stdin EOF 时结束。
 ///
 /// 脚本保持纯 ASCII（命令行按本地代码页传递）；文本与音色都不拼进脚本文本：
-/// 文本走 stdin，音色走 `$args[0]`。
+/// 文本走 stdin，音色走环境变量 `TYPEWORDS_TTS_VOICE`。
+///
+/// 音色**不能**追加在 `-Command` 之后的 argv 上：Windows PowerShell 会把
+/// `-Command` 之后的所有参数拼进脚本文本而不是放进 `$args`，那样
+/// `$args[0]` 永远是空的、`SelectVoice` 形同虚设，脚本跑完还会去执行
+/// 那串音色名（`CommandNotFoundException`）。
 #[cfg(any(windows, test))]
 const SCRIPT: &str = "\
 $ErrorActionPreference='Stop';
 Add-Type -AssemblyName System.Speech;
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer;
 $s.SetOutputToDefaultAudioDevice();
-if ($args.Count -gt 0 -and $args[0]) { try { $s.SelectVoice($args[0]) } catch { } }
+$voice = $env:TYPEWORDS_TTS_VOICE;
+if ($voice) { try { $s.SelectVoice($voice) } catch { } }
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8);
 while ($null -ne ($line = $reader.ReadLine())) {
   $bar = $line.IndexOf('|');
@@ -238,7 +244,9 @@ mod session {
         let mut command = Command::new("powershell");
         command.args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT]);
         if !voice.is_empty() {
-            command.arg(voice);
+            // 走环境变量而不是 argv：`-Command` 之后的参数会被 PowerShell 拼进
+            // 脚本文本，`$args` 收不到（见 `SCRIPT` 的文档）。
+            command.env("TYPEWORDS_TTS_VOICE", voice);
         }
         // 不要用 `-WindowStyle Hidden`：那正是安全软件「隐藏执行 PowerShell」
         // 规则最典型的匹配特征。CREATE_NO_WINDOW 同样不出窗口。
@@ -281,7 +289,10 @@ mod tests {
             SCRIPT.contains("SpeakAsyncCancelAll"),
             "新句子要打断上一句，避免朗读堆积"
         );
-        assert!(SCRIPT.contains("$args[0]"), "音色走 argv，不拼进脚本");
+        assert!(
+            SCRIPT.contains("TYPEWORDS_TTS_VOICE"),
+            "音色走环境变量，不拼进脚本也不追加 argv"
+        );
     }
 
     #[cfg(not(windows))]
@@ -322,9 +333,17 @@ mod tests {
             "隐藏窗口是安全软件规则的匹配特征，改用 CREATE_NO_WINDOW"
         );
         assert!(
-            args.iter()
+            !args
+                .iter()
                 .any(|argument| argument == "Microsoft Zira Desktop"),
-            "音色作为 argv 传入"
+            "音色不能作为 -Command 之后的 argv（会被拼进脚本，$args 取不到）"
+        );
+        assert!(
+            command.get_envs().any(|(key, value)| {
+                key == std::ffi::OsStr::new("TYPEWORDS_TTS_VOICE")
+                    && value == Some(std::ffi::OsStr::new("Microsoft Zira Desktop"))
+            }),
+            "音色应通过环境变量 TYPEWORDS_TTS_VOICE 传入"
         );
     }
 

@@ -257,6 +257,26 @@ impl PracticeSession {
         }
     }
 
+    /// 新词出现时应该朗读哪个词；`None` 表示不朗读。
+    ///
+    /// 对齐上游 `WordTypingCore.reset` + `TypeWord.playWord`（NewWord /
+    /// ResetSameWord 触发）：换词时朗读当前单词，**默写阶段除外**——默写的
+    /// 单词是遮罩的，朗读等于直接念出答案（上游 `reset` 也只在
+    /// `practiceType !== Dictation` 时播放）。
+    ///
+    /// 是否真的出声由 `word_sound`（单词自动发音）决定，由调用方判断。
+    pub fn auto_pronounce_word(&self) -> Option<&str> {
+        if self.practice_type() == WordPracticeType::Dictation {
+            return None;
+        }
+        let word = self.data.current_word()?;
+        if word.word.is_empty() {
+            None
+        } else {
+            Some(word.word.as_str())
+        }
+    }
+
     pub fn typing_settings(settings: &SettingState) -> TypingSettings {
         TypingSettings {
             ignore_case: settings.ignore_case,
@@ -877,4 +897,66 @@ pub fn cache_from_compact(compact: &PracticeCacheCompact, words: &[Word]) -> Opt
         stat_store_data,
         session_snapshot,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::flow::flow_for_mode;
+    use crate::domain::rng::seeded;
+
+    fn task() -> TaskWords {
+        let word = |text: &str| Word {
+            word: text.to_string(),
+            ..Word::default()
+        };
+        TaskWords {
+            new: vec![word("hello")],
+            review: vec![word("world")],
+        }
+    }
+
+    fn session(mode: WordPracticeMode) -> PracticeSession {
+        let mut session = PracticeSession::with_flow(mode, flow_for_mode(mode));
+        let mut rng = seeded(7);
+        let mut stat = PracticeState::default();
+        let _ = session.initialize_task(task(), &mut rng, &mut stat, 0);
+        session
+    }
+
+    /// 新词出现时自动朗读（对齐上游 TypeWord.playWord 的 NewWord 触发）；
+    /// 默写阶段不朗读，否则会直接把答案念出来。
+    #[test]
+    fn new_words_are_auto_pronounced_in_every_mode_except_dictation() {
+        for mode in [
+            WordPracticeMode::System,
+            WordPracticeMode::Free,
+            WordPracticeMode::Review,
+            WordPracticeMode::IdentifyOnly,
+            WordPracticeMode::ListenOnly,
+        ] {
+            assert!(
+                session(mode).auto_pronounce_word().is_some(),
+                "{mode:?} 的新词应自动朗读"
+            );
+        }
+        assert_eq!(
+            session(WordPracticeMode::System).auto_pronounce_word(),
+            Some("hello"),
+            "系统模式先学新词"
+        );
+        assert_eq!(
+            session(WordPracticeMode::Review).auto_pronounce_word(),
+            Some("world"),
+            "复习模式先复习到期词"
+        );
+        // 随机复习整轮都是默写，也不朗读。
+        for mode in [WordPracticeMode::Shuffle, WordPracticeMode::DictationOnly] {
+            assert_eq!(
+                session(mode).auto_pronounce_word(),
+                None,
+                "{mode:?} 是默写流程，不该朗读答案"
+            );
+        }
+    }
 }

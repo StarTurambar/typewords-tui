@@ -195,10 +195,11 @@ fn summary_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// 单词测试页的选项键位。
+/// 单词测试页的键位。
 ///
-/// 走键位表（`ChooseA`~`ChooseD` / `WordTestingNext`），用户改绑后新键位
-/// 同样生效。默认绑定是 `1`~`4` 与空格，与上游 `words-test/[id].vue` 一致。
+/// 走键位表（`ChooseA`~`ChooseD` / `WordTestingNext` /
+/// `PlayWordPronunciation`），用户改绑后新键位同样生效。默认绑定是 `1`~`4`、
+/// 空格与 `Ctrl+P`，与上游 `words-test/[id].vue` 一致。
 fn word_test_shortcut_action(app: &App, key: KeyEvent) -> Option<Action> {
     let shortcut = to_shortcut_key(key)?;
     for action in app.shortcuts.actions_for(&shortcut) {
@@ -208,6 +209,7 @@ fn word_test_shortcut_action(app: &App, key: KeyEvent) -> Option<Action> {
             ShortcutAction::ChooseC => Action::WordTestChoose(2),
             ShortcutAction::ChooseD => Action::WordTestChoose(3),
             ShortcutAction::WordTestingNext => Action::WordTestNext,
+            ShortcutAction::PlayWordPronunciation => Action::WordTestSpeak,
             _ => continue,
         };
         return Some(action);

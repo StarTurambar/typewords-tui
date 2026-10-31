@@ -359,7 +359,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `normalize_practice_timer(segments, spend, now)` | 清洗、合并、裁剪、跨天拆分，返回 `(segments, spend)` |
 | `format_duration(ms)` | 至少 1 小时输出“x小时y分钟”，有分钟输出“y分钟”，否则“z秒” |
 
-自动暂停：`IDLE_TIMEOUT_MS = 3 * 60 * 1000`。`tick` 在 `now - last_activity >= 180000` 时把最后片段结束在 `last_activity + 180000`（不超过 `now`），标记暂停、原因为 `"auto_idle"`；手动暂停（`Ctrl+P`）由应用层调用 `pause(state, "manual", now)`。
+自动暂停：`IDLE_TIMEOUT_MS = 3 * 60 * 1000`。`tick` 在 `now - last_activity >= 180000` 时把最后片段结束在 `last_activity + 180000`（不超过 `now`），标记暂停、原因为 `"auto_idle"`；手动暂停（`Ctrl+,`）由应用层调用 `pause(state, "manual", now)`。
 
 `normalize_practice_timer` 的清洗顺序：
 

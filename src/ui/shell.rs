@@ -500,7 +500,12 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::DictPicker => &[("enter", "选择"), ("+/-", "每日词数"), ("esc", "返回")],
         Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
-        Screen::WordTest => &[("1~4", "选择"), ("空格", "下一题"), ("esc", "退出")],
+        Screen::WordTest => &[
+            ("1~4", "选择"),
+            ("空格", "下一题"),
+            ("ctrl+p", "发音"),
+            ("esc", "退出"),
+        ],
         Screen::Articles => &[
             ("↑↓", "选书本"),
             ("←→", "选文章"),

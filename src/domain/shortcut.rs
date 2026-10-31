@@ -457,8 +457,8 @@ impl ShortcutAction {
 ///
 /// 与上游的差异（终端限制）：
 /// - `ToggleConciseMode` 上游是 `Ctrl+M`，在多数终端等同回车，改用 `Ctrl+G`。
-/// - `PlayWordPronunciation` 上游是 `Ctrl+P`，本项目暂未实现发音，保持该绑定
-///   以便与上游存档一致，暂停计时改用 TUI 专有的 `Ctrl+,`。
+/// - `PlayWordPronunciation` 上游是 `Ctrl+P`，本项目同样用 `Ctrl+P` 播放单词
+///   发音（系统 TTS / 有道 mp3）；暂停计时是 TUI 专有的 `Ctrl+,`。
 pub fn default_bindings() -> BTreeMap<ShortcutAction, ShortcutKey> {
     use BaseKey::*;
     use ShortcutAction::*;
