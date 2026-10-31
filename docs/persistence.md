@@ -178,7 +178,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `enName` | 上游路由名；读取时也接受 `en_name` 别名，两者都可作为 `--dict` 的取值 |
 | `name` / `description` / `url` / `category` / `tags` / `language` / `translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
 | `length` | 词数；有效词数还应参考 `words.len()`（`Dict::effective_length`） |
-| `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；`select_dict` 切换词库时会保留既有值 |
+| `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值 |
 | `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
 | `articles` | 文章数组；TUI 原样透传、不读取 |
 | `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，以及可选的 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole`（`single/start/middle/end`，跨天练习用） |
@@ -213,7 +213,7 @@ article.bookList 中 system == false 的词典                        → articl
 | 结算 `finish_session` | `PracticeSession::settle` 写入 `statistics` 与 `fsrsData` 后立即保存 |
 | 离开练习 | `Ctrl+C`（无结算时）、结算后「回主页」不写（已保存过） |
 | `Ctrl+Enter`（重学本组） | 重建会话后立即保存练习缓存（新会话） |
-| 切换词库、主页/词库页 `+`/`-`、设置页每日词数（`PerDay`） | 修改当前词典元数据后立即保存 |
+| 切换词库、主页/词库页 `+`/`-`、设置页「复习 → 每日词数」（`daily_words`，`PerDay`） | 修改当前词典元数据后立即保存（写 `dict.json`，不是 `setting.json`） |
 | 确认退出 / 事件循环结束 | `save_all` 保存；首次运行即使没进练习，也会在退出时生成 `dict.json` |
 
 练习过程中的收藏/错词/已掌握改动只改内存，靠上述时机落盘；中途崩溃最多丢掉这次会话的未保存改动（练习缓存另算）。FSRS 卡片与统计**只在结算时产生**，练习到一半退出不会写入评级。
@@ -262,6 +262,8 @@ article.bookList 中 system == false 的词典                        → articl
 | `fsrsParameters` | 见 4.4 | FSRS 参数（snake_case 键） |
 | `tuiBigWord` | `true` | **TUI 独有**：练习页是否用 2 倍点阵大字 |
 | `_ignoreWatch` | `false` | 上游「忽略监听」标记，TUI 不使用 |
+
+设置页的「每日词数」一行不在 `setting.json` 里：它改的是 `dict.json` 当前学习词典的 `perDayStudyNumber`（见 3.3 与 [设置项参考](settings.md)）。
 
 ### 4.3 透传字段与 `serde` 行为
 

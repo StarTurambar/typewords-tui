@@ -284,7 +284,7 @@ Catalog(assets) ───────┘                                      �
 | --- | --- |
 | app ↔ ui 耦合 | `App` 直接调用 `ui::render`，各页面直接读 `App`；未来拆视图层需要先引入只读 ViewState。 |
 | 界面文案硬编码 | `domain/i18n.rs` 是一张中文映射表，键名对齐上游 i18n，但没有语言切换；新增文案需同时改代码。 |
-| 设置项只建模一部分 | `SettingState` 建模 43 个具名字段，设置页覆盖 29 个配置项 + 2 个动作（31 行）；其余上游字段原样透传保存。FSRS 参数（`w` / `request_retention` / `maximum_interval` / `enable_fuzz` / `enable_short_term` / 两组步进）均已生效，详见 [settings.md](settings.md)。 |
+| 设置项只建模一部分 | `SettingState` 建模 43 个具名字段，设置页覆盖 29 个 `SettingState` 配置项 +「每日词数」（写 `dict.json` 的词典元数据）+ 2 个动作（共 32 行）；其余上游字段原样透传保存。FSRS 参数（`w` / `request_retention` / `maximum_interval` / `enable_fuzz` / `enable_short_term` / 两组步进）均已生效，详见 [settings.md](settings.md)。 |
 | 键位可配置但受终端限制 | `shortcutKeyMap` 与上游同构，可在快捷键页改绑；`Ctrl+P` 仍是「播放单词发音」，手动暂停改用 TUI 专有的 `Ctrl+,`。 |
 | 练习缓存只支持 v2 | v1 缓存直接丢弃（上游有 v1→v2 升级）。 |
 | （已消除） | FSRS 已改为逐条移植上游 ts-fsrs 5.4.1，同一张卡在两端得到相同的下次复习时间；`tests/fsrs_parity.rs` 用上游生成的黄金样本锁定。 |

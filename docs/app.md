@@ -76,20 +76,20 @@
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
 - `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action`，文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。
 - `SummaryData`：`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`；后三项来自当前学习词典的总进度。
-- `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 没有设置行可打开，仅 `apply_number_value` 保留处理（每日词数由主页/词库页 `+`/`-` 修改），`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
+- `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 对应设置页「复习 → 每日词数」行（`daily_words`），保存时夹在 `1..=词表长度` 并写 `dict.json` 的当前学习词典，`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
 
 ### 2.4 设置表与 `SettingKind`
 
-`SETTING_ROWS` 是设置页唯一数据源，共 31 行（29 个配置项 + 2 个动作项），数组顺序即渲染顺序。
+`SETTING_ROWS` 是设置页唯一数据源，共 32 行（30 个配置项 + 2 个动作项），数组顺序即渲染顺序。
 
 | `SettingKind` | `SETTING_ROWS` 中的 key（按出现顺序） |
 | --- | --- |
 | `Mode` / `Theme` / `SoundType` / `AudioSource` | `word_practice_mode` / `theme` / `sound_type` / `tts_source` |
 | `Bool` | `big_word`、`keyboard_sound`、`effect_sound`、`word_sound`、`article_sound`、`auto_random_review`、`ignore_simple_word`、`auto_next_word`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology`、`show_near_word`、`show_usage_tips` |
-| `Number` | `word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
+| `Number` | `daily_words`→`PerDay`、`word_review_ratio`→`Ratio`、`repeat_count`→`Repeat`、`repeat_custom_count`→`RepeatCustom`、`wait_time`→`WaitMs`、`space_cooldown`→`SpaceCooldown`、`fsrs_easy_limit`→`EasyLimit`、`fsrs_good_limit`→`GoodLimit`、`fsrs_hard_limit`→`HardLimit`、`request_retention`→`Retention` |
 | `Shortcuts` / `Action(ConfirmAction)` | `shortcut_settings`（跳到快捷键编辑页）、`reset_practice_progress`→`ResetPractice`、`clear_all_data`→`ClearAllData` |
 
-设置页按 key 归入「通用 / 音频 / 复习 / 键入 / 显示 / FSRS / 其他」七个分区（起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
+设置页按 key 归入「通用 / 音频 / 复习 / 键入 / 显示 / FSRS / 其他」七个分区（复习分区起点是 `daily_words`；起点见 `src/ui/settings.rs` 的 `SECTIONS`），值格式化由渲染层完成，细节见 [设置项参考](settings.md)。
 
 ## 3. 启动流程
 
@@ -237,7 +237,7 @@ app.save_all()
 | `Back` | 依次关闭 confirm/edit/summary；否则按屏返回 Home（Settings 先保存设置；Help 走 `help_back`） |
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
-| `AdjustDaily(delta)` | 每日词数 `±delta` 并夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
+| `AdjustDaily(delta)` | 每日词数以显示值 `Dict::per_day()` 为基准 `±delta`，再夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
 | `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
 | `OpenArticles` | 打开文章页：载入书本与当前书本的文章（见 6.3）。主页 `a` 键用它；侧栏 / 数字键走 `Navigate(Articles)`，两者最终落到同一个方法 |
 | `DictMove(delta)` | 词库光标移动并夹在有效范围 |
@@ -367,7 +367,7 @@ app.save_all()
 | `Theme` | `cycle_theme`：按 `ThemeRegistry::cycle_ids`（`auto` + 内置 + 自定义）循环，保存设置 |
 | `SoundType` | `us` ⇄ `uk`，影响练习页音标取哪个字段，保存设置 |
 | `Bool` | `toggle_setting_bool(key)` 翻转对应字段，保存设置 |
-| `Number(target)` | 打开 `EditState`，`buffer` 预填当前值的十进制字符串（尚未落盘） |
+| `Number(target)` | 打开 `EditState`，`buffer` 预填当前值的十进制字符串（尚未落盘；`PerDay` 预填显示值 `Dict::per_day()`） |
 | `Action(action)` | 打开确认弹层，文案取 `confirm_message(action)`：`ResetPractice` 为「确定清空当前练习进度吗？」，`ClearAllData` 为「该操作将会清除所有数据，确认继续？」 |
 
 分派结束后统一执行 `save_settings_now()` 与 `refresh_task_preview()`；`Bool`/`SoundType` 靠这一步落盘。
@@ -378,11 +378,11 @@ app.save_all()
 
 ### 8.3 数字项的夹取范围
 
-设置页显示的数字值来自 `App::setting_number_value(target)`（比例、阈值、毫秒数直接取值，`Retention` 转成百分数）；`EditSave` 解析输入（空串或非法值按 0），`apply_number_value` 按目标夹取后写回，并刷新任务预览：
+设置页显示的数字值来自 `App::setting_number_value(target)`（比例、阈值、毫秒数直接取值，`Retention` 转成百分数，`PerDay` 取夹取后的 `Dict::per_day()`）；`EditSave` 解析输入（空串或非法值按 0），`apply_number_value` 按目标夹取后写回，并刷新任务预览：
 
 | `EditTarget` | 字段 | 范围 |
 | --- | --- | --- |
-| `PerDay` | 学习词典 `per_day_study_number` | `1..=词表长度`（至少 1） |
+| `PerDay` | 学习词典 `per_day_study_number`（设置页 `daily_words` 行） | `1..=词表长度`（至少 1） |
 | `Ratio` | `word_review_ratio` | 0 ~ 10 |
 | `Repeat` | `repeat_count` | 1 ~ 100；100 表示改用 `repeat_custom_count`（下一行可编辑） |
 | `RepeatCustom` | `repeat_custom_count` | 1 ~ 100；仅当 `repeat_count == 100` 时参与实际重复次数 |
@@ -390,7 +390,7 @@ app.save_all()
 | `EasyLimit` / `GoodLimit` / `HardLimit` | `fsrs_easy_limit` 等 | 0 ~ 20 |
 | `Retention` | `fsrs_parameters.request_retention` | 50 ~ 99（输入百分数，存为 0.50 ~ 0.99） |
 
-每日词数不在 `SETTING_ROWS` 中；主页与词库页的 `+`/`-` 通过 `adjust_daily_target(±5)` 修改同一字段，范围 `1..=词表长度`，变化时保存词典、刷新任务预览并 Toast「每日词数：N」。
+每日词数在 `SETTING_ROWS` 中（`daily_words`，复习分区首行）：`Enter` 打开输入弹层，`apply_number_value(PerDay)` 夹在 `1..=词表长度` 后写入学习词典并保存 `dict.json`。主页与词库页的 `+`/`-` 通过 `adjust_daily_target(±5)` 修改同一字段，基准是显示值 `Dict::per_day()`（未完成词库按词表长度夹取），结果再夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast「每日词数：N」。
 
 ## 9. 持久化时机
 
@@ -422,8 +422,8 @@ app.save_all()
 | `Ctrl+Enter`（重学本组） | 新会话建立时立即保存练习缓存 |
 | `finish_session` | 立即保存词典，删除练习缓存 |
 | 结算继续 / 重学 | 新会话立即保存练习缓存 |
-| 主页/词库页 `+`/`-`、切换词库、`PerDay` 数字项 | 立即保存词典 |
-| 设置页任意修改、退出设置页 | 立即保存设置 |
+| 主页/词库页 `+`/`-`、切换词库、设置页每日词数（`daily_words`，`PerDay`） | 立即保存词典 |
+| 设置页其余项的修改、退出设置页 | 立即保存设置（「每日词数」行改的是词典，见上一行） |
 | 确认退出 / 事件循环结束 | `save_all` |
 | 窗口缩放 | 不保存 |
 

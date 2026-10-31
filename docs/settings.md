@@ -1,17 +1,17 @@
 # 设置项参考
 
-本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、31 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
+本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、32 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和仍不支持的字段（「复习 → 每日词数」写的是 `dict.json` 的词典元数据，不是 `setting.json` 字段）。设置页的操作步骤见 [使用手册 · 设置](usage.md#设置)，存档格式、版本与备份见 [存档与数据格式](persistence.md)。
 
 设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。本文所有数值都以这两处与 `src/domain/constants.rs` 为准。
 
-> 适用范围：设置页全部 31 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
+> 适用范围：设置页全部 32 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.1.0。
 
 ## 设置文件与保存时机
 
 - **位置**：`<home>/setting.json`。外层是 `SaveEnvelope`：`{ "val": { … }, "version": 23, "updated_at": "RFC3339" }`。
 - **字段命名**：`val` 下的具名字段为 camelCase（与 Web 的 `typing-word-setting` v23 同名，如 `wordPracticeMode`、`fsrsEasyLimit`）；`fsrsParameters` 内部沿用 ts-fsrs 的 snake_case（如 `request_retention`、`maximum_interval`）。
 - **载入**：启动时读取一次。文件缺失用默认值；JSON 解析失败会把文件改名为 `setting.json.corrupt-<时间戳>.json` 并在界面提示「存档已损坏，已隔离并恢复默认值」；`version` 高于 23 时以默认值启动并提示，且**本次运行只读**（`readonly_settings`，不会覆盖原文件）。
-- **保存时机**：设置页每修改一项立即写盘；数字项在输入框按 `Enter` 时写盘；返回主页（`Esc` / `q`）再保存一次；退出程序时统一保存；`--mode` / `--theme` 的启动覆盖也会在退出时写回设置。`readonly_settings` 为真时以上保存全部跳过。
+- **保存时机**：设置页每修改一项立即写盘（「每日词数」写 `dict.json`，其余写 `setting.json`）；数字项在输入框按 `Enter` 时写盘；返回主页（`Esc` / `q`）再保存一次；退出程序时统一保存；`--mode` / `--theme` 的启动覆盖也会在退出时写回设置。`readonly_settings` 为真时设置项保存全部跳过；「每日词数」受 `readonly_dict` 约束（词典只读时同样不落盘）。
 - **写盘方式**：同目录临时文件 + fsync + rename（`src/store/mod.rs` 的 `write_atomic`），不会出现写一半的 JSON。
 - **手工修改前提**：先退出程序再改文件。程序运行中修改会被内存状态在下次保存时覆盖。
 
@@ -21,7 +21,7 @@
 - **修改与返回**：`Enter` / 空格修改——开关类直接切换；模式 / 主题 / 音标循环；数字类弹输入框（只接受 ASCII 数字与 `Backspace`，最多 6 位，留空按 0 解析后按范围收敛，`Enter` 保存、`Esc` 取消）；「清空当前练习进度」与「清除所有数据」弹确认；`Esc` / `q` 保存并回主页。
 
 - **恢复默认只有整体入口**：设置页没有单项重置；「清除所有数据」会把全部设置连同学习记录一起恢复默认（见下文「清除所有数据」）。想只重置某一项，只能删除或手工编辑 `setting.json`（删除后下次启动使用 `SettingState::default`）。
-- **分区与顺序**：通用（5 行）→ 音频（6 行）→ 复习（3 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 31 行 = 29 个配置项 + 2 个动作项。
+- **分区与顺序**：通用（5 行）→ 音频（6 行）→ 复习（4 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 32 行 = 30 个配置项 + 2 个动作项；「复习」分区以「每日词数」（`daily_words`）行开头。
 
 ## 分区总表
 
@@ -40,6 +40,7 @@
 | 音频 | `articleSound`（`article_sound` 行） | 文章朗读 | 布尔 | 开启 | 开启 / 关闭 | 文章跟打每完成一句自动朗读下一句；关闭后自动朗读与文章页 `Ctrl+P` 都不再触发 TTS；立即生效 |
 | 音频 | `ttsSource`（`tts_source` 行） | 发音来源 | 枚举 | 系统 TTS | 系统 TTS / 有道发音 | 有道发音需要网络，失败自动降级回系统 TTS；立即生效 |
 | 音频 | `wordSoundSpeed`（`word_sound_speed` 行） | 发音倍速 | 整数 % | 100 | 50~300 | 朗读语速；立即生效 |
+| 复习 | 词典元数据 `perDayStudyNumber`（`daily_words` 行） | 每日词数 | 整数 | 20 | 1 ~ 当前词库词数 | 决定每日新词数与复习上限；主页 / 词库页 `+` / `-` 每次 ±5、设置页可精确输入；写入 `dict.json` 的当前学习词典（不是 `setting.json`）；下次生成任务生效 |
 | 复习 | `word_review_ratio` | 复习比例 | 整数 | 3 | 0~10 | 复习上限 = 每日词数 × 比例；0 表示平时不抽到期复习（词库学完或末组时仍按 1 处理）；下次生成任务生效 |
 | 复习 | `auto_add_random_review_when_no_due`（`auto_random_review` 行） | 无到期复习时随机填充 | 布尔 | 关闭 | 开启 / 关闭 | 无到期复习时随机补足「每日词数 × 比例」个已学词；下次生成任务生效 |
 | 复习 | `ignore_simple_word` | 忽略简单词 | 布尔 | 关闭 | 开启 / 关闭 | 额外忽略 `SIMPLE_WORDS` 的 42 个常见词；影响今日任务与随机复习；下次生成任务生效 |
@@ -78,6 +79,13 @@
 - **文章朗读**：文章跟打每完成一句自动朗读下一句，默认开启；关闭后自动朗读与文章页的 `Ctrl+P` 都不再触发 TTS。
 - **系统 TTS 的实现**：Windows 上由一个常驻 PowerShell 会话（`System.Speech`）承担，首次朗读时启动、之后复用同一个进程，退出程序时随 stdin 关闭而结束。音色固定用系统英文音色（Windows `Microsoft Zira Desktop`；未安装时退回系统默认音色），设置里的音量为死字段、不参与，倍速生效。若该进程被安全软件（如「系统加固 / 敏感动作防护」里的「隐藏执行 PowerShell」规则）拦截，本次运行后续朗读会静默放弃、不再重试，重启程序后恢复；需要朗读时请在安全软件里对 `tw.exe` 放行一次。
 - **发音来源**只影响单词发音：切成「有道发音」时会先尝试下载 mp3，失败自动降级回系统 TTS；文章句子始终走系统 TTS。
+
+### 每日词数（设置页精确输入）
+
+- 每日词数决定今日任务的新词数量与复习上限（复习上限 = 每日词数 × 复习比例），新建词库默认 20。
+- 主页与词库页的 `+` / `-` 每次 ±5；设置页「复习 → 每日词数」按 `Enter` 打开数字输入弹层，可输入精确值，保存时按 `1..=当前词库词数` 夹取。
+- 这一行写的是 `dict.json` 里当前学习词典的 `perDayStudyNumber`，不是 `setting.json` 字段；修改后立即保存词典，并在下次生成任务时生效。
+- 主页、词库页详情与设置页显示的都是 `Dict::per_day()`（未完成词库会按当前词库词数夹取，至少 1）；`+` / `-` 也以该显示值为基准，因此换到更小的词库后仍能从当前显示值继续减，不会出现按 `-` 无反应。
 
 ### 复习比例与随机填充
 
@@ -201,12 +209,13 @@
 | 类别 | 字段 |
 | --- | --- |
 | 有 UI 且生效（28 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`shortcut_key_map`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`keyboardSound`（`keyboard_sound` 行）、`effectSound`（`effect_sound` 行）、`wordSound`（`word_sound` 行）、`articleSound`（`article_sound` 行）、`ttsSource`（`tts_source` 行）、`wordSoundSpeed`（`word_sound_speed` 行）、`fsrs_easy_limit`、`fsrs_good_limit`、`fsrs_hard_limit`、`fsrsParameters.request_retention` |
+| 有 UI、写词典元数据 | 每日词数（`dict.json` 的 `perDayStudyNumber`；设置页 `daily_words` 行，不写 `setting.json`） |
 | 有 UI、条件生效 | `repeat_custom_count`（仅 `repeat_count == 100` 时参与计算） |
 | 无 UI、但内部会读取 | `fsrsParameters.maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`、`fsrsParameters.enable_short_term`、`fsrsParameters.learning_steps`、`fsrsParameters.relearning_steps` |
 | 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段都原样保存在这里，保存时写回 |
 
-`SettingState` 共建模 43 个具名字段 + `extra`，设置页覆盖其中 29 个配置项（外加 2 个动作项：清空练习进度、清除所有数据；快捷键页是独立入口）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
+`SettingState` 共建模 43 个具名字段 + `extra`，设置页覆盖其中 29 个配置项（外加「每日词数」一行——写的是 `dict.json` 的词典元数据，不是设置字段——与 2 个动作项：清空练习进度、清除所有数据；快捷键页是独立入口）。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留（`tests/store_roundtrip.rs` 验证了 `someFutureField` 往返不丢失）；字段类型不匹配或枚举值非法则会解析失败并触发损坏隔离。
 
 ## 未生效 / 半生效设置项清单
 
@@ -221,7 +230,7 @@
 ## 与 Web 设置字段对照（版本 23）
 
 - **版本**：`setting.json` 的 `version` 恒为 `23`，对应 Web 的 `typing-word-setting` v23；TUI 不升级也不降级该版本号。
-- **同名字段**：上表 28 个有 UI 的配置项与 Web 使用相同 camelCase 键名与数值语义（枚举值同样用整数：练习模式 0=学习、1=自由、2=自测、3=默写、4=听写、5=随机复习、6=复习）；Web 其余字段通过 `extra` 原样保留。
+- **同名字段**：上表 28 个有 UI 的设置字段与 Web 使用相同 camelCase 键名与数值语义（枚举值同样用整数：练习模式 0=学习、1=自由、2=自测、3=默写、4=听写、5=随机复习、6=复习）；Web 其余字段通过 `extra` 原样保留。
 - **FSRS 参数**：`fsrsParameters` 与 ts-fsrs 的参数结构一致（snake_case 的 `request_retention` / `maximum_interval` / `w` / `enable_fuzz` 等），因此两端的参数可以手工互相拷贝；TUI 的 FSRS-6 逐条移植自 ts-fsrs（含 fuzz 区间与随机源），黄金样本见 `tests/fsrs_parity.rs`。
 - **TUI 新增**：`tuiBigWord` 是 TUI 专属字段，Web 设置里没有对应项。
 - **不互通**：TUI 不读写浏览器 IndexedDB，所以设置不会自动双向同步；手工迁移方法见 [存档与数据格式](persistence.md)。
@@ -231,6 +240,7 @@
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 改了设置本轮没变化 | 词库相关项只在下次生成任务时生效（复习比例、随机填充、忽略简单词等） | 正常；见总表「生效」列，回主页或结算后继续即可 |
+| 设置页改了每日词数，`setting.json` 里找不到 | 每日词数属于词典元数据，不在 `setting.json` 里 | 正常；它写在 `dict.json` 当前学习词典的 `perDayStudyNumber` |
 | 想恢复默认设置 | 单项重置没有入口，全部重置有 | 设置页「其他 → 清除所有数据」把设置与学习记录一起恢复默认（不可撤销）；只想重置某一项则退出程序后编辑 `setting.json` |
 | 手工改完设置，重启丢失 | 修改时程序仍在运行，退出时被内存状态覆盖 | 退出程序 → 改文件 → 再启动 |
 | 启动提示设置损坏 | JSON 语法错误、类型不匹配或枚举值非法 | 修复或删除 `setting.json`；坏文件已隔离为 `*.corrupt-*.json` |

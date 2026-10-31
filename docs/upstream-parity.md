@@ -68,7 +68,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | `(articles)/book-list.vue` | 书籍目录 | 无（与文章页合并） |
 | `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无（与文章页合并；音频用系统 TTS 替代） |
 | `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 文章跟打页 `src/ui/articles.rs` |
-| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 31 行） |
+| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 32 行） |
 | `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
 | `doc.vue` | 英语学习资源分享 | 无 |
 | `about.vue` | 关于 | 无 |
@@ -87,7 +87,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 主页 | 营销落地页 | `index.vue` | 无 | 不适用 | 终端客户端不需要网站首页 |
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
-| 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页 + 主页/词库页 `+`/`-` | 部分 | TUI 步进 5 词；无滑块、预计完成天数、同一弹窗改复习比例 |
+| 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页「复习 → 每日词数」+ 主页/词库页 `+`/`-` | 部分 | 主页/词库页步进 5 词，设置页可输入 1 ~ 词库词数的精确值（显示值按词库词数夹取）；仍无滑块、预计完成天数，复习比例在单独一行而非同一弹窗 |
 | 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线 |
 | 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 词条管理页（搜索 / 编辑 / 增删 / 排序 / 批量标记） | 已对齐 | 见 [使用手册 · 词条管理](usage.md#词条管理) |
 | 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 词库页 `n` 新建、`c` 复制 | 已对齐 | 自建词典落在数据目录，会自动出现在词库页 |
@@ -113,7 +113,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 统计页有月历 + 选中日按词典明细 | 已对齐 | 日历以周一为首；有记录的日子打点；`v` 可切到按词典视图 |
 | 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
 | 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 已对齐 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
-| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 31 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
+| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 32 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
 | 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
@@ -198,11 +198,12 @@ TUI 另有上游没有的全局键：`1`~`5` 切页、`d` / `s` / `t` 直达页�
 
 ### 4.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：40 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 18 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 29 个配置项 + 2 个动作项（清空练习进度、清除所有数据），共 31 行。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：40 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 18 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 29 个 `SettingState` 配置项，另加「每日词数」一行（写 `dict.json` 的词典元数据）与 2 个动作项（清空练习进度、清除所有数据），共 32 行。
 
 | 类别 | 项 |
 | --- | --- |
 | 有 UI 且生效 | 练习模式、主题、音标、大字单词、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、重复次数(自定义)、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据 |
+| 有 UI、写词典元数据 | 每日词数（`dict.json` 的 `perDayStudyNumber`） |
 | 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch` |
 | 无 UI 但生效 | `maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`（手工编辑 `setting.json` 后 `Scheduler` 会读取） |
 | 建模但不生效 | `enable_short_term`、`learning_steps`、`relearning_steps`（学习步进固定 1/6/10 分钟） |
@@ -434,6 +435,6 @@ Web 备份 data.json                       TUI 数据目录
 
 - [文档索引](README.md)
 - [数据文件与互通](persistence.md)（存档格式、版本策略、手工迁移细节）
-- [设置项参考](settings.md)（31 行设置与透传字段的逐项说明）
+- [设置项参考](settings.md)（32 行设置与透传字段的逐项说明）
 - [领域算法](domain.md)（FSRS、流程、会话与统计的实现）
 - [应用状态机](app.md)（键位分发、保存时机与扩展点）
