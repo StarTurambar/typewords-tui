@@ -1,6 +1,6 @@
 # 开发指南
 
-> 适用范围：构建、测试、调试、资源维护、CI 与发布流程；对应版本：typewords-tui 0.1.0。
+> 适用范围：构建、测试、调试、资源维护、CI 与发布流程；对应版本：typewords-tui 0.2.0。
 
 本文面向要改代码或维护仓库的人。先读 [architecture.md](architecture.md) 了解分层与主循环，再按任务查阅 [domain.md](domain.md)、[app.md](app.md)、[ui.md](ui.md)、[persistence.md](persistence.md)。
 
@@ -141,7 +141,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 
 注意事项：
 
-- 截图依赖本机字体与 Pillow 版本，不同机器像素不会完全一致；同一台机器上重新生成应与仓库文件一致（可用 hash 对比）。
+- 截图依赖本机字体与 Pillow 版本，不同机器像素不会完全一致；同一台机器上重新生成时，除含日期的区域外应与仓库文件一致（可用 hash 对比）。含日期的区域（主页「本周学习记录」、统计月历、结算「本周记录」）会随生成日期变化，属预期差异。
 - 修改界面后同步更新受影响的截图，并在 PR 中说明是纯样式变化还是布局变化。
 - Pillow 只是开发期依赖：运行 TUI 与 `cargo test` 都不需要 Python。
 
@@ -188,7 +188,7 @@ node tools/fsrs_golden.mjs > tests/fixtures/fsrs_golden.json
 
 ### 8.2 发布（`.github/workflows/release.yml` + `scripts/package.ps1`）
 
-推送 `v*` tag 触发 Windows 发布任务：`cargo build --release --locked` → 组装目录 → `Compress-Archive` → 生成 `.sha256` → `gh release create` 上传。本地可用 `pwsh -File scripts/package.ps1` 复现。
+推送 `v*` tag 触发 Windows 发布任务：`cargo build --release --locked` → 组装目录 → `Compress-Archive` → 生成 `.sha256` → `gh release create` 上传。发布说明优先读 `.github/release-notes/<tag>.md`（存在则用 `--notes-file` 上传），没有对应文件时退回 `--generate-notes`。本地可用 `pwsh -File scripts/package.ps1` 复现。
 
 发布包内容：
 
@@ -203,11 +203,13 @@ typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc/
 
 发布检查清单：
 
-1. 更新 `Cargo.toml` 的 `version`（发布包名与 `tw --version` 都取这里）。
-2. `cargo test --locked`、clippy、fmt 全绿；如改过文档，检查文档相对链接与截图。
-3. 打 tag `vX.Y.Z` 并推送；等待 release 工作流完成。
-4. 解压产物到空目录，运行 `tw.exe doctor` 与 `tw.exe` 做一次开始练习/退出冒烟；确认 `tw --version`、zip 名、sha256 一致。
-5. 确认 `LICENSE` 与 `README.md` 在包内；文档链接指向包内 `docs/`（相对链接）而非外部路径。
+1. 更新 `Cargo.toml` 的 `version`（发布包名与 `tw --version` 都取这里），并同步 `docs/` 各文档页首的「对应版本」、`usage.md` 的下载包文件名与 `--version` 示例。
+2. 重新生成 `docs/screenshots/`：底栏与侧栏显示版本号，见第 6 节。
+3. `cargo test --locked`、clippy、fmt 全绿；如改过文档，检查文档相对链接与截图。
+4. 在 `.github/release-notes/vX.Y.Z.md` 写发布说明（可选；省略时由 GitHub 自动生成）。
+5. 打 tag `vX.Y.Z` 并推送；等待 release 工作流完成。
+6. 解压产物到空目录，运行 `tw.exe doctor` 与 `tw.exe` 做一次开始练习/退出冒烟；确认 `tw --version`、zip 名、sha256 一致。
+7. 确认 `LICENSE` 与 `README.md` 在包内；文档链接指向包内 `docs/`（相对链接）而非外部路径。
 
 ## 9. 代码风格与约定
 

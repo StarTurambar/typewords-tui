@@ -4,7 +4,7 @@ typewords-tui 是 TypeWords 的终端客户端：在终端里选词库、按 FSR
 
 界面和文案为简体中文，操作以键盘为主、鼠标为辅。设置项逐个解释见 [设置项参考](settings.md)，配色与自定义主题见 [主题系统](themes.md)，数据文件格式见 [存档与数据格式](persistence.md)。
 
-> 适用范围：安装、首次使用、命令行、界面、练习流程、按键与鼠标、设置入口、数据备份与排障；对应版本：typewords-tui 0.1.0。
+> 适用范围：安装、首次使用、命令行、界面、练习流程、按键与鼠标、设置入口、数据备份与排障；对应版本：typewords-tui 0.2.0。
 
 ## 这是什么
 
@@ -32,10 +32,10 @@ typewords-tui 把上游 TypeWords（Nuxt + Vue 的 Web / Tauri 桌面端）的�
 
 ### 下载发布包（推荐）
 
-从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-v0.1.0-x86_64-pc-windows-msvc.zip` 及其 `.sha256` 校验文件，解压后目录结构：
+从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-v0.2.0-x86_64-pc-windows-msvc.zip` 及其 `.sha256` 校验文件，解压后目录结构：
 
 ```text
-typewords-tui-v0.1.0-x86_64-pc-windows-msvc/
+typewords-tui-v0.2.0-x86_64-pc-windows-msvc/
   tw.exe
   assets/
     list/word.json            # 词库目录（内置 CET-4，2607 词）
@@ -50,8 +50,8 @@ typewords-tui-v0.1.0-x86_64-pc-windows-msvc/
 校验下载包（PowerShell）：
 
 ```powershell
-Get-FileHash .\typewords-tui-v0.1.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-Get-Content .\typewords-tui-v0.1.0-x86_64-pc-windows-msvc.zip.sha256
+Get-FileHash .\typewords-tui-v0.2.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Get-Content .\typewords-tui-v0.2.0-x86_64-pc-windows-msvc.zip.sha256
 ```
 
 两行哈希一致再解压运行；`.sha256` 文件内容为 `<sha256>  <zip 文件名>`。没有校验过的包不要运行。
@@ -129,7 +129,7 @@ tw             # 2. 启动界面
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
 | `--seed N` | 固定随机种子（复现问题用） | 影响洗牌、选择题与随机复习；日常可省略 |
 | `--reset-practice` | 启动前清空练习缓存 | 清 `practice-word.json` 与 `practice-article.json`，不动词典与设置；对 `doctor`/`task` 无效 |
-| `-h` / `--help`、`-V` / `--version` | 帮助与版本 | 由 clap 生成，`--version` 输出 `tw 0.1.0` |
+| `-h` / `--help`、`-V` / `--version` | 帮助与版本 | 由 clap 生成，`--version` 输出 `tw 0.2.0` |
 
 ### 子命令
 

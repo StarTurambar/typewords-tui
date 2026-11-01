@@ -2,7 +2,7 @@
 
 渲染层负责把只读的 `App` 状态画到 ratatui 的 `Frame` 上：布局、颜色、文本折行、大字点阵，以及「屏幕上的哪块区域对应哪个鼠标动作」。它不修改 `App`、不写存档、不推进会话；所有数据都由应用层准备好，所有鼠标交互都通过 `ui::hit` 的 `Target` 映射回应用层。
 
-> 适用范围：`src/ui/` 全部文件，以及 `src/theme/` 与 `src/app/` 中与渲染相关的接口（`App::theme`、`App::render`、`ui::hit`）；对应版本：typewords-tui 0.1.0。
+> 适用范围：`src/ui/` 全部文件，以及 `src/theme/` 与 `src/app/` 中与渲染相关的接口（`App::theme`、`App::render`、`ui::hit`）；对应版本：typewords-tui 0.2.0。
 
 ## 1. 职责与文件清单
 
@@ -101,7 +101,7 @@ ui::render(app, frame)
 
 - 宽屏顶栏：`▎` + 当前页标题（bold）；右侧空间足够时再画 `模式 X  ·  主题名`（`practice_mode_name` + `theme_label`），放不下就省略。
 - 窄屏顶栏：左侧 `Type Words`，右侧 5 个标签；当前页用 `element` 背景 + `fg`，其余 `muted`。`narrow_nav_targets` 从 `Type Words` 右侧 2 列开始排布，宽度为标签显示宽度 + 2，放不下的标签不生成。
-- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）。右侧是版本号 `v0.1.0`（`CARGO_PKG_VERSION`）。
+- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）。右侧是版本号 `v0.2.0`（`CARGO_PKG_VERSION`）。
 - 终端过小：`render_too_small` 用 `modal_block` 画一个居中提示，不渲染任何页面内容。
 
 ## 5. 主页

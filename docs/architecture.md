@@ -1,6 +1,6 @@
 # 总体架构
 
-> 适用范围：整个仓库（`src/`、`tests/`、`assets/`、`scripts/`、`.github/`）；对应版本：typewords-tui 0.1.0。
+> 适用范围：整个仓库（`src/`、`tests/`、`assets/`、`scripts/`、`.github/`）；对应版本：typewords-tui 0.2.0。
 
 本文回答三个问题：程序由哪些部分组成、它们如何协作完成一轮「选词库 → 练习 → 结算 → 统计」、以及为什么这样设计。各模块的内部细节见 [domain.md](domain.md)、[app.md](app.md)、[ui.md](ui.md)、[persistence.md](persistence.md)。
 

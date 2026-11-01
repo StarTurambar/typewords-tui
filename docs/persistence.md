@@ -2,7 +2,7 @@
 
 typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本地 JSON 文件，词库则是只读 JSON 资源。程序启动时把这些文件读进内存，运行中按固定时机原子写回。本文是这些文件的权威说明：目录与路径解析、存档信封与写入协议、三份带版本号的存档与一份无版本号的流程存档的字段、资源词库格式、`import-dict`、与上游 Web 端的数据互通，以及备份/恢复与隐私注意事项。
 
-> 适用范围：`src/store/`、`src/paths.rs`、`src/bootstrap.rs`、`src/domain/catalog.rs`、`src/cli.rs` 的 `doctor`/`import-dict`、`src/domain/types.rs` 的存档模型；对应版本：typewords-tui 0.1.0。
+> 适用范围：`src/store/`、`src/paths.rs`、`src/bootstrap.rs`、`src/domain/catalog.rs`、`src/cli.rs` 的 `doctor`/`import-dict`、`src/domain/types.rs` 的存档模型；对应版本：typewords-tui 0.2.0。
 
 ## 1. 数据目录与路径解析
 
