@@ -305,6 +305,40 @@ fn overlay_screens_render() {
     assert!(text.contains("确认"));
 }
 
+/// 文章跟打的结算与单词会话共用弹层，但文案、指标与按钮都是文章口径。
+#[test]
+fn article_summary_renders_article_labels() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.summary = Some(app::SummaryData {
+        kind: app::SummaryKind::Article {
+            article_id: 11,
+            title: "第一篇".to_string(),
+        },
+        spend_ms: 95_000,
+        accuracy: 80,
+        wrong: 1,
+        last_learn_index: 5,
+        length: 5,
+        complete: true,
+        ..Default::default()
+    });
+    let text = render_text(&app, 100, 30);
+    assert!(text.contains("文章跟打完成"), "文章结算标题不对: {text}");
+    assert!(text.contains("第一篇"), "应显示文章标题: {text}");
+    assert!(text.contains("完成 5 / 5 句"), "应显示句子进度: {text}");
+    assert!(text.contains("错句 1"), "应显示错句数: {text}");
+    assert!(
+        text.contains("Enter 返回列表"),
+        "主按钮应回文章列表: {text}"
+    );
+    assert!(text.contains("r 重打本篇"), "重学按钮应重打本篇: {text}");
+    assert!(
+        !text.contains("今日任务完成"),
+        "文章结算不该套用单词会话标题: {text}"
+    );
+}
+
 #[test]
 fn mouse_target_rects_match_rendered_text() {
     use ratatui::layout::Rect;

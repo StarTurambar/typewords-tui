@@ -37,6 +37,23 @@ fn type_text(app: &mut app::App, text: &str) {
     }
 }
 
+/// 把当前文章整篇打完（逐句输入整句文本，标点会被忽略），直到结算弹出。
+fn finish_article(app: &mut app::App) {
+    for _ in 0..2000 {
+        let Some(practice) = app.article_practice.as_ref() else {
+            return;
+        };
+        let Some(sentence) = practice.sentences.get(practice.index) else {
+            return;
+        };
+        let text = sentence.text.clone();
+        for character in text.chars() {
+            press(app, KeyCode::Char(character));
+        }
+    }
+    panic!("文章在 2000 轮内没有打完");
+}
+
 /// 渲染一帧，把测试终端的缓冲克隆出来，用于按坐标断言字符颜色。
 fn render_buffer(app: &app::App, width: u16, height: u16) -> Buffer {
     let backend = TestBackend::new(width, height);
@@ -61,6 +78,54 @@ fn render_text(app: &app::App, width: u16, height: u16) -> String {
                 let display_width = UnicodeWidthStr::width(cell.symbol());
                 if display_width > 1 {
                     skip_cells = display_width - 1;
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// 只取结算弹层边框内部的文本，避免断言被遮罩下面的主页内容干扰。
+fn summary_inner_text(app: &app::App, width: u16, height: u16) -> String {
+    let buffer = render_buffer(app, width, height);
+    let mut corner = None;
+    'outer: for y in 0..height {
+        for x in 0..width {
+            if buffer.cell((x, y)).is_some_and(|cell| cell.symbol() == "╭") {
+                corner = Some((x, y));
+                break 'outer;
+            }
+        }
+    }
+    let (left, top) = corner.expect("结算弹层应有左上圆角");
+    let right = (left..width)
+        .find(|x| {
+            buffer
+                .cell((*x, top))
+                .is_some_and(|cell| cell.symbol() == "╮")
+        })
+        .expect("结算弹层应有右上圆角");
+    let bottom = (top..height)
+        .find(|y| {
+            buffer
+                .cell((left, *y))
+                .is_some_and(|cell| cell.symbol() == "╰")
+        })
+        .expect("结算弹层应有左下圆角");
+    let mut out = String::new();
+    for y in (top + 1)..bottom {
+        let mut skip = 0u16;
+        for x in (left + 1)..right {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            if let Some(cell) = buffer.cell((x, y)) {
+                out.push_str(cell.symbol());
+                let display_width = UnicodeWidthStr::width(cell.symbol());
+                if display_width > 1 {
+                    skip = (display_width - 1) as u16;
                 }
             }
         }
@@ -273,9 +338,129 @@ fn the_article_summary_lands_on_a_usable_screen() {
     assert_eq!(app.screen, app::Screen::Home, "结算后应回到主页");
 }
 
-/// 标点不用打，但词与词之间的空格是跟打内容，必须打。
+/// 文章跟打结束后的结算必须是文章口径。
+///
+/// 早期实现直接复用单词会话的 `SummaryData`：词典进度、新词、复习等
+/// 字段只能填占位值，界面上同时出现「学习进度 0 / 2」与「已完成」、
+/// 0% 的进度条与全空的本周记录，标题还是「今日任务完成」。
 #[test]
-fn punctuation_is_ignored_but_word_spaces_must_be_typed() {
+fn the_article_summary_reports_article_progress_instead_of_dictionary_progress() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+    finish_article(&mut app);
+
+    let summary = app.summary.as_ref().expect("整篇打完应给出结算");
+    assert!(
+        matches!(
+            &summary.kind,
+            app::SummaryKind::Article { article_id: 11, title } if title.as_str() == "第一篇"
+        ),
+        "文章结算应带文章类型、id 与标题，实际 {:?}",
+        summary.kind
+    );
+    assert_eq!(summary.last_learn_index, 2, "完成句数应是整篇句数");
+    assert_eq!(summary.length, 2, "总句数应是整篇句数");
+    assert!(summary.complete, "整篇打完应标记完成");
+    assert_eq!(summary.wrong, 0, "正确输入不该有错句");
+    assert!(
+        summary.week_days.iter().any(Option::is_some),
+        "文章统计已经落盘，本周记录里今天应有记录"
+    );
+
+    let text = summary_inner_text(&app, 100, 30);
+    assert!(text.contains("文章跟打完成"), "文章结算标题不对:\n{text}");
+    assert!(text.contains("第一篇"), "应显示文章标题:\n{text}");
+    assert!(text.contains("完成 2 / 2 句"), "应显示句子进度:\n{text}");
+    assert!(text.contains("错句 0"), "应显示错句数:\n{text}");
+    assert!(
+        !text.contains("今日任务完成"),
+        "文章结算不该套用单词会话标题:\n{text}"
+    );
+    assert!(
+        !text.contains("学习进度"),
+        "文章结算不该显示词典学习进度:\n{text}"
+    );
+    assert!(!text.contains("新词"), "文章结算不该出现新词:\n{text}");
+    assert!(!text.contains(" 0 / 2"), "不应再出现占位的 0 / N:\n{text}");
+    assert!(
+        text.contains("Enter 返回列表"),
+        "主按钮应回文章列表:\n{text}"
+    );
+    assert!(text.contains("r 重打本篇"), "重学按钮应重打本篇:\n{text}");
+    assert!(text.contains("q 主页"), "应保留回主页按钮:\n{text}");
+}
+
+/// 文章结算的「错句」按句统计：一句打错只算一句，正确率按句算。
+#[test]
+fn the_article_summary_counts_wrong_sentences() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+
+    // 第一句故意按错首字符（继续打完剩下的字符，本句会记一次错误）。
+    let first = app.article_practice.as_ref().unwrap().sentences[0]
+        .text
+        .clone();
+    let rest: String = first.chars().skip(1).collect();
+    press(&mut app, KeyCode::Char('x'));
+    type_text(&mut app, &rest);
+    // 第二句打对；整篇结束后结算。
+    finish_article(&mut app);
+
+    let summary = app.summary.as_ref().expect("整篇打完应给出结算");
+    assert_eq!(summary.wrong, 1, "只有第一句出现错误");
+    assert_eq!(summary.accuracy, 50, "两句错一句，正确率应为 50%");
+
+    let text = summary_inner_text(&app, 100, 30);
+    assert!(text.contains("正确率 50%"), "正确率应按句统计:\n{text}");
+    assert!(text.contains("错句 1"), "应显示错句数:\n{text}");
+}
+
+/// 文章结算的三个按钮各有去向：Enter 回文章列表、r 重打同一篇、q 回主页。
+///
+/// 早期文章跟打没有练习会话，三个动作都会落到 `leave_practice`——无论按
+/// 哪个按钮都只是回主页。
+#[test]
+fn the_article_summary_actions_match_article_practice() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    // Enter：回文章列表。
+    start_first_article(&mut app);
+    finish_article(&mut app);
+    assert!(app.summary.is_some(), "整篇打完应给出结算");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Articles, "Enter 应回文章列表");
+    assert!(app.summary.is_none(), "回列表后结算应关闭");
+    assert!(app.article_practice.is_none(), "回列表后不该留着跟打状态");
+    assert!(!app.article_list.is_empty(), "回列表时应能看到文章");
+
+    // r：重打同一篇，从头开始、重新计时。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::ArticlePractice);
+    finish_article(&mut app);
+    assert!(app.summary.is_some(), "重打一轮后也应给出结算");
+    press(&mut app, KeyCode::Char('r'));
+    assert_eq!(app.screen, app::Screen::ArticlePractice, "r 应重打本篇");
+    assert!(app.summary.is_none(), "重打时结算应关闭");
+    let practice = app.article_practice.as_ref().expect("重打应重新进入跟打页");
+    assert_eq!(practice.article_id, 11, "应重打同一篇文章");
+    assert_eq!(practice.index, 0, "重打应从句首开始");
+    assert_eq!(practice.finished, 0, "重打不该携带上次的进度");
+    assert_eq!(practice.wrong_sentences, 0, "重打不该携带上次的错句数");
+    assert_eq!(practice.spend, 0, "重打应重新计时");
+
+    // q：回主页。
+    finish_article(&mut app);
+    press(&mut app, KeyCode::Char('q'));
+    assert_eq!(app.screen, app::Screen::Home, "q 应回主页");
+    assert!(app.summary.is_none(), "回主页后结算应关闭");
+}
+
+/// 标点不用打；词与词之间的空格可以显式输入，也可以省略（另见下一个用例）。
+#[test]
+fn punctuation_is_ignored_and_word_spaces_are_optional() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     start_first_article(&mut app);
@@ -295,7 +480,7 @@ fn punctuation_is_ignored_but_word_spaces_must_be_typed() {
     assert!(!practice.typing.wrong, "按标点不该算错");
     assert_eq!(practice.index, 0, "按标点不应结束当前句");
 
-    // 空格是跟打内容：必须按下去才继续。
+    // 空格可以显式输入：按下去算正确输入。
     press(&mut app, KeyCode::Char(' '));
     let practice = app.article_practice.as_ref().expect("练习状态");
     assert_eq!(practice.typing.cursor(), 6, "词间空格应推进光标");
@@ -308,9 +493,9 @@ fn punctuation_is_ignored_but_word_spaces_must_be_typed() {
     assert!(!practice.typing.wrong, "正确输入不应算错");
 }
 
-/// 漏打词间空格只记一次错误，并且会自动补空格，后面的字母不会整体错位。
+/// 不打词间空格、直接打下一个单词的字母：空格按正确输入补上，不计错也不错位。
 #[test]
-fn a_missing_word_space_counts_one_mistake_without_shifting_later_letters() {
+fn a_skipped_word_space_counts_no_mistake_and_keeps_the_letters_aligned() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     start_first_article(&mut app);
@@ -322,26 +507,60 @@ fn a_missing_word_space_counts_one_mistake_without_shifting_later_letters() {
     assert_eq!(
         practice.typing.cursor(),
         8,
-        "漏打空格应自动补上，后续按键继续对齐"
+        "省略空格应自动补上，后续按键继续对齐"
     );
     assert_eq!(
         practice.typing.input,
         vec!['H', 'e', 'l', 'l', 'o', ' ', 't', 'h'],
-        "自动补上的空格应落在目标位置上"
+        "补上的空格应落在目标位置上"
     );
-    assert!(practice.typing.wrong, "漏打词间空格应记一次错误");
+    assert!(!practice.typing.wrong, "省略词间空格不该算错");
+    assert!(
+        !practice.typing.is_mismatch(5, &target, true),
+        "补上的空格本身应是正确输入"
+    );
     assert!(
         (0..practice.typing.cursor())
             .all(|position| !practice.typing.is_mismatch(position, &target, true)),
         "补上空格后，后面的字母不该全部错位"
     );
 
-    // 打完剩余字母（仍然不按空格），整句应完成且只记一句错误。
+    // 打完剩余字母（仍然不按空格），整句应完成且不计错误句。
     type_text(&mut app, "ere.");
     let practice = app.article_practice.as_ref().expect("练习状态");
-    assert_eq!(practice.finished, 1, "漏打空格不该卡住整句完成");
+    assert_eq!(practice.finished, 1, "省略空格不该卡住整句完成");
     assert_eq!(practice.index, 1, "打完整句应自动进入第二句");
-    assert_eq!(practice.wrong_sentences, 1, "漏打空格只计一次错误句");
+    assert_eq!(practice.wrong_sentences, 0, "省略空格不该记错误句");
+}
+
+/// 打完后回退到词间空格、再按一个错误字母：空格仍是正确输入，错字落在
+/// 下一个单词的首字母上（用户反馈的「回退回来再在空格处输入别的字母」场景）。
+#[test]
+fn backspacing_to_a_word_space_then_typing_a_wrong_letter_marks_the_next_letter() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+    let target = current_target(&app);
+
+    // 省略空格打到 "Hellot"（空格被自动补上），再退格两次回到空格位置。
+    type_text(&mut app, "Hellot");
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Backspace);
+    let practice = app.article_practice.as_ref().expect("练习状态");
+    assert_eq!(practice.typing.cursor(), 5, "应退回到词间空格上");
+
+    // 在空格位置按错误字母：空格补正确，错字记在下一个字母位置。
+    press(&mut app, KeyCode::Char('z'));
+    let practice = app.article_practice.as_ref().expect("练习状态");
+    assert_eq!(practice.typing.cursor(), 7);
+    assert_eq!(practice.typing.typed_char(5), Some(' '), "空格应是正确输入");
+    assert!(!practice.typing.is_mismatch(5, &target, true));
+    assert_eq!(practice.typing.typed_char(6), Some('z'));
+    assert!(
+        practice.typing.is_mismatch(6, &target, true),
+        "错字应落在下一个单词的首字母上，而不是空格上"
+    );
+    assert!(practice.typing.wrong);
 }
 
 /// 多余的空格不是目标内容：按了被忽略，不推进也不计错。
@@ -390,7 +609,7 @@ fn a_wrong_character_is_marked_red_at_its_own_position() {
     let x_cell = buffer.cell((x_column, x_row)).unwrap();
     assert!(
         !x_cell.modifier.contains(Modifier::UNDERLINED),
-        "字母位置打错只标红，不加下划线（下划线只用于空格位置的错字）"
+        "打错只标红，不加下划线"
     );
 
     // 继续正确输入后续字母：错误标记不跟着光标前移。
@@ -415,14 +634,10 @@ fn a_wrong_character_is_marked_red_at_its_own_position() {
     );
 }
 
-/// 光标停在词间空格上时按了别的字符：错字记在空格位置，红色 + 下划线。
-///
-/// 早期实现把这种按键一律当成「漏打空格」：自动补一个空格，再把按键用于
-/// 下一个目标字符，于是红色错字出现在下一个字母的位置上。新语义是：只有
-/// 按下的字符正好等于下一个目标字符时才按漏打空格处理，否则把字符记在
-/// 空格本身上，光标前进一位，后面的字母仍与目标对齐。
+/// 光标停在词间空格上时按了别的字母：空格按正确输入补上，错字落在下一个
+/// 单词的首字母上（红色、不加下划线），后面的字母仍与目标对齐。
 #[test]
-fn a_wrong_character_at_a_word_space_is_marked_red_and_underlined_at_the_space() {
+fn a_wrong_letter_at_a_skipped_space_is_marked_on_the_next_letter() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     start_first_article(&mut app);
@@ -434,59 +649,72 @@ fn a_wrong_character_at_a_word_space_is_marked_red_and_underlined_at_the_space()
     press(&mut app, KeyCode::Char('z'));
 
     let practice = app.article_practice.as_ref().expect("练习状态");
-    assert_eq!(practice.typing.cursor(), 6, "空格位置上的错字应推进光标");
+    assert_eq!(
+        practice.typing.cursor(),
+        7,
+        "补上空格后，错字落在下一个字母的位置上"
+    );
     assert_eq!(
         practice.typing.typed_char(5),
-        Some('z'),
-        "空格位置应记下实际按下的字符"
+        Some(' '),
+        "空格应被补成正确输入"
     );
     assert!(
-        practice.typing.is_mismatch(5, &target, true),
-        "空格位置上按下的 'z' 应算打错"
+        !practice.typing.is_mismatch(5, &target, true),
+        "空格本身不再算错"
     );
-    assert!(practice.typing.wrong, "空格位置打错应留下错误标记");
+    assert_eq!(
+        practice.typing.typed_char(6),
+        Some('z'),
+        "错字应记在下一个单词的首字母位置"
+    );
+    assert!(
+        practice.typing.is_mismatch(6, &target, true),
+        "下一个字母位置上的 'z' 应算打错"
+    );
+    assert!(practice.typing.wrong, "打错应留下错误标记");
 
-    // 渲染：'z' 必须落在空格那一列（'H' 所在列 + 5），而不是下一个字母列。
+    // 渲染：'z' 落在下一个单词首字母那一列（'H' 所在列 + 6），不是空格列。
     let theme = app.theme();
     let buffer = render_buffer(&app, 120, 40);
     let (h_column, h_row) = find_symbol(&buffer, 'H').expect("应显示已正确输入的 'H'");
-    let (z_column, z_row) = find_symbol(&buffer, 'z').expect("应显示空格位置上的错字 'z'");
+    let (z_column, z_row) = find_symbol(&buffer, 'z').expect("应显示下一个字母位置上的错字 'z'");
     assert_eq!(
         (z_column, z_row),
-        (h_column + 5, h_row),
-        "错字应留在空格那一列，不能跳到下一个字母的位置"
+        (h_column + 6, h_row),
+        "错字应显示在下一个单词的首字母处，而不是空格处"
     );
     let cell = buffer.cell((z_column, z_row)).expect("错字所在单元");
-    assert_eq!(cell.fg, theme.bad, "空格位置的错字应使用主题 bad 色");
+    assert_eq!(cell.fg, theme.bad, "错字应使用主题 bad 色");
     assert!(
-        cell.modifier.contains(Modifier::UNDERLINED),
-        "空格位置的错字应带下划线"
+        !cell.modifier.contains(Modifier::UNDERLINED),
+        "字母位置的错字不加下划线"
     );
 
-    // 后面照常按目标输入：字母仍与目标对齐，整句完成且只记一次错误句。
-    type_text(&mut app, "there");
+    // 后面照常按目标输入：从错字之后的位置继续，整句完成且只记一次错误句。
+    type_text(&mut app, "here");
     let practice = app.article_practice.as_ref().expect("练习状态");
-    assert_eq!(practice.finished, 1, "空格位置打错不该卡住整句完成");
+    assert_eq!(practice.finished, 1, "打错不该卡住整句完成");
     assert_eq!(practice.index, 1, "打完整句应自动进入下一句");
     assert_eq!(practice.wrong_sentences, 1, "本句出现过错误，错误句数应 +1");
 }
 
-/// 折行恰好落在会被打错的词间空格上时，错字移到下一行行首继续显示。
+/// 折行恰好落在词间空格上时，空格被省略；空格后第一个字母上的错字
+/// 仍然显示在下一行行首（红色、不加下划线）。
 ///
-/// `article_lines` 在折行处通常会丢掉空格，避免下一行以空格开头；但如果
-/// 那是当前句的词间空格、且此刻在那里打错了，丢掉就等于把红字吞掉。渲染层
-/// 要把这种单元保留到下一行行首。60 列的正文宽度是 56（终端宽 - 边框 - 行首
-/// gutter），因此用 56 个 'a' + 一个词间空格 + 'b' 制造折行边界。
+/// `article_lines` 在折行处会丢掉空格，避免下一行以空格开头。60 列的正文
+/// 宽度是 56（终端宽 - 边框 - 行首 gutter），因此用 56 个 'a' + 一个词间
+/// 空格 + 'b' 制造折行边界：省略空格后 'b' 的位置正好折到下一行行首。
 #[test]
-fn a_wrong_character_at_a_wrapped_word_space_stays_visible_on_the_next_line() {
+fn a_wrong_letter_after_a_wrapped_space_stays_visible_on_the_next_line() {
     use typewords_tui::domain::article::{Sentence, SentenceTyping, parse_sentence};
 
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     start_first_article(&mut app);
 
-    // 只留一句：56 个 'a' + 词间空格 + 'b'，空格正好落在第一行行尾的折行边界。
-    let text = format!("{} b", "a".repeat(56));
+    // 只留一句：56 个 'a' + 词间空格 + "bcd"，空格正好落在第一行行尾的折行边界。
+    let text = format!("{} bcd", "a".repeat(56));
     let practice = app.article_practice.as_mut().expect("练习状态");
     practice.sentences = vec![Sentence {
         text: text.clone(),
@@ -498,7 +726,19 @@ fn a_wrong_character_at_a_wrapped_word_space_stays_visible_on_the_next_line() {
     practice.typing = SentenceTyping::default();
 
     type_text(&mut app, &"a".repeat(56));
+    // 空格省略：这次按键被记到下一个字母 'b' 的位置上。
     press(&mut app, KeyCode::Char('z'));
+    let practice = app.article_practice.as_ref().expect("练习状态");
+    assert_eq!(
+        practice.typing.typed_char(56),
+        Some(' '),
+        "折行处的空格应被补成正确输入"
+    );
+    assert_eq!(
+        practice.typing.typed_char(57),
+        Some('z'),
+        "错字应记在空格后的第一个字母位置上"
+    );
 
     let theme = app.theme();
     let buffer = render_buffer(&app, 60, 20);
@@ -506,22 +746,34 @@ fn a_wrong_character_at_a_wrapped_word_space_stays_visible_on_the_next_line() {
     let (z_column, z_row) = find_symbol(&buffer, 'z').expect("折行后的错字仍应可见");
     assert!(
         z_row > a_row,
-        "折行边界上的错字应移到下一行，而不是被折行吞掉"
+        "折行边界后的错字应显示在下一行，而不是被折行吞掉"
     );
     assert_eq!(
         z_column, a_column,
         "错字应落在下一行行首（与上一行正文同列）"
     );
     let cell = buffer.cell((z_column, z_row)).expect("错字所在单元");
-    assert_eq!(cell.fg, theme.bad, "折行处的空格错字仍应是主题 bad 色");
+    assert_eq!(cell.fg, theme.bad, "折行处的错字仍应是主题 bad 色");
     assert!(
-        cell.modifier.contains(Modifier::UNDERLINED),
-        "折行处的空格错字仍应带下划线"
+        !cell.modifier.contains(Modifier::UNDERLINED),
+        "字母位置的错字不加下划线"
     );
-    assert_eq!(
-        buffer.cell((z_column + 1, z_row)).map(|next| next.symbol()),
-        Some("b"),
-        "错字后面应紧跟下一个目标字符 'b'，说明它落在下一行行首"
+}
+
+/// 最小终端 60×20 下，跟打页底部提示必须完整显示（末尾不能被裁掉）。
+#[test]
+fn the_article_hint_fits_the_minimum_terminal_width() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    start_first_article(&mut app);
+    let text = render_text(&app, 60, 20);
+    assert!(
+        text.contains("空格可省略"),
+        "提示应完整显示「空格可省略」:\n{text}"
+    );
+    assert!(
+        text.contains("Backspace 退格"),
+        "提示末尾不该被裁掉:\n{text}"
     );
 }
 

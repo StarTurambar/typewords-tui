@@ -6,7 +6,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::app::{Action, ConfirmState, EditState, SummaryData};
+use crate::app::{Action, ConfirmState, EditState, SummaryData, SummaryKind};
 use crate::domain::i18n::tr;
 use crate::domain::timer::format_duration;
 use crate::ui::theme::Theme;
@@ -467,60 +467,105 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
         ((summary.last_learn_index.min(summary.length) as f64 / summary.length as f64) * 100.0)
             .round() as u32
     };
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "今日任务完成",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled("学习报告", Style::default().fg(theme.dim))),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("学习时长 ", Style::default().fg(theme.muted)),
-            Span::styled(
-                format_duration(summary.spend_ms),
-                Style::default().fg(theme.accent_alt),
-            ),
-            Span::styled("    正确率 ", Style::default().fg(theme.muted)),
-            Span::styled(
-                format!("{}%", summary.accuracy),
-                Style::default().fg(theme.accent_alt),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("新词 ", Style::default().fg(theme.muted)),
-            Span::styled(summary.new_words.to_string(), Style::default().fg(theme.fg)),
-            Span::styled("    复习 ", Style::default().fg(theme.muted)),
-            Span::styled(summary.review.to_string(), Style::default().fg(theme.fg)),
-            Span::styled("    错词 ", Style::default().fg(theme.muted)),
-            Span::styled(summary.wrong.to_string(), Style::default().fg(theme.bad)),
-        ]),
-        Line::from(vec![
-            Span::styled("学习进度 ", Style::default().fg(theme.muted)),
-            Span::styled(
-                format!("{} / {}", summary.last_learn_index, summary.length),
-                Style::default().fg(theme.fg),
-            ),
-            Span::styled(
-                if summary.complete { "  已完成" } else { "" },
-                Style::default().fg(theme.good),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(widgets::thin_bar_spans(
-            percent,
-            layout.inner.width as usize,
-            if summary.complete {
-                theme.good
-            } else {
-                theme.accent_alt
-            },
-            theme.dim,
-        )),
-    ];
+    let muted = Style::default().fg(theme.muted);
+    let value = Style::default().fg(theme.fg);
+    // 两份结算共用弹层，但指标口径不同：单词会话看「新词 / 复习 / 词典
+    // 学习进度」，文章跟打看「完成句数 / 错句数」。文章跟打没有会话，
+    // 早期实现把单词口径的字段填成占位值，才出现「学习进度 0 / N 已完成」。
+    let mut lines = match &summary.kind {
+        SummaryKind::Word => vec![
+            Line::from(Span::styled(
+                "今日任务完成",
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled("学习报告", Style::default().fg(theme.dim))),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("学习时长 ", muted),
+                Span::styled(
+                    format_duration(summary.spend_ms),
+                    Style::default().fg(theme.accent_alt),
+                ),
+                Span::styled("    正确率 ", muted),
+                Span::styled(
+                    format!("{}%", summary.accuracy),
+                    Style::default().fg(theme.accent_alt),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("新词 ", muted),
+                Span::styled(summary.new_words.to_string(), value),
+                Span::styled("    复习 ", muted),
+                Span::styled(summary.review.to_string(), value),
+                Span::styled("    错词 ", muted),
+                Span::styled(summary.wrong.to_string(), Style::default().fg(theme.bad)),
+            ]),
+            Line::from(vec![
+                Span::styled("学习进度 ", muted),
+                Span::styled(
+                    format!("{} / {}", summary.last_learn_index, summary.length),
+                    value,
+                ),
+                Span::styled(
+                    if summary.complete { "  已完成" } else { "" },
+                    Style::default().fg(theme.good),
+                ),
+            ]),
+        ],
+        SummaryKind::Article { title, .. } => vec![
+            Line::from(Span::styled(
+                "文章跟打完成",
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                widgets::fit_text(title, layout.inner.width as usize),
+                Style::default().fg(theme.dim),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("学习时长 ", muted),
+                Span::styled(
+                    format_duration(summary.spend_ms),
+                    Style::default().fg(theme.accent_alt),
+                ),
+                Span::styled("    正确率 ", muted),
+                Span::styled(
+                    format!("{}%", summary.accuracy),
+                    Style::default().fg(theme.accent_alt),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("完成 ", muted),
+                Span::styled(
+                    format!(
+                        "{} / {} 句",
+                        summary.last_learn_index.min(summary.length),
+                        summary.length
+                    ),
+                    value,
+                ),
+                Span::styled("    错句 ", muted),
+                Span::styled(summary.wrong.to_string(), Style::default().fg(theme.bad)),
+            ]),
+        ],
+    };
+    lines.push(Line::from(""));
+    lines.push(Line::from(widgets::thin_bar_spans(
+        percent,
+        layout.inner.width as usize,
+        if summary.complete {
+            theme.good
+        } else {
+            theme.accent_alt
+        },
+        theme.dim,
+    )));
 
-    // 错词 Top10（上游结算报告有这一项）
+    // 错词 Top10（上游结算报告有这一项；文章跟打只记错句，没有单词维度）
     if !summary.wrong_top.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -550,10 +595,16 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
             .block(widgets::modal_block(" 结算 ", theme)),
         layout.rect,
     );
+    // 按钮文案按结算类型区分：文章跟打的「继续」是回文章列表，「重学」
+    // 是重打同一篇；动作仍是 SummaryContinue / SummaryRelearn。
+    let (continue_label, relearn_label) = match &summary.kind {
+        SummaryKind::Word => ("Enter 继续", "r 重学"),
+        SummaryKind::Article { .. } => ("Enter 返回列表", "r 重打本篇"),
+    };
     widgets::draw_button(
         frame,
         layout.continue_btn,
-        "Enter 继续",
+        continue_label,
         theme.accent,
         theme.bg,
         true,
@@ -561,7 +612,7 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
     widgets::draw_button(
         frame,
         layout.relearn_btn,
-        "r 重学",
+        relearn_label,
         theme.element,
         theme.fg,
         false,

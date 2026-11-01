@@ -5,7 +5,9 @@
 //! 用法：
 //!   cargo run --quiet --example shot -- <screen> [width] [height] [theme] [--plain]
 //!
-//!   screen: home | practice | dict | stats | settings | help | summary | edit | confirm
+//!   screen: home | practice | wordtest | words | articles | flows | articlepractice |
+//!           dict | stats | settings | shortcuts | help | summary | summary-article |
+//!           edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
 //!   theme: 写入 app.boot.settings.theme 的字符串（dark/light/high-contrast，
 //!          重设计后的自定义主题名也可传；未知名字由 app 自行回退）
@@ -54,6 +56,7 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "shortcuts",
     "help",
     "summary",
+    "summary-article",
     "edit",
     "confirm",
 ];
@@ -198,6 +201,10 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             start_practice(app)?;
             reach_summary(app)?;
         }
+        "summary-article" => {
+            start_article_practice(app)?;
+            reach_article_summary(app)?;
+        }
         other => bail!("unsupported screen {other:?}"),
     }
     Ok(())
@@ -295,6 +302,44 @@ fn reach_summary(app: &mut App) -> Result<()> {
     } else {
         bail!("could not reach the summary overlay by skipping words")
     }
+}
+
+/// 把当前文章整篇打完，直到 `finish_article_practice` 弹出结算。
+///
+/// 跟打是逐字符的：每句按 `sentence.text` 逐字符 `press` 就行——标点会被忽略，
+/// 多余空白也不会记错（`SentenceTyping::input` 在字母位置忽略空格）。每按一个键
+/// 都要检查结算是否已经出现：结算弹层把空格 / Enter 解释成「继续」，多按一个
+/// 就会把弹层关掉。
+///
+/// 用仓库真实资源时一篇可能有上千个字符，循环上限只是兜底；先用 `on_tick`
+/// 把学习时长推成非零，避免截图上出现「0秒」。
+fn reach_article_summary(app: &mut App) -> Result<()> {
+    let base = typewords_tui::domain::timer::now_ms();
+    for step in 1..=95 {
+        app.on_tick(base + step * 1000);
+    }
+    for _ in 0..5000 {
+        if app.summary.is_some() {
+            return Ok(());
+        }
+        // 先克隆本句文本，随后 `press` 要可变借用 `app`。
+        let text = {
+            let Some(practice) = app.article_practice.as_ref() else {
+                bail!("article practice ended without a summary");
+            };
+            let Some(sentence) = practice.sentences.get(practice.index) else {
+                bail!("article practice cursor ran past the last sentence without a summary");
+            };
+            sentence.text.clone()
+        };
+        for character in text.chars() {
+            if app.summary.is_some() {
+                return Ok(());
+            }
+            press(app, KeyCode::Char(character));
+        }
+    }
+    bail!("could not reach the article summary after typing 5000 sentences")
 }
 
 fn press(app: &mut App, code: KeyCode) {

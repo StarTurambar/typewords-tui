@@ -287,8 +287,31 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
     ),
 ];
 
+/// 结算对应的练习类型。
+///
+/// 结算弹层最初只服务单词练习会话。文章跟打没有会话，直接复用同一份
+/// `SummaryData` 时只能把「词典进度 / 新词 / 复习」这些单词口径字段填成
+/// 占位值——界面上会同时出现「学习进度 0 / N」与「已完成」、空的本周记录，
+/// 而且三个按钮都落到无会话时回主页的兜底路径。把类型显式建模后，
+/// 文章结算有自己的指标、文案与去向。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SummaryKind {
+    /// 单词练习会话（`finish_session`）与单词测试（`finish_word_test`）。
+    #[default]
+    Word,
+    /// 文章跟打（`finish_article_practice`）。
+    Article {
+        /// 文章 id——「重打本篇」按它从文章列表里找回同一篇。
+        article_id: i64,
+        /// 文章标题，结算弹层里直接显示。
+        title: String,
+    },
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SummaryData {
+    /// 结算类型：单词会话与文章跟打的指标、按钮文案和去向都不同。
+    pub kind: SummaryKind,
     pub spend_ms: i64,
     pub accuracy: u32,
     pub new_words: usize,
@@ -1059,6 +1082,7 @@ impl App {
             .map(|dict| crate::ui::insights::week_days_for_dict(dict, crate::ui::insights::today()))
             .unwrap_or([None; 7]);
         self.summary = Some(SummaryData {
+            kind: SummaryKind::Word,
             spend_ms: self.stat.spend,
             accuracy,
             new_words: self.stat.new_word_number,
@@ -1080,6 +1104,15 @@ impl App {
     }
 
     pub fn continue_after_summary(&mut self) {
+        // 文章跟打没有「下一组」：结算里的继续 = 回到文章列表挑下一篇。
+        if matches!(
+            self.summary.as_ref().map(|item| &item.kind),
+            Some(SummaryKind::Article { .. })
+        ) {
+            self.summary = None;
+            self.return_to_articles();
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             self.leave_practice();
             return;
@@ -1109,6 +1142,15 @@ impl App {
     }
 
     pub fn relearn_after_summary(&mut self) {
+        // 文章跟打没有练习会话：「重学」= 重打同一篇，而不是重建单词会话
+        // （无会话时 `leave_practice` 只会把用户送回主页）。
+        if let Some(SummaryKind::Article { article_id, .. }) =
+            self.summary.as_ref().map(|item| item.kind.clone())
+        {
+            self.summary = None;
+            self.restart_article(article_id);
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             self.leave_practice();
             return;
@@ -1116,6 +1158,44 @@ impl App {
         let task = session.create_repeat_task(&mut self.boot.base, &self.boot.settings, &self.stat);
         let mode = self.boot.settings.word_practice_mode;
         self.begin_session_with_task(task, mode);
+    }
+
+    /// 回到文章列表继续挑下一篇（保留书本与文章光标）。
+    fn return_to_articles(&mut self) {
+        self.pending_article_save = None;
+        self.article_practice = None;
+        self.refresh_article_resume();
+        if self.article_list.is_empty() {
+            // 列表没载入过（理论上到不了这里）：补一次加载再落地。
+            self.open_articles();
+        } else {
+            self.screen = Screen::Articles;
+        }
+    }
+
+    /// 从头重打同一篇文章。
+    ///
+    /// 文章列表还在内存里时按 id 找回那一篇；找不到（换了书 / 资源更新）
+    /// 就回文章列表并提示，不拿别的文章硬套。
+    fn restart_article(&mut self, article_id: i64) {
+        self.pending_article_save = None;
+        self.article_practice = None;
+        // 清掉内存里的断点标记，保证从头开始而不是接着上次的句子。
+        self.article_resume = None;
+        match self
+            .article_list
+            .iter()
+            .position(|article| article.id == article_id)
+        {
+            Some(index) => {
+                self.article_cursor = index;
+                self.start_article_practice(index);
+            }
+            None => {
+                self.open_articles();
+                self.toast(NoticeLevel::Warning, "这篇文章已不在当前书目的列表里");
+            }
+        }
     }
 
     // ── 键入 ─────────────────────────────────────────────────────────────
@@ -1696,6 +1776,7 @@ impl App {
             self.save_dict_now();
         }
         self.summary = Some(SummaryData {
+            kind: SummaryKind::Word,
             spend_ms: spend,
             accuracy,
             new_words: 0,
@@ -2250,7 +2331,8 @@ impl App {
     /// 处理文章跟打的一个按键。
     ///
     /// 跟打内容是字母、数字与词间空格；标点、符号按下后直接忽略（不计错
-    /// 也不前进）。空格是内容：该按空格时没按会被记为错误。打错的字符同样
+    /// 也不前进）。词间空格可以省略：不打空格直接按下一个单词的字母时按
+    /// 「空格已正确输入」处理，只有字母 / 数字打错才计错。打错的字符同样
     /// 会记录并前移，错误标记留在它真正发生的位置上，而不是钉在进度最前面。
     fn article_typing_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
@@ -2327,16 +2409,22 @@ impl App {
     }
 
     /// 文章练习结束，写统计并给结算。
+    ///
+    /// 文章跟打没有单词练习会话，不能套用会话结算那套「新词 / 复习 /
+    /// 词典学习进度」。结算按文章口径给：完成句数、错句数与文章标题；
+    /// 「本周记录」必须在上面把统计写进词典之后取，否则今天的打卡点
+    /// 永远是空的（早期实现直接填 `[None; 7]`）。
     fn finish_article_practice(&mut self) {
         let Some(practice) = self.article_practice.take() else {
             return;
         };
-        let total = practice.finished;
-        let wrong = practice.wrong_sentences;
-        let accuracy = if total == 0 {
+        let length = practice.sentences.len();
+        let done = practice.finished.min(length);
+        let wrong = practice.wrong_sentences.min(done);
+        let accuracy = if done == 0 {
             100
         } else {
-            (((total - wrong) as f64 / total as f64) * 100.0).round() as u32
+            (((done - wrong) as f64 / done as f64) * 100.0).round() as u32
         };
         // 文章练习的统计写进当前词典的 statistics（带文章标题）
         if let Some(dict) = self.boot.base.study_dict_mut() {
@@ -2344,9 +2432,9 @@ impl App {
             let stat = Statistics {
                 start_date: now,
                 spend: practice.spend,
-                total,
+                total: done,
                 new_words: 0,
-                review: total,
+                review: done,
                 wrong,
                 title: Some(practice.title.clone()),
                 segments: None,
@@ -2355,17 +2443,28 @@ impl App {
             dict.statistics.push(stat);
         }
         self.save_dict_now();
+        // 本周记录：只算当前词典，且要在上面的统计落盘之后取。
+        let week_days = self
+            .boot
+            .base
+            .study_dict()
+            .map(|dict| crate::ui::insights::week_days_for_dict(dict, crate::ui::insights::today()))
+            .unwrap_or([None; 7]);
         self.summary = Some(SummaryData {
+            kind: SummaryKind::Article {
+                article_id: practice.article_id,
+                title: practice.title.clone(),
+            },
             spend_ms: practice.spend,
             accuracy,
             new_words: 0,
-            review: total,
+            review: 0,
             wrong,
-            last_learn_index: 0,
-            length: total,
-            complete: true,
+            last_learn_index: done,
+            length,
+            complete: done >= length,
             wrong_top: Vec::new(),
-            week_days: [None; 7],
+            week_days,
         });
         // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。

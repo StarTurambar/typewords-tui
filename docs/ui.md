@@ -267,8 +267,8 @@ ui::render(app, frame)
 
 - 列表页（`render_articles`）套外壳（`Nav::Articles`）：左「书本」、右「文章」两栏（38% / 其余，右栏至少 20 列），行首 `▶` 为选中项；文章行显示标题、句数与断点标记「· 上次第 N 句」（`accent_alt`）。`targets` 给两个列表的可见行注册点击目标，滚轮映射为 `ArticleBookMove`。
 - 跟打页（`render_article_practice`）全屏、不套外壳，纵向分四段：状态行（标题 `accent` + 第 N/M 句 + 已完成 / 错误 / 用时；错误数把当前句已出现的错误也算进去）、「跟打」区块、「当前句译文」区块、两行提示。`article_lines` 把整篇文章按段落折行成同一页的行列表（段落之间空一行），`cursor_line` 找出光标所在行，视口据此滚动；`offset` 只在渲染期计算，不写 `App` 状态。
-- 逐字符着色：非跟打字符（标点、符号与多余空白）在当前句用 `dim`、已完成句用 `muted`、未来句用 `fg`；词间空格是跟打目标，光标会停在待输入的空格上；当前句里已输入且正确的字符 `good`，打错的字符 `bad` 并显示实际按下的字符；空格位置打错时在该空格处显示实际按下的字符，`theme.bad` + `Modifier::UNDERLINED` 下划线（字母位置打错只标红、不加下划线）；光标位置（第一个未输入字符）用 `selection` 背景 + BOLD；当前句首行行首是 `▶ `（`accent`）标记，其它行补两个空格对齐。`article_lines` 折行时普通空格在行尾丢掉，但词间空格是跟打目标：折行落在会被打错的空格上时该单元移到下一行行首，避免错字被吞掉。
-- 底部第一行平时提示「字母、数字与词间空格照打 · 标点不用打 · Backspace 退格」；本句出现过错误时换成「 红色 = 打错的字符 · 下划线 = 空格处按错 · Backspace 改正」。该页不注册鼠标目标，只用键盘。截图见 [文章跟打](screenshots/articlepractice-120x40-dark.png)。
+- 逐字符着色：非跟打字符（标点、符号与多余空白）在当前句用 `dim`、已完成句用 `muted`、未来句用 `fg`；词间空格是可选目标，光标会停在待输入的空格上，但直接打下一个字母也不算错；当前句里已输入且正确的字符 `good`，打错的字符 `bad` 并显示实际按下的字符——错误只会出现在字母 / 数字位置（省略空格时自动补成正确输入，不再有「空格处错字」与下划线样式，渲染里也不再有 `Modifier::UNDERLINED` 分支）；光标位置（第一个未输入字符）用 `selection` 背景 + BOLD；当前句首行行首是 `▶ `（`accent`）标记，其它行补两个空格对齐。`article_lines` 折行时行尾空格直接丢掉：空格可省略且总按正确输入显示，折掉不会藏起错误标记。
+- 底部第一行平时提示「 字母、数字照打 · 空格可省略 · 标点不用打 · Backspace 退格」（`dim`；58 列，60 列最小终端下可完整显示）；本句出现过错误时换成「 红色 = 打错的字符 · Backspace 改正」（`warn`）。该页不注册鼠标目标，只用键盘。截图见 [文章跟打](screenshots/articlepractice-120x40-dark.png)。
 
 ## 9. 通用部件（widgets.rs）
 
@@ -289,16 +289,17 @@ ui::render(app, frame)
 
 | 弹层 | 布局 | 内容与按钮 |
 | --- | --- | --- |
-| 结算 `summary` | 居中 `64 × 14`；内区左右各缩 2、上下各缩 1；按钮行在内区最后一行 | 标题「结算」，`今日任务完成` / `学习报告`、学习时长与正确率、新词/复习/错词、学习进度、细进度条；按钮「Enter 继续」（14 列）、「r 重学」（11 列）、「q 主页」（10 列） |
+| 结算 `summary` | 居中 `72 × (12 + extra)`，`extra = 2 + 错词 Top10 占用行数`（本周记录占 2 行；错词 Top10 为空时不占行，否则为 2 + min(10, 错词数)）；内区左右各缩 2、上下各缩 1；按钮行在内区最后一行 | 标题「结算」，内容按 `SummaryData.kind` 分两套：**单词**（`Word`，会话与单词测试）为 `今日任务完成` / `学习报告`、学习时长与正确率、新词/复习/错词、学习进度与「已完成」、细进度条、错词 Top10、本周记录，按钮「Enter 继续」（14 列）/「r 重学」（11 列）/「q 主页」（10 列）；**文章**（`Article`）为 `文章跟打完成` + 文章标题、学习时长与正确率、「完成 N / M 句」「错句 N」、细进度条、本周记录，按钮「Enter 返回列表」（14 列）/「r 重打本篇」（11 列）/「q 主页」（10 列） |
 | 输入 `edit` | 居中 `46 × 5` | 标题「输入」；文案「修改 {设置名}（Enter 保存 · Esc 取消）」+「> {buffer}_」 |
 | 确认 `confirm` | 居中 `56 × 7`；内区左右各缩 2、上下各缩 1 | 标题「确认」；消息（`fit_text`）、空行、「Enter/y 确认 · 其他键取消」；按钮「确认」「取消」（各 10 列） |
 
 - `centered_rect` 先把宽高夹到 `area`，所以最小终端 60×20 下弹层不会越界（单测 `summary_layout_fits_min_terminal`、`confirm_buttons_are_inside_modal` 覆盖）。
+- 结算弹层高度随内容自适应：`height = 12 + extra`，`summary_extra_lines` 在基础 12 行之外累计「本周记录（1 空行 + 1 行）」与「错词 Top10（1 空行 + 标题 + 每词 1 行）」；文章结算没有错词 Top10，`extra` 恒为 2。内区高度 = 高度 − 2，正文后留白、按钮画在内区最后一行；`render_summary` 压入错词 Top10 与本周记录前都检查剩余高度（`lines.len() + 2`），最小终端 60×20 下按钮不会被内容顶掉。
 - 遮罩：`ui::render` 在弹层打开时给全 buffer 加 `Modifier::DIM`；弹层绘制前用 `Clear` + `theme.bg` 清掉弹层外扩 2 列/行的背景，再用 `theme.panel` 画自身，从而在无 alpha 的终端里「压暗背景、恢复前景」。
 - 鼠标：`overlays::targets` 为确认弹层生成「确认/取消」、为结算弹层生成三个按钮，为模式 / 跳组 / 收藏 / 词条编辑弹层生成各自的行 target（输入弹层没有按钮 target）。
   `target_action` **复用 `targets` 的结果**做命中——两处各写一遍时，模式 / 收藏 / 词条编辑三个弹层只有 `targets` 一侧，鼠标点它们毫无反应。
   「点弹层外」的语义各弹层不同：跳组 / 确认 / 输入弹层点外面 = 取消；模式 / 收藏 / 词条编辑弹层点外面 = 无动作；结算弹层只响应三个按钮，点外面不动。
-  结算截图见 [结算弹层](screenshots/summary-120x40-dark.png)。
+  结算截图见 [结算弹层](screenshots/summary-120x40-dark.png)（单词会话）与 [文章结算](screenshots/summary-article-120x40-dark.png)（文章跟打）。
 
 ## 11. 鼠标命中
 
@@ -327,9 +328,10 @@ ui::render(app, frame)
 | `practice_screen_renders_big_word` / `masked_mode_renders_placeholder_blocks` / `typed_letters_are_colored` | 大字方块字符、默写占位符、正确输入用 `theme.good` 着色 |
 | `all_screens_render_without_panic` / `cjk_text_wraps_within_width` | 4 个非主页屏幕在 80×24 与 120×40 下渲染、逐行不超出宽度 |
 | `all_builtin_themes_render_home` / `tiny_terminal_shows_hint` / `overlay_screens_render` / `usage_tips_can_be_hidden` | 三套内置主题背景、`< 60 × 20` 提示、弹层文本、关闭「显示使用提示」后底部提示行消失 |
+| `article_summary_renders_article_labels` | 文章结算弹层用文章口径（文章标题 / 完成 N / M 句 / 错句 / 返回列表按钮）而不是单词会话口径 |
 | `mouse_target_rects_match_rendered_text` / `help_scrolls_at_min_size` | 命中矩形与渲染文本一致、帮助页在小终端可滚动 |
 
-`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / practice / dict / stats / settings / help / summary / edit / confirm` 与自定义宽高、主题。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
+`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
 
 ### 12.2 新增/修改页面的检查清单
 

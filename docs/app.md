@@ -10,7 +10,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
+| `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SummaryKind`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
@@ -75,7 +75,7 @@
 
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
 - `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action`，文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。
-- `SummaryData`：`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`；后三项来自当前学习词典的总进度。
+- `SummaryData`：`kind: SummaryKind`（`Word`（默认）/ `Article { article_id, title }`）、`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`。`Word` 是单词会话（`finish_session`）与单词测试（`finish_word_test`）的口径：`last_learn_index` / `length` / `complete` 来自当前学习词典的总进度，`wrong` 是本轮错词数；`Article` 是文章跟打（`finish_article_practice`）的口径：`last_learn_index` 是完成句数、`length` 是总句数、`wrong` 是错句数（出现过错误的句子数）、`review` 固定 0——**文章结算的指标是句数而不是词数**，没有「新词 / 复习」维度；`article_id` / `title` 供结算文案与「重打本篇」使用。
 - `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 对应设置页「复习 → 每日词数」行（`daily_words`），保存时夹在 `1..=词表长度` 并写 `dict.json` 的当前学习词典，`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
 
 ### 2.4 设置表与 `SettingKind`
@@ -209,15 +209,15 @@ app.save_all()
 | 键 | 行为 |
 | --- | --- |
 | 字母、数字 | 记到当前句的光标位置（`SentenceTyping::input`）；打错也照样前进，错误标记留在打错的位置 |
-| 空格 | 词与词之间的空格是跟打内容：光标会停在待输入的空格上；该按空格时按空格记为目标位置的空格，不该按时按的空格被忽略 |
-| 空格位置上按了别的字符 | 记在空格位置上（红色显示实际字符 + 下划线），光标前进一位，后面的字母仍与目标对齐；若这个字符正好等于下一个目标字符，则按漏打空格处理：记一次错误、自动补空格，按键用于下一个目标字符（不会让后面全部错位） |
+| 空格 | 词与词之间的空格是**可选**目标：光标会停在待输入的空格上，按空格记为正确输入；不打空格、直接打下一个单词的首字母时自动补成正确输入（见下一行）。字母位置上的多余空格被忽略 |
+| 空格位置上按了别的字母 / 数字 | 视为空格已正确输入：先补上空格，再把这个字符记到下一个目标位置——打对则不计错，打错则错字落在下一个单词的首字母位置（红色显示实际按下的字符，不带下划线），后面的字母不会错位。空格位置永远不会出现错字，因此「一句话没按空格、字母全打对」不计入错误句 |
 | 标点、符号 | 不是跟打内容（`is_typing_char` 为假）：忽略，不计错也不前进 |
 | `Backspace` | `SentenceTyping::backspace` 删除最后输入的字符；本句的 `wrong` 标记不因此清除 |
 | `Ctrl+P` | `speak_current_sentence` 用系统 TTS 朗读当前句 |
 | `Esc` | `back()` 保存文章断点并返回文章列表 |
 | 其它（含 `Ctrl` / `Alt` 组合） | 忽略 |
 
-输入长度达到当前句 `typing_target`（字母、数字与词间空格按顺序排成的字符序列，见 `Sentence::typing_cells`）的字符数就调用 `finish_article_sentence`：本句出现过错误时 `wrong_sentences += 1`，然后推进句子下标、排一次防抖保存并朗读下一句；`advance_over_empty_article_sentences` 会跳过没有跟打内容的纯标点 / 空白句（按已完成计），跳过之后到篇尾则直接结算。
+输入长度达到当前句 `typing_target`（字母、数字与词间空格按顺序排成的字符序列，见 `Sentence::typing_cells`；词间空格可省略，省略时 `SentenceTyping::input` 自动补成正确输入，不会因此记错）的字符数就调用 `finish_article_sentence`：本句出现过错误时 `wrong_sentences += 1`，然后推进句子下标、排一次防抖保存并朗读下一句；`advance_over_empty_article_sentences` 会跳过没有跟打内容的纯标点 / 空白句（按已完成计），跳过之后到篇尾则直接结算。结算走 `finish_article_practice`，按文章口径生成 `SummaryKind::Article`（完成句数 / 总句数 / 错句数 / 文章标题），去向是文章列表 / 重打本篇 / 主页，见 7.5。
 
 ### 5.4 其它屏幕键位（`screen_action`）
 
@@ -237,7 +237,7 @@ app.save_all()
 | --- | --- |
 | 输入 `edit` | `Esc`→`EditCancel`；`Enter`→`EditSave`；`Backspace`→`EditBackspace`；ASCII 数字→`EditChar`；其它忽略 |
 | 确认 `confirm` | `y`/`Y`/`Enter`→`ConfirmAccept`；**其它任意键**→`ConfirmCancel` |
-| 结算 `summary` | `Enter`/`Space`→`SummaryContinue`；`r`→`SummaryRelearn`；`q`/`Esc`→`SummaryHome`；其它忽略 |
+| 结算 `summary` | `Enter`/`Space`→`SummaryContinue`；`r`→`SummaryRelearn`；`q`/`Esc`→`SummaryHome`；其它忽略。同一组键的含义由 `SummaryData.kind` 决定：单词结算是「继续 / 重学 / 主页」，文章结算是「返回文章列表 / 重打本篇 / 主页」（见 7.5） |
 
 ### 5.6 键入映射与鼠标
 
@@ -264,7 +264,7 @@ app.save_all()
 | `SettingsMove(delta)` | 设置光标移动并夹在 `0..SETTING_ROWS.len()-1` |
 | `ActivateSetting(i)` | 设置光标置 `i` 并执行该项（见第 8 节） |
 | `StatsScroll(delta)` | 统计页滚动，上限为「最近 14 天」记录数减一 |
-| `SummaryContinue` / `SummaryRelearn` / `SummaryHome` | 结算弹层三种去向（见 7.5） |
+| `SummaryContinue` / `SummaryRelearn` / `SummaryHome` | 结算弹层三种去向，含义随 `SummaryData.kind` 不同（见 7.5） |
 | `ConfirmAccept` / `ConfirmCancel` | 执行/关闭确认；`ConfirmAccept` 处理 Quit、ResetPractice 与 ClearAllData |
 | `EditSave` / `EditCancel` | 解析输入并写回 / 关闭输入弹层 |
 | `EditChar(c)` / `EditBackspace` | 追加 ASCII 数字（最多 6 位）/ 删除一位 |
@@ -308,7 +308,7 @@ app.save_all()
 
 `navigate_to(Screen::Articles)` 因此转交给 `open_articles`；`Action::OpenArticles` 保留给主页的 `a` 键，两者最终落到同一处。
 
-跟打页的状态是 `ArticlePracticeState`：`sentences` 是 `gen_sections` 之后按段落展开的扁平句子列表，`section_starts` 记录每个段落首句在其中的下标（渲染分段用；跟打仍按扁平顺序逐句推进），`index` 是当前句，`typing: SentenceTyping` 记录实际按下的字符与实际错误，另有 `finished`、`wrong_sentences`、`spend`。跟打目标由 `Sentence::typing_cells` 决定：字母、数字与词间空格是目标字符，标点、符号与多余空白不是（`typing_target` 即这些目标按顺序排成的字符序列）。`start_article_practice` 构造它：命中同一篇文章的断点缓存时把下标 clamp 到当前句数内续打，否则从头开始；落点句子没有跟打内容（纯标点 / 空白）时自动向后跳到最近的有内容句子并按已完成计，整篇都没有可跟打内容时只弹 Warning、不进入跟打页。`finish_article_sentence` 在每句输满目标长度后推进，`advance_over_empty_article_sentences` 负责跳过没有内容的句子，全部完成后 `finish_article_practice` 写统计、给结算并删除断点缓存。
+跟打页的状态是 `ArticlePracticeState`：`sentences` 是 `gen_sections` 之后按段落展开的扁平句子列表，`section_starts` 记录每个段落首句在其中的下标（渲染分段用；跟打仍按扁平顺序逐句推进），`index` 是当前句，`typing: SentenceTyping` 记录实际按下的字符与实际错误，另有 `finished`、`wrong_sentences`、`spend`。跟打目标由 `Sentence::typing_cells` 决定：字母、数字与词间空格是目标字符，标点、符号与多余空白不是（`typing_target` 即这些目标按顺序排成的字符序列）。词间空格是可选目标：按空格算正确输入，不打空格直接打下一个字母时自动补成正确输入，所以错误只会落在字母 / 数字位置。`start_article_practice` 构造它：命中同一篇文章的断点缓存时把下标 clamp 到当前句数内续打，否则从头开始；落点句子没有跟打内容（纯标点 / 空白）时自动向后跳到最近的有内容句子并按已完成计，整篇都没有可跟打内容时只弹 Warning、不进入跟打页。`finish_article_sentence` 在每句输满目标长度后推进，`advance_over_empty_article_sentences` 负责跳过没有内容的句子，全部完成后 `finish_article_practice` 写统计、给结算并删除断点缓存——这里的结算是文章口径的 `SummaryKind::Article`（完成句数 / 总句数 / 错句数 / 文章标题），不是单词会话那份「新词 / 复习 / 学习进度」，去向是文章列表 / 重打本篇 / 主页，详见 7.5。
 
 ## 7. 练习会话集成
 
@@ -365,15 +365,29 @@ app.save_all()
 
 ### 7.5 结算与离开
 
-`finish_session`（只在 `session.complete` 且尚无 `summary` 时执行）：`session.settle(&mut base, &settings, &mut stat, now)` 写回 FSRS 卡片与词典统计；由 `stat` 计算 `SummaryData`（`spend_ms = stat.spend`，`accuracy = round((total - wrong) / total × 100)`，`total == 0` 记 100，`new_words`/`review` 取会话统计，进度三项取学习词典）；`save_dict_now()` → `clear_practice_cache()` → `refresh_stats()` → `refresh_task_preview()`。
+`finish_session`（只在 `session.complete` 且尚无 `summary` 时执行）：`session.settle(&mut base, &settings, &mut stat, now)` 写回 FSRS 卡片与词典统计；由 `stat` 计算 `SummaryData`（`spend_ms = stat.spend`，`accuracy = round((total - wrong) / total × 100)`，`total == 0` 记 100，`new_words`/`review` 取会话统计，进度三项取学习词典）；`save_dict_now()` → 删除 `practice-word.json`（`store.remove_practice`，不动文章跟打缓存）→ `refresh_stats()` → `refresh_task_preview()`。
 
-| 结算去向 | 方法 | 结果 |
+| 结算去向（单词会话 / 单词测试） | 方法 | 结果 |
 | --- | --- | --- |
 | 继续 | `continue_after_summary` | `create_next_task` 生成下一轮；任务为空则提示并回主页；否则以当前设置模式开启新会话 |
 | 重学 | `relearn_after_summary` | `create_repeat_task` 生成重复任务，以当前设置模式开启新会话 |
-| 主页 | `summary_home` | 清空会话与结算、清练习缓存、回主页并刷新统计/任务 |
+| 主页 | `summary_home` | 清空会话与结算、清两个待保存标记（缓存文件已由结算路径删掉）、回主页并刷新统计/任务 |
 
 `leave_practice`（`Ctrl+C` 或结算继续失败时）在无结算的情况下先保存练习与词典，再清空会话、回主页、刷新缓存。结算弹层出现后练习缓存已被删除，因此「回主页」不再产生缓存文件。
+
+**文章跟打分支**：文章跟打没有练习会话，结算由 `finish_article_practice` 直接生成，`kind = SummaryKind::Article { article_id, title }`，指标按文章口径填写（见 2.3）：
+
+- `last_learn_index` = 完成句数、`length` = 总句数、`wrong` = 错句数（本句出现过错误即计一句）、`complete` = 完成句数是否达到总句数；`accuracy = (完成句数 - 错句数) / 完成句数`，0 句记 100。
+- `new_words` / `review` 记 0、`wrong_top` 为空——文章没有「新词 / 复习 / 错词」与句级错词 Top10；`week_days` 必须在把本轮 statistics 写进当前词典**之后**再从该词典取，否则结算里的「本周记录」永远是空的。
+- 统计照旧写进当前词典的 `statistics`（`title` 为文章标题，`total` / `review` 都是完成句数），`save_dict_now()` 后回主页并作为弹层背景，同时删除 `practice-article.json` 断点缓存。
+
+| 结算去向（文章跟打） | 方法 | 结果 |
+| --- | --- | --- |
+| 返回列表（Enter） | `continue_after_summary` | 清结算后 `return_to_articles()`：回到文章列表并保留书本 / 文章光标；列表为空时补一次 `open_articles()` |
+| 重打本篇（r） | `relearn_after_summary` | `restart_article(article_id)`：按 id 在文章列表里找回同一篇从头开始（先清断点标记）；文章已不在列表时回列表并 Toast 提示 |
+| 主页（q / Esc） | `summary_home` | 与单词结算相同：清空会话与结算、清两个待保存标记、回主页并刷新统计/任务（不删缓存文件——本轮缓存已由 `finish_article_practice` 删除） |
+
+文章结算没有会话，这两个分支在 `kind == Article` 时提前返回，不再落到「无 session 就 `leave_practice()` 回主页」的兜底路径——早期实现三个按钮都走兜底，用户点「继续」看到的却是主页。
 
 **中途退出的学习时长不能丢**：统计有两条写入路径——会话正常结束（`settle` → `flush_stat_to_store`）与断点缓存被丢弃时的兜底（`flush_practice_stats`）。后者在**开新一轮练习**与**「清空当前练习进度」**时调用，对齐上游 `words.vue` 的 `resetCacheData`（先 `flushStatToStore` 再清缓存）。`stats_recorded` 保证同一轮只记一次。
 
@@ -441,6 +455,7 @@ app.save_all()
 | `Ctrl+C` | 立即保存练习缓存 + 词典，随后离开练习 |
 | `Ctrl+Enter`（重学本组） | 新会话建立时立即保存练习缓存 |
 | `finish_session` | 立即保存词典，删除练习缓存 |
+| `finish_article_practice` | 立即保存词典（统计写进当前词典），删除文章断点缓存 |
 | 结算继续 / 重学 | 新会话立即保存练习缓存 |
 | 主页/词库页 `+`/`-`、切换词库、设置页每日词数（`daily_words`，`PerDay`） | 立即保存词典 |
 | 设置页其余项的修改、退出设置页 | 立即保存设置（「每日词数」行改的是词典，见上一行） |
