@@ -11,7 +11,7 @@ pub use super::target::Target;
 ///
 /// 必须与 `ui::mod` 的 `modal_open` 判定保持一致——漏掉一个弹层，鼠标点击
 /// 就会穿透到下层页面，把弹层里的编辑对象和下层光标搅乱。
-fn modal_open(app: &App) -> bool {
+pub(crate) fn modal_open(app: &App) -> bool {
     app.confirm.is_some()
         || app.edit.is_some()
         || app.summary.is_some()

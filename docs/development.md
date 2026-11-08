@@ -99,7 +99,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | 复现随机问题 | `--seed <N>` 固定随机源；报告问题时附上 seed 与操作步骤 |
 | 清空练习状态 | `--reset-practice`，或删除 `<home>/practice-word.json` |
 | 练习页可视化 | `cargo run --example dump -- <mode> [typed] [width] [height] [big 或 plain]` 把练习页渲染成等宽文本 |
-| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/practice/wordtest/words/articles/flows/articlepractice/dict/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
+| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/practice/wordtest/words/articles/flows/articlepractice/dict/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
 | panic 定位 | `RUST_BACKTRACE=1`；程序安装了 panic hook，会先恢复终端与鼠标捕获再打印回溯 |
 | 日志 | 程序当前**没有**日志设施（不写日志文件）；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤 |
 | 手工检查存档 | 存档是可读 JSON：`dict.json`、`setting.json`、`practice-word.json`，字段说明见 [persistence.md](persistence.md) |
@@ -117,11 +117,12 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 17 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
+仓库 `docs/screenshots/` 的 18 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
 | `home-120x40-dark.png` | `home 120 40 dark` |
+| `home-focus-120x40-dark.png` | `home-focus 120 40 dark`（主页方向键选中「f 自由练习」） |
 | `home-90x30-dark.png` | `home 90 30 dark`（窄屏外壳） |
 | `home-120x40-light.png` | `home 120 40 light` |
 | `home-120x40-high-contrast.png` | `home 120 40 high-contrast` |

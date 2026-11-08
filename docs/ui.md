@@ -12,6 +12,7 @@
 | `src/ui/theme.rs` | `Theme`（13 个 token 映射为 ratatui `Color`）与 `Theme::from_spec` |
 | `src/ui/shell.rs` | 外壳：响应式侧栏/顶栏/底栏、`Nav`、`ShellLayout`/`SidebarLayout`、颜色提示文案 |
 | `src/ui/home.rs` | 主页 dashboard 与 `targets` |
+| `src/ui/focus.rs` | 主页键盘焦点：`targets`/`tour_rank` 巡览顺序、`step` 逐项移动与回绕、`focused_rect`/`focused_label`、`paint` 选中高亮 |
 | `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏）与 `PracticeLayout` |
 | `src/ui/bigtext.rs` | 5×7 点阵字体、1×/2× 放大、遮罩占位、折行 |
 | `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs`、`word_test.rs`、`words.rs`、`articles.rs`、`flows.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页、单词测试页、词条管理页、文章背诵页、练习流程页 |
@@ -84,7 +85,7 @@ ui::render(app, frame)
 | 主区行分配 | 顶栏 `main.y`、分隔线 `main.y+1`、正文区从 `main.y+3` 到 `footer.y` 前 |
 | 正文内容区 | `body.x+2` 起、宽度减 4；即所有页面共享的左右各 2 列留白 |
 
-`ShellLayout` 字段：`sidebar: Option<SidebarLayout>`、`main`、`topbar`、`rule`、`body`、`footer`、`content`、`nav_targets: Vec<(Screen, Rect)>`、`quit_target`、`narrow`。`SidebarLayout` 字段：`area`、`wordmark`、`wordmark_rows`、`subtitle`、`top_nav`、`bottom_rule`、`version`、`settings`、`quit`。
+`ShellLayout` 字段：`sidebar: Option<SidebarLayout>`、`area`（整屏区域，键盘焦点据此重算主页布局）、`main`、`topbar`、`rule`、`body`、`footer`、`content`、`nav_targets: Vec<(Screen, Rect)>`、`quit_target`、`narrow`。`SidebarLayout` 字段：`area`、`wordmark`、`wordmark_rows`、`subtitle`、`top_nav`、`bottom_rule`、`version`、`settings`、`quit`。
 
 ### 4.2 侧栏
 
@@ -101,7 +102,7 @@ ui::render(app, frame)
 
 - 宽屏顶栏：`▎` + 当前页标题（bold）；右侧空间足够时再画 `模式 X  ·  主题名`（`practice_mode_name` + `theme_label`），放不下就省略。
 - 窄屏顶栏：左侧 `Type Words`，右侧 5 个标签；当前页用 `element` 背景 + `fg`，其余 `muted`。`narrow_nav_targets` 从 `Type Words` 右侧 2 列开始排布，宽度为标签显示宽度 + 2，放不下的标签不生成。
-- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）。右侧是版本号 `v0.2.0`（`CARGO_PKG_VERSION`）。
+- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）；主页有键盘焦点时优先显示 `shell::focus_hints`（「选中 X / ↑↓←→ 选择 / enter 触发 / esc 取消」）。右侧是版本号 `v0.2.0`（`CARGO_PKG_VERSION`）。
 - 终端过小：`render_too_small` 用 `modal_block` 画一个居中提示，不渲染任何页面内容。
 
 ## 5. 主页
@@ -139,6 +140,17 @@ ui::render(app, frame)
 - 「推荐」：从 `catalog.resources()` 过滤掉当前词典与 `book_list` 已拥有的 id/enName，按行显示 名称（截断 18 列）/ 简介（22 列）/ 词数；行数由区块高度决定；无推荐时显示「暂无推荐 · d 浏览词库」。
 - 词典卡片的排布由 `dict_tile_layout` 统一计算，绘制（`render_dicts`）与命中检测（`layout`）共用它——两边各算一遍必然漂移，「+ / d 管理」卡就会点不到。`ordered_dicts` 负责展示顺序（当前词库优先）。
 - `targets`：主按钮 `StartPractice`、自由按钮 `StartFreePractice`、目标 `AdjustDaily(±5)`、模式标签 `OpenModePicker`、「d 词库」「+ / d 管理」卡「d 更多」→ `Navigate(DictPicker)`。标题右侧文字本身是 `section_header` 画出来的，命中矩形由 layout 预留（`open_dicts`/`open_more`/`manage_tile`）。
+
+### 5.4 键盘焦点
+
+- 可聚焦目标与鼠标命中同源：`ui::focus::targets(app, area)` 调 `ui::home::targets(app, shell.content)`，再用 `tour_rank` 做**稳定排序**得到巡览顺序——开始 / 继续学习 → 自由练习 → 词库页 → 管理词典（「+ / d 管理」卡）→ 更多词库 → 每日目标 `-` → 每日目标 `+` → 练习模式；主页以后新增的可点元素统一排在末尾，不打乱已有顺序。有弹层或不在主页时返回空列表——方向键此时属于弹层或其它页面。
+- 移动规则（`ui::focus::step(&targets, from, step)`，纯函数）：`↓` / `→` 是 `+1`（下一项）、`↑` / `←` 是 `-1`（上一项），下标用 `rem_euclid` 回绕——到头继续按会绕回另一端，任何一次按键都有反馈。没有焦点（或旧下标失效）时，`+1` 选中第一项、`-1` 选中最后一项。
+- **为什么不用几何最近邻**：主页布局很稀疏，两个按钮与几个小链接散落在 hero 卡和分区标题上；按几何选「最近的」会让焦点大跨度乱跳（例如从开始按钮按 `↓` 直接蹦到右下角的管理卡），某个方向没有目标时还会停在原地，表现为「按了没反应」。固定顺序 + 回绕在稀疏布局上更可预测。
+- `Enter` 触发焦点元素（等价于鼠标点击该 `Target` 的 `Action`），没有焦点时仍是「开始 / 继续学习」；`Esc` 清空焦点。切屏后焦点一并清空（`App::apply_action` 在 `screen` 变化后置空）。
+- 高亮沿用列表选中行的语言：`selection` 底色 + 正文 `fg` 加粗（`ui::focus::paint`），左侧再画 1 列 `accent` 强调条。强调条优先画在控件自己的第一列（按钮 / 卡片的左边距通常是空白），那一列有字时改画在矩形外一格；两处都压着字就不画，绝不覆盖控件文字。高对比主题里 `selection` 与 `bg` 同为黑色，靠强调条 + 加粗识别焦点。焦点画在页面内容之上、弹层遮罩之下。
+- 底栏联动：`ui::target::Target` 带 `label: Option<&'static str>`（`Target::labeled` 构造），`ui::home::targets` 给 8 个元素标注了中文名（开始学习、自由练习、词库页、管理词典、更多词库、每日目标 -、每日目标 +、练习模式）。有焦点时 `shell::focus_hints` 把底栏从常规快捷键换成「选中 {label}  ↑↓←→ 选择  enter 触发  esc 取消」，`focused_label` 在有断点时把开始按钮显示成「继续学习」；底栏渲染用 `ShellLayout.area`（整屏区域）重新算主页布局取标签。无焦点时恢复常规提示。
+- `App.focus` 存的是巡览列表下标；`App.viewport` 必须与实际渲染面积一致——渲染用 `Frame::area()`，而 `on_key` 不经过渲染，只能读 `App.viewport`（事件循环每帧同步，测试与 `examples/shot` 用 `App::set_viewport` 显式设置）。两者不一致时，按键算出的布局与画面不同，焦点矩形会落到别的元素上。
+- 焦点只覆盖页面内元素，侧栏 / 顶栏仍由数字键与点击负责。
 
 ## 6. 练习页
 
@@ -303,7 +315,7 @@ ui::render(app, frame)
 
 ## 11. 鼠标命中
 
-- `Target { rect: Rect, action: Action }`；`contains(column, row)` 使用半开区间 `[x, right) × [y, bottom)`。
+- `Target { rect: Rect, action: Action, label: Option<&'static str> }`；`contains(column, row)` 使用半开区间 `[x, right) × [y, bottom)`。`label` 只给键盘焦点用（底栏「选中 X」），鼠标命中路径不读它：主页 target 用 `Target::labeled` 标注中文名，其它页面仍是 `Target::new`。
 - `hit::targets` 的收集顺序（也是命中优先级）：
   1. 有弹层时只返回 `overlays::targets`；
   2. **独占整屏**的页面（`Practice`、`ArticlePractice`）不画侧栏，也不注册侧栏 target——早期实现按 shell 布局注册了导航，点屏幕上什么都没画的位置会突然跳回主页；
@@ -311,6 +323,7 @@ ui::render(app, frame)
   4. 页面 target：`Home`、`DictPicker`、`Settings`、`Shortcuts`、`Words`、`Stats`、`Flows`、`Articles`、`WordTest` 的页面内按钮/列表；`Help` 只有右侧滚动指示器（正文不做点击，返回由键盘或导航负责）。
 - `action_at` 用 `find` 返回第一个包含坐标的 target；因此导航优先于页面内按钮，页面内又按 `targets()` 的 push 顺序（例如主页：开始按钮 → 自由练习 → 目标 +/- → d 词库 → d 更多）。
   **重叠的 target 要靠注册顺序让位**：设置页 / 词库页的滚动指示器画在内容区最右一列，行 target 必须让出这一列，否则点 `↓` 会误触行 target。
+- **键盘焦点与命中目标同源**：`ui::focus::targets` 复用 `home::targets(app, shell.content)`，只是按 `tour_rank` 稳定排序得到巡览顺序；所以方向键选中的元素一定就是鼠标点得到的那一块，但键盘顺序与命中优先级无关——`action_at` 仍按上面的注册顺序取第一个包含坐标的 target。焦点只决定「`Enter` 触发哪个 `Action`」。鼠标点击不会移动焦点，切屏时由 `apply_action` 清空；侧栏 / 顶栏不在焦点目标里。
 - `wheel_action`：有弹层返回 `None`；词库页 → `DictMove(delta)`、设置页 → `SettingsMove(delta)`、统计页 → `StatsScroll(delta)`、帮助页 → `HelpScroll(delta)`、词条页 → `WordsMove(delta)`、快捷键页 → `ShortcutMove(delta)`、流程页 → `FlowMove(delta)`、文章页 → `ArticleBookMove(delta)`，其它页面 `None`；`delta` 由滚轮方向给出（上 `-1`、下 `1`）。
 - 不变量：每个页面只写一份 `layout`/`layout_xxx`，`render` 与 `targets` 都从它取 `Rect`；滚动偏移来自 `App` 的同一字段。这样绘制位置与可点击位置不会漂移。
   **文本驱动的控件更进一步**：主页每日目标的 `[-]` / `[+]` 位置由「绘制用的同一行文本」算出来（`home::goal_line_text` + `goal_buttons`），不能各写一份偏移量——早期实现用固定偏移估算，与实际排版差 2 列，所有终端尺寸下点 `+` 都没反应。
@@ -331,7 +344,9 @@ ui::render(app, frame)
 | `article_summary_renders_article_labels` | 文章结算弹层用文章口径（文章标题 / 完成 N / M 句 / 错句 / 返回列表按钮）而不是单词会话口径 |
 | `mouse_target_rects_match_rendered_text` / `help_scrolls_at_min_size` | 命中矩形与渲染文本一致、帮助页在小终端可滚动 |
 
-`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
+主页方向键焦点另有独立集成测试 `tests/focus_nav.rs`（顺序巡览、到头回绕、底栏「选中 X」、选中色高亮与 `focused_rect` 一致、不落入侧栏）。
+
+`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / home-focus / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题；`home-focus` 是主页方向键选中「f 自由练习」后的快照。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页方向键焦点](screenshots/home-focus-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
 
 ### 12.2 新增/修改页面的检查清单
 

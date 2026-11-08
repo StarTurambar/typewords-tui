@@ -2,7 +2,7 @@
 
 use chrono::Datelike;
 
-use super::{App, ConfirmAction, ConfirmState, Screen};
+use super::{App, ConfirmAction, ConfirmState, FocusDir, Screen};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -14,6 +14,12 @@ pub enum Action {
     StartPractice,
     StartFreePractice,
     AdjustDaily(i64),
+    /// 主页键盘焦点：按方向键移动选中的元素。
+    FocusMove(FocusDir),
+    /// 主页键盘焦点：触发选中的元素；没有选中时沿用「开始练习」。
+    ActivateFocus,
+    /// 主页键盘焦点：取消选中。
+    ClearFocus,
     // 词库
     DictMove(i32),
     SelectDict(usize),
@@ -121,6 +127,7 @@ pub enum Action {
 
 impl App {
     pub fn apply_action(&mut self, action: Action) {
+        let screen_before = self.screen;
         match action {
             Action::Navigate(screen) => self.navigate_to(screen),
             Action::Back => self.back(),
@@ -133,6 +140,9 @@ impl App {
             Action::StartPractice => self.start_practice(),
             Action::StartFreePractice => self.start_free_practice(),
             Action::AdjustDaily(delta) => self.adjust_daily_target(delta),
+            Action::FocusMove(direction) => self.move_focus(direction),
+            Action::ActivateFocus => self.activate_focus(),
+            Action::ClearFocus => self.clear_focus(),
             Action::DictMove(delta) => self.move_dict_cursor(delta),
             Action::SelectDict(index) => {
                 if index < self.boot.catalog.resources().len() {
@@ -248,6 +258,11 @@ impl App {
             }
             Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
+        }
+        // 焦点下标只在当前页面内有意义：页面一换，旧下标就可能指向
+        // 另一个元素，甚至越界。
+        if self.screen != screen_before {
+            self.focus = None;
         }
     }
 

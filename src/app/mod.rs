@@ -32,10 +32,12 @@ use crate::paths::Paths;
 use crate::store::{FileStore, LoadStatus};
 
 pub mod action;
+pub mod focus;
 pub mod keymap;
 pub mod mouse;
 
 pub use action::Action;
+pub use focus::FocusDir;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
@@ -356,6 +358,13 @@ pub struct App {
     pub boot: Bootstrapped,
     pub store: FileStore,
     pub screen: Screen,
+    /// 主页键盘焦点：`ui::focus::targets` 列表里的下标；`None` 表示没有选中。
+    pub focus: Option<usize>,
+    /// 最近一次绘制用的终端区域。
+    ///
+    /// 键盘焦点导航要靠布局算几何，而 `on_key` 不经过渲染；事件循环每帧
+    /// 把它同步成当前终端尺寸，测试用 [`App::set_viewport`] 显式设置。
+    pub viewport: ratatui::layout::Rect,
     pub session: Option<PracticeSession>,
     pub typing: TypingEngine,
     pub stat: PracticeState,
@@ -465,6 +474,14 @@ impl App {
         &self.boot.settings
     }
 
+    /// 同步终端区域。
+    ///
+    /// 主循环每帧调用一次；测试与 `examples/shot` 在按键前显式设置，
+    /// 保证「按键时算出的布局」与「实际渲染的布局」是同一个尺寸。
+    pub fn set_viewport(&mut self, area: ratatui::layout::Rect) {
+        self.viewport = area;
+    }
+
     pub fn theme(&self) -> crate::ui::Theme {
         let (spec, _) = self.boot.themes.resolve(&self.boot.settings.theme);
         crate::ui::Theme::from_spec(spec)
@@ -510,6 +527,8 @@ impl App {
             boot,
             store,
             screen: Screen::Home,
+            focus: None,
+            viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
             session: None,
             typing: TypingEngine::new(),
             stat: PracticeState::default(),
@@ -3562,6 +3581,8 @@ impl App {
         loop {
             terminal.draw(|frame| self.render(frame))?;
             self.on_tick(timer::now_ms());
+            // 键盘焦点导航按布局算几何：先同步终端区域再处理事件。
+            self.viewport = terminal_area();
             if self.quit {
                 break;
             }

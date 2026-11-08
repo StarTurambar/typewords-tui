@@ -966,39 +966,60 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
         crate::domain::constants::practice_mode_name(app.boot.settings.word_practice_mode);
     let layout = layout(app, content, per_day, mode_name);
     let mut targets = Vec::new();
-    targets.push(Target::new(
+    // 标签供键盘焦点在底栏显示「选中 X」；鼠标路径用不到，但共用同一个 target。
+    targets.push(Target::labeled(
         layout.primary,
         crate::app::Action::StartPractice,
+        "开始学习",
     ));
     if let Some(free) = layout.free {
-        targets.push(Target::new(free, crate::app::Action::StartFreePractice));
+        targets.push(Target::labeled(
+            free,
+            crate::app::Action::StartFreePractice,
+            "自由练习",
+        ));
     }
     if let Some(minus) = layout.goal_minus {
-        targets.push(Target::new(minus, crate::app::Action::AdjustDaily(-5)));
+        targets.push(Target::labeled(
+            minus,
+            crate::app::Action::AdjustDaily(-5),
+            "每日目标 -",
+        ));
     }
     if let Some(plus) = layout.goal_plus {
-        targets.push(Target::new(plus, crate::app::Action::AdjustDaily(5)));
+        targets.push(Target::labeled(
+            plus,
+            crate::app::Action::AdjustDaily(5),
+            "每日目标 +",
+        ));
     }
     if let Some(mode) = layout.mode_row {
-        targets.push(Target::new(mode, crate::app::Action::OpenModePicker));
+        targets.push(Target::labeled(
+            mode,
+            crate::app::Action::OpenModePicker,
+            "练习模式",
+        ));
     }
     if let Some(open) = layout.open_dicts {
-        targets.push(Target::new(
+        targets.push(Target::labeled(
             open,
             crate::app::Action::Navigate(Screen::DictPicker),
+            "词库页",
         ));
     }
     // 「+ / d 管理」卡也是词库入口：卡片上写着「d」，点它就该去词库页。
     if let Some(manage) = layout.manage_tile {
-        targets.push(Target::new(
+        targets.push(Target::labeled(
             manage,
             crate::app::Action::Navigate(Screen::DictPicker),
+            "管理词典",
         ));
     }
     if let Some(open) = layout.open_more {
-        targets.push(Target::new(
+        targets.push(Target::labeled(
             open,
             crate::app::Action::Navigate(Screen::DictPicker),
+            "更多词库",
         ));
     }
     targets

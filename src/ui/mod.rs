@@ -7,6 +7,7 @@ pub mod articles;
 pub mod bigtext;
 pub mod dict_picker;
 pub mod flows;
+pub mod focus;
 pub mod help;
 pub mod hit;
 pub mod home;
@@ -56,6 +57,12 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Settings => settings::render(app, frame, area, &theme),
         Screen::Shortcuts => shortcuts::render(app, frame, area, &theme),
         Screen::Help => help::render(app, frame, area, &theme),
+    }
+
+    // 键盘焦点高亮画在页面内容之上、弹层遮罩之下；弹层打开时
+    // `focus::targets` 返回空列表，不会留下静止的高亮。
+    if let Some(rect) = focus::focused_rect(app, area) {
+        focus::paint(frame, rect, &theme);
     }
 
     let modal_open = app.summary.is_some()

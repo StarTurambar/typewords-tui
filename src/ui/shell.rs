@@ -101,6 +101,8 @@ pub struct SidebarLayout {
 #[derive(Clone, Debug)]
 pub struct ShellLayout {
     pub sidebar: Option<SidebarLayout>,
+    /// 布局用的整屏区域（键盘焦点要按它重新算主页布局）。
+    pub area: Rect,
     pub main: Rect,
     pub topbar: Rect,
     pub rule: Rect,
@@ -158,6 +160,7 @@ pub fn layout(area: Rect, _active: Nav) -> ShellLayout {
 
     ShellLayout {
         sidebar,
+        area,
         main,
         topbar,
         rule,
@@ -457,14 +460,18 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
                 crate::domain::flow::navigator::NoticeLevel::Info => theme.accent_alt,
             }),
         )),
-        None => {
-            let hints = if app.screen == Screen::Home && hint_width < 52 {
-                HOME_COMPACT_HINTS
-            } else {
-                hints_for(app.screen)
-            };
-            Line::from(footer_hints(hints, hint_width, theme))
-        }
+        None => match focus_hints(app, shell.area) {
+            // 有键盘焦点时优先说明「选中了什么、能按哪些键」。
+            Some(hints) => Line::from(footer_hints(&hints, hint_width, theme)),
+            None => {
+                let hints = if app.screen == Screen::Home && hint_width < 52 {
+                    HOME_COMPACT_HINTS
+                } else {
+                    hints_for(app.screen)
+                };
+                Line::from(footer_hints(hints, hint_width, theme))
+            }
+        },
     };
     frame.render_widget(Paragraph::new(left), footer);
     if footer.width as usize > version_width + 2 {
@@ -474,6 +481,17 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
             footer,
         );
     }
+}
+
+/// 主页有键盘焦点时，底栏换成焦点提示：显示选中项与操作键。
+fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, &'static str)>> {
+    let label = crate::ui::focus::focused_label(app, area)?;
+    Some(vec![
+        ("选中", label),
+        ("↑↓←→", "选择"),
+        ("enter", "触发"),
+        ("esc", "取消"),
+    ])
 }
 
 /// 60 列左右时优先保留开始 / 自由 / 词库 / 帮助 / 退出。
@@ -496,6 +514,8 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("t", "统计"),
             ("?", "帮助"),
             ("q", "退出"),
+            // 放在末尾：宽度不够时优先丢弃它，别把「退出」这类老提示挤掉。
+            ("↑↓←→", "选择"),
         ],
         Screen::DictPicker => &[("enter", "选择"), ("+/-", "每日词数"), ("esc", "返回")],
         Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],

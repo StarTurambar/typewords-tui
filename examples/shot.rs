@@ -5,9 +5,9 @@
 //! 用法：
 //!   cargo run --quiet --example shot -- <screen> [width] [height] [theme] [--plain]
 //!
-//!   screen: home | practice | wordtest | words | articles | flows | articlepractice |
-//!           dict | stats | settings | shortcuts | help | summary | summary-article |
-//!           edit | confirm
+//!   screen: home | home-focus | practice | wordtest | words | articles | flows |
+//!           articlepractice | dict | stats | settings | shortcuts | help | summary |
+//!           summary-article | edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
 //!   theme: 写入 app.boot.settings.theme 的字符串（dark/light/high-contrast，
 //!          重设计后的自定义主题名也可传；未知名字由 app 自行回退）
@@ -44,6 +44,7 @@ use typewords_tui::paths::{Paths, locate_assets};
 
 const SUPPORTED_SCREENS: &[&str] = &[
     "home",
+    "home-focus",
     "practice",
     "wordtest",
     "words",
@@ -115,6 +116,9 @@ fn run() -> Result<()> {
     if let Some(fatal) = &app.fatal {
         bail!("app reported fatal error: {fatal}");
     }
+    // 键盘焦点导航按布局算几何：先把区域同步成实际渲染尺寸再导航，
+    // 否则方向键用的是 `App` 的默认 80 × 24 布局，焦点会按错误的几何算出来。
+    app.set_viewport(ratatui::layout::Rect::new(0, 0, width, height));
     prepare(&mut app, &screen)?;
     // 主题在导航之后再写一次：某些页面（如 settings）的按键操作可能临时改动它。
     app.boot.settings.theme = theme.clone();
@@ -173,6 +177,16 @@ fn build_cli(theme: &str) -> Cli {
 fn prepare(app: &mut App, screen: &str) -> Result<()> {
     match screen {
         "home" => app.screen = Screen::Home,
+        "home-focus" => {
+            // 主页方向键焦点：第一次按下落在「开始 / 继续学习」上（且不移动），
+            // 第二次右移到「f 自由练习」，截图里能看到选中底色与左侧强调条。
+            app.screen = Screen::Home;
+            press(app, KeyCode::Right);
+            press(app, KeyCode::Right);
+            if app.focus.is_none() {
+                bail!("home-focus: arrow keys did not engage the focus");
+            }
+        }
         "practice" => start_practice(app)?,
         "wordtest" => start_word_test(app)?,
         "words" => start_words(app)?,

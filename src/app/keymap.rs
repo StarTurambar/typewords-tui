@@ -2,7 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{Action, App, Screen};
+use super::{Action, App, FocusDir, Screen};
 use crate::domain::shortcut::{BaseKey, ShortcutAction, ShortcutKey};
 
 /// 把终端按键事件转成领域层的键位表示。
@@ -255,7 +255,14 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
 
     match app.screen {
         Screen::Home => match key.code {
-            KeyCode::Enter => Some(Action::StartPractice),
+            // 方向键在主页面板的可点元素之间移动焦点，Enter 触发：
+            // 等价于鼠标「移到按钮上再点下去」。
+            KeyCode::Enter => Some(Action::ActivateFocus),
+            KeyCode::Up => Some(Action::FocusMove(FocusDir::Up)),
+            KeyCode::Down => Some(Action::FocusMove(FocusDir::Down)),
+            KeyCode::Left => Some(Action::FocusMove(FocusDir::Left)),
+            KeyCode::Right => Some(Action::FocusMove(FocusDir::Right)),
+            KeyCode::Esc => Some(Action::ClearFocus),
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenFlows)
             }

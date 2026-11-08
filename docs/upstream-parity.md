@@ -300,6 +300,7 @@ Web 备份 data.json                       TUI 数据目录
 | --- | --- | --- |
 | 自定义主题 | `src/theme/` | 13 个颜色 token、三套内置主题、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
 | 鼠标 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs` | 侧栏/按钮/列表点击与滚轮滚动；练习页不响应鼠标（结算弹层除外）；终端鼠标捕获后需 Shift+拖拽复制文本 |
+| 主页方向键焦点导航 | `src/ui/focus.rs`、`src/app/focus.rs` | 方向键按固定顺序逐项选中主页元素（到头回绕）、`Enter` 触发、`Esc` 取消，选中项用选中底色 + 左侧强调条高亮；上游只有鼠标 / 触屏，键盘没有对应的「选中页面元素」操作 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；< 60 × 20 只渲染提示 |
 | 点阵大字 | `src/ui/bigtext.rs`、`src/ui/practice.rs` | 5×7 点阵字体，空间足够时按本轮最长单词整体放大 2 倍；非 ASCII 回退普通文本 |
 | 独立统计页 | `src/ui/stats.rs` | 累计 6 卡 + 最近 14 天，Web 无对应页面 |
