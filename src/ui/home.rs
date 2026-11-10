@@ -465,27 +465,16 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
         row(3),
     );
 
-    // 按钮文案：词典学到一半、或有未完成的一轮，都显示「继续」。
-    // 词典进度用 `last_learn_index` 判断——它是「学过多少」的累计值；
-    // 断点缓存则是「有一轮没练完」，两者是不同的语义，可以同时成立。
-    let continue_learning = dict
-        .map(|dict| dict.last_learn_index > 0 || dict.complete)
-        .unwrap_or(false)
-        || app.has_saved_practice();
-    let primary_label = if continue_learning {
-        "Enter  继续学习 →"
-    } else {
-        "Enter  开始学习 →"
-    };
-    // 主按钮常态就是 accent 底（和自由练习的 element 底区分开）；焦点时
-    // `ui::focus::paint` 会把整块重画成 accent 底 + 深色文字 + 加粗，
-    // 靠「整块紫 + 加粗」识别选中，不再额外画竖条。
+    // 主按钮常态用 element 底 + accent 文字（不再用整块 accent 底）：
+    // 焦点高亮就是整块 accent 底 + 深色文字，若常态也是 accent 底，
+    // 选中主按钮时画面毫无变化。自由练习按钮同为 element 底，靠文字颜色区分。
+    let primary_text = format!("Enter  {} →", primary_label(app));
     widgets::draw_button(
         frame,
         layout.primary,
-        primary_label,
+        &primary_text,
+        theme.element,
         theme.accent,
-        theme.bg,
         true,
     );
     if let Some(free) = layout.free {
@@ -957,9 +946,28 @@ fn two_part_line(left: Span<'static>, right: Span<'static>, width: usize) -> Lin
     ])
 }
 
-/// 鼠标命中检测用的目标（主页）。
+/// 主按钮文案（「开始学习」/「继续学习」）的唯一来源。
+///
+/// 按钮绘制、键盘焦点的 `Target.label` 与底栏「选中 X」必须共用它：早期
+/// 三处各写一份判定，会出现「按钮写着继续学习、底栏写着开始学习」。
+pub fn primary_label(app: &App) -> &'static str {
+    let continue_learning = app
+        .boot
+        .base
+        .study_dict()
+        .map(|dict| dict.last_learn_index > 0 || dict.complete)
+        .unwrap_or(false)
+        || app.has_saved_practice();
+    if continue_learning {
+        "继续学习"
+    } else {
+        "开始学习"
+    }
+}
+
+/// 鼠标命中检测用的目标（主页）；键盘焦点复用同一批 target 的稳定身份。
 pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
-    use crate::ui::target::Target;
+    use crate::ui::target::{ContentId, FocusId, Target};
     let per_day = app
         .boot
         .study_dict()
@@ -969,60 +977,70 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
         crate::domain::constants::practice_mode_name(app.boot.settings.word_practice_mode);
     let layout = layout(app, content, per_day, mode_name);
     let mut targets = Vec::new();
-    // 标签供键盘焦点在底栏显示「选中 X」；鼠标路径用不到，但共用同一个 target。
-    targets.push(Target::labeled(
+    // 标签供键盘焦点在底栏显示「选中 X」；鼠标路径不读 label。八项都带稳定
+    // 的 ContentId，键盘焦点因此不会因为布局增删而指到别的按钮。
+    let content = |id: ContentId| FocusId::Content(id);
+    targets.push(Target::focusable(
         layout.primary,
         crate::app::Action::StartPractice,
-        "开始学习",
+        primary_label(app),
+        content(ContentId::Start),
     ));
     if let Some(free) = layout.free {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             free,
             crate::app::Action::StartFreePractice,
             "自由练习",
+            content(ContentId::Free),
         ));
     }
     if let Some(minus) = layout.goal_minus {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             minus,
             crate::app::Action::AdjustDaily(-5),
             "每日目标 -",
+            content(ContentId::DailyMinus),
         ));
     }
     if let Some(plus) = layout.goal_plus {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             plus,
             crate::app::Action::AdjustDaily(5),
             "每日目标 +",
+            content(ContentId::DailyPlus),
         ));
     }
     if let Some(mode) = layout.mode_row {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             mode,
             crate::app::Action::OpenModePicker,
             "练习模式",
+            content(ContentId::Mode),
         ));
     }
     if let Some(open) = layout.open_dicts {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             open,
             crate::app::Action::Navigate(Screen::DictPicker),
             "词库页",
+            content(ContentId::DictPage),
         ));
     }
     // 「+ / d 管理」卡也是词库入口：卡片上写着「d」，点它就该去词库页。
     if let Some(manage) = layout.manage_tile {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             manage,
             crate::app::Action::Navigate(Screen::DictPicker),
             "管理词典",
+            content(ContentId::ManageDict),
         ));
     }
     if let Some(open) = layout.open_more {
-        targets.push(Target::labeled(
+        targets.push(Target::focusable(
             open,
             crate::app::Action::Navigate(Screen::DictPicker),
             "更多词库",
+            content(ContentId::MoreDicts),
         ));
     }
     targets

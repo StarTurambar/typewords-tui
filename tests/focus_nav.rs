@@ -1,48 +1,42 @@
 //! 主页方向键焦点导航的集成测试。
 //!
-//! 交互模型：主页有导航栏与内容区两栏。内容区按固定巡览顺序排成一个环——
-//! 开始学习 → 自由练习 → 词库入口 → 每日目标 → 练习模式；↓ / → 下一项、
-//! ↑ / ← 上一项，到头回绕。← 从内容区进导航栏（落在当前页入口），→ 从导航栏
-//! 回内容区。Enter 触发当前项，Esc 取消。
+//! 交互模型：
+//! - 焦点存稳定身份（FocusId），不存列表下标；resize / 模式变化后重新解析。
+//! - 内容区按视觉行分带：上下键在带间移动（永不反向），左右键在带内移动。
+//! - 宽屏：侧栏竖向（上/下选、右进内容区、左在内容区到边时进导航）；
+//!   窄屏：顶栏横向（左/右选、下进内容区、上在内容区到顶带时进导航）。
+//! - 无焦点：下/右落「开始 / 继续学习」，上/左进导航栏。
+//! - 到边不回头回绕；失效焦点 Enter 只清空并提示，不开练习。
 //!
-//! 焦点用整块 accent 高亮（不再用 selection 底 / 左侧竖条 / 反显），底栏同步
-//! 显示「选中 X」与操作提示。
-//!
-//! 所有用例都先 `app.set_viewport(...)` 再按键，渲染用同一个尺寸——焦点
-//! 几何由布局算出，按键路径不经过渲染。
+//! 所有用例都先 set_viewport 再按键，渲染用同一个尺寸。
 
 mod common;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use typewords_tui::app::{self, Screen};
 use typewords_tui::domain::types::WordPracticeMode;
-use typewords_tui::ui::focus;
+use typewords_tui::ui::focus::{self, ContentId, FocusId, Pane};
 use typewords_tui::ui::shell::{self, Nav};
 use unicode_width::UnicodeWidthStr;
 
-const WIDE_WIDTH: u16 = 120;
-const WIDE_HEIGHT: u16 = 40;
-/// 宽屏（>= 120 列）侧栏 26 列 + 正文内边距 2 列：焦点矩形不应出现在此列之前。
-const WIDE_CONTENT_X: u16 = 28;
-const NARROW_WIDTH: u16 = 80;
-const NARROW_HEIGHT: u16 = 24;
-const MINIMUM_WIDTH: u16 = 60;
-const MINIMUM_HEIGHT: u16 = 20;
+const WIDE: (u16, u16) = (120, 40);
+const NARROW: (u16, u16) = (80, 24);
+const MINIMUM: (u16, u16) = (60, 20);
 
-fn wide_area() -> Rect {
-    Rect::new(0, 0, WIDE_WIDTH, WIDE_HEIGHT)
+fn area_of(size: (u16, u16)) -> Rect {
+    Rect::new(0, 0, size.0, size.1)
 }
 
-/// 建一个已经同步好视口的测试应用（`Fixture` 必须活得比 `App` 久，一起返回）。
-fn test_app(width: u16, height: u16) -> (common::Fixture, app::App) {
+/// 建一个已经同步好视口的测试应用（Fixture 必须活得比 App 久，一起返回）。
+fn test_app(size: (u16, u16)) -> (common::Fixture, app::App) {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).expect("build app");
-    app.set_viewport(Rect::new(0, 0, width, height));
+    app.set_viewport(area_of(size));
     (fixture, app)
 }
 
@@ -50,50 +44,37 @@ fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
 }
 
-fn focused_rect(app: &app::App, area: Rect) -> Rect {
-    focus::focused_rect(app, area).expect("当前应有主页焦点")
+fn label(app: &app::App) -> Option<&'static str> {
+    focus::focused_label(app, app.viewport)
 }
 
-/// 主页可聚焦目标里的 label 顺序（也就是方向键的巡览顺序）。
-fn target_labels(app: &app::App, area: Rect) -> Vec<&'static str> {
-    focus::targets(app, area)
-        .iter()
-        .map(|target| target.label.expect("可聚焦的主页目标都应带 label"))
-        .collect()
+fn rect(app: &app::App) -> Rect {
+    focus::focused_rect(app, app.viewport).expect("当前应有焦点")
 }
 
-/// 某个 label 在 `ui::focus::targets` 里的下标。
-fn label_index(app: &app::App, area: Rect, label: &str) -> usize {
-    focus::targets(app, area)
-        .iter()
-        .position(|target| target.label == Some(label))
-        .unwrap_or_else(|| panic!("主页目标里应有「{label}」"))
+fn set_content(app: &mut app::App, id: ContentId) {
+    app.focus = Some(FocusId::Content(id));
+    app.last_content_focus = Some(id);
 }
 
-fn render_terminal(app: &app::App, width: u16, height: u16) -> Terminal<TestBackend> {
-    let backend = TestBackend::new(width, height);
+fn render_text(app: &app::App, size: (u16, u16)) -> String {
+    let backend = TestBackend::new(size.0, size.1);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal.draw(|frame| app.render(frame)).expect("draw");
-    terminal
-}
-
-/// 把一帧渲染成文本（宽字符按显示宽度跳过尾随格）。
-fn render_text(app: &app::App, width: u16, height: u16) -> String {
-    let terminal = render_terminal(app, width, height);
     let buffer = terminal.backend().buffer();
     let mut out = String::new();
-    for y in 0..height {
+    for y in 0..size.1 {
         let mut skip = 0usize;
-        for x in 0..width {
+        for x in 0..size.0 {
             if skip > 0 {
                 skip -= 1;
                 continue;
             }
             if let Some(cell) = buffer.cell((x, y)) {
                 out.push_str(cell.symbol());
-                let display_width = UnicodeWidthStr::width(cell.symbol());
-                if display_width > 1 {
-                    skip = display_width - 1;
+                let width = UnicodeWidthStr::width(cell.symbol());
+                if width > 1 {
+                    skip = width - 1;
                 }
             }
         }
@@ -102,446 +83,528 @@ fn render_text(app: &app::App, width: u16, height: u16) -> String {
     out
 }
 
-/// 底栏（最后一行）的文本。
-fn last_line(app: &app::App, width: u16, height: u16) -> String {
-    render_text(app, width, height)
+fn last_line(app: &app::App, size: (u16, u16)) -> String {
+    render_text(app, size)
         .lines()
         .last()
         .unwrap_or_default()
         .to_string()
 }
 
-/// 全屏所有带反显（`Modifier::REVERSED`）的单元格。
-fn reversed_cells(buffer: &Buffer, width: u16, height: u16) -> Vec<(u16, u16)> {
-    let mut cells = Vec::new();
-    for y in 0..height {
-        for x in 0..width {
-            if let Some(cell) = buffer.cell((x, y))
-                && cell.modifier.contains(Modifier::REVERSED)
-            {
-                cells.push((x, y));
-            }
-        }
-    }
-    cells
-}
-
-/// 该列是否是宽字符的尾随格。
-///
-/// ratatui 的 diff 不更新「只改样式」的宽字符尾随格（终端上字形按首格样式
-/// 整块绘制），所以 TestBackend 的 buffer 里它们会停留在默认样式。
-fn is_wide_tail(buffer: &Buffer, x: u16, y: u16) -> bool {
-    x > 0
-        && buffer
-            .cell((x - 1, y))
-            .map(|cell| UnicodeWidthStr::width(cell.symbol()) > 1)
-            .unwrap_or(false)
-}
-
-/// 首次按 ↓ / ↑ 分别选中内容区第一项 / 最后一项。
+/// 无焦点时方向键的确定落点：下/右 → 主按钮；上/左 → 导航栏。
 #[test]
-fn the_first_down_selects_the_first_item_and_the_first_up_selects_the_last() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let labels = target_labels(&app, area);
-    assert!(labels.len() >= 3, "主页至少应有三项可聚焦目标：{labels:?}");
-    assert_eq!(labels[0], "开始学习", "第一项应是「开始学习」");
-
-    press(&mut app, KeyCode::Down);
-    assert_eq!(app.focus, Some(0), "首次按 ↓ 应选中第一项");
-    assert_eq!(focus::focused_label(&app, area), Some(labels[0]));
-    assert_eq!(focused_rect(&app, area), focus::targets(&app, area)[0].rect);
-
-    press(&mut app, KeyCode::Esc);
-    assert!(app.focus.is_none(), "Esc 应清除焦点");
-
-    press(&mut app, KeyCode::Up);
-    assert_eq!(app.focus, Some(labels.len() - 1), "首次按 ↑ 应选中最后一项");
-    assert_eq!(
-        focus::focused_label(&app, area),
-        Some(labels[labels.len() - 1])
-    );
-}
-
-/// 连续 ↓ 按 targets() 的顺序逐项前进并在末尾回绕；↑ 反向逐项并回绕。
-#[test]
-fn down_tours_every_target_in_order_and_wraps_at_both_ends() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let labels = target_labels(&app, area);
-    let len = labels.len();
-    assert!(len >= 3, "主页至少应有三项可聚焦目标：{labels:?}");
-
-    press(&mut app, KeyCode::Down);
-    assert_eq!(app.focus, Some(0));
-    let mut index = 0usize;
-    for step in 1..=len {
+fn idle_arrows_have_a_predictable_landing() {
+    for size in [WIDE, NARROW, MINIMUM] {
+        let (_fixture, mut app) = test_app(size);
         press(&mut app, KeyCode::Down);
-        index = (index + 1) % len;
-        assert_eq!(app.focus, Some(index), "第 {step} 次 ↓ 应走到第 {index} 项");
-        assert_eq!(
-            focus::focused_label(&app, area),
-            Some(labels[index]),
-            "第 {step} 次 ↓ 的 label 应与 targets() 顺序一致"
-        );
-    }
-    assert_eq!(app.focus, Some(0), "连按 {len} 次 ↓ 应回绕到第一项");
+        assert_eq!(focus::pane(&app), Some(Pane::Content));
+        assert_eq!(label(&app), Some("开始学习"), "{size:?} 下 ↓ 应落主按钮");
 
-    // 第一项再按 ↑：回绕到最后一项（无死键）。
-    press(&mut app, KeyCode::Up);
-    assert_eq!(app.focus, Some(len - 1), "第一项再按 ↑ 应回绕到最后一项");
-    index = len - 1;
-    for step in 1..=len {
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(label(&app), Some("开始学习"), "{size:?} 下 → 应落主按钮");
+
+        press(&mut app, KeyCode::Esc);
         press(&mut app, KeyCode::Up);
-        index = (index + len - 1) % len;
-        assert_eq!(app.focus, Some(index), "第 {step} 次 ↑ 应走到第 {index} 项");
         assert_eq!(
-            focus::focused_label(&app, area),
-            Some(labels[index]),
-            "第 {step} 次 ↑ 的 label 应与 targets() 顺序反向一致"
+            focus::pane(&app),
+            Some(Pane::Nav),
+            "{size:?} 下 ↑ 应进导航栏"
         );
+        assert_eq!(label(&app), Some("单词"));
+
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(
+            focus::pane(&app),
+            Some(Pane::Nav),
+            "{size:?} 下 ← 应进导航栏"
+        );
+        assert_eq!(label(&app), Some("单词"));
     }
 }
 
-/// 内容区内 → 等价于下一项；← 是跨栏（进导航栏），不是「上一项」。
+/// 内容区连按 ↓：y 单调不降，到最后一个带后停住，不回绕。
 #[test]
-fn right_steps_like_down_and_left_switches_to_the_nav() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let labels = target_labels(&app, area);
+fn down_moves_downwards_and_never_reverses() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("开始学习"));
+    let mut previous = rect(&app).y;
+    for _ in 0..6 {
+        press(&mut app, KeyCode::Down);
+        let y = rect(&app).y;
+        assert!(y >= previous, "↓ 不应向上跳：{previous} -> {y}");
+        previous = y;
+    }
+    assert_eq!(label(&app), Some("更多词库"), "连续 ↓ 应停在最后一个带");
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("更多词库"), "到底后继续按 ↓ 仍停住");
+}
 
+/// 窄屏 60×20 下空间最小，方向语义同样成立：↓ 不向上，↑ 才向上。
+#[test]
+fn minimum_size_keeps_down_downwards() {
+    let (_fixture, mut app) = test_app(MINIMUM);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("开始学习"));
+    let start_y = rect(&app).y;
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("开始学习"), "↓ 到底不应跳到上面的目标");
+    assert_eq!(rect(&app).y, start_y);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(label(&app), Some("每日目标 -"));
+    assert!(rect(&app).y < start_y);
+}
+
+/// 同一带内 ←/→ 移动；宽屏最左再按 ← 才进导航栏。
+#[test]
+fn left_and_right_move_inside_the_row() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("开始学习"));
     press(&mut app, KeyCode::Right);
-    assert_eq!(app.focus, Some(0), "首次按 → 应像 ↓ 一样选中第一项");
-    assert_eq!(focus::focused_label(&app, area), Some(labels[0]));
-
+    assert_eq!(label(&app), Some("自由练习"), "→ 应到同一行的右侧按钮");
     press(&mut app, KeyCode::Right);
-    assert_eq!(app.focus, Some(1), "→ 应前进一项");
-    assert_eq!(focus::focused_label(&app, area), Some(labels[1]));
-
+    assert_eq!(label(&app), Some("自由练习"), "行尾继续 → 停住，不换栏");
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("开始学习"), "← 应回到同一行左侧");
     press(&mut app, KeyCode::Left);
     assert_eq!(
         focus::pane(&app),
-        Some(focus::Pane::Nav),
-        "← 应进入导航栏，而不是在内容区里回退"
+        Some(Pane::Nav),
+        "宽屏行首再 ← 才进导航栏"
     );
+    assert_eq!(label(&app), Some("单词"));
 }
 
-/// 焦点在「开始学习」上按 Enter：进入练习页。
+/// 跨栏会记住内容区上一次的选择：← 进导航、→ 回来仍是原来的按钮。
 #[test]
-fn enter_on_the_start_button_enters_the_practice_screen() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let index = label_index(&app, area, "开始学习");
-    app.focus = Some(index);
-
-    press(&mut app, KeyCode::Enter);
-
-    assert_eq!(app.screen, Screen::Practice, "应进入练习页");
-    assert!(app.session.is_some(), "应创建练习会话");
-}
-
-/// 焦点在「自由练习」上按 Enter：进入练习页，且本轮是自由模式。
-#[test]
-fn enter_on_the_free_practice_button_starts_a_free_session() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let index = label_index(&app, area, "自由练习");
-    app.focus = Some(index);
-
-    press(&mut app, KeyCode::Enter);
-
-    assert_eq!(app.screen, Screen::Practice, "应进入练习页");
-    let session = app.session.as_ref().expect("应创建练习会话");
-    assert_eq!(session.mode, WordPracticeMode::Free, "应是自由练习模式");
-}
-
-/// 三个词库入口按 Enter 都切到词库页，并清空焦点。
-#[test]
-fn enter_on_each_dict_entry_opens_the_dict_picker_and_clears_the_focus() {
-    for label in ["词库页", "管理词典", "更多词库"] {
-        let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-        let area = wide_area();
-        let index = label_index(&app, area, label);
-        app.focus = Some(index);
-
-        press(&mut app, KeyCode::Enter);
-
-        assert_eq!(app.screen, Screen::DictPicker, "「{label}」应切到词库页");
-        assert!(app.focus.is_none(), "「{label}」切页后焦点应清空");
-    }
-}
-
-/// 每日目标 -/+ 按 Enter：词数按 clamp 变化，焦点保持。
-#[test]
-fn enter_on_the_daily_goal_buttons_clamps_the_target_and_keeps_the_focus() {
-    for (label, delta, start) in [("每日目标 -", -5i64, 7usize), ("每日目标 +", 5i64, 2usize)]
-    {
-        let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-        let area = wide_area();
-        app.boot
-            .base
-            .study_dict_mut()
-            .expect("夹具应有学习词典")
-            .per_day_study_number = start;
-        let cap = app
-            .boot
-            .base
-            .study_dict()
-            .expect("夹具应有学习词典")
-            .effective_length()
-            .max(1) as i64;
-        let before = app
-            .boot
-            .base
-            .study_dict()
-            .expect("夹具应有学习词典")
-            .per_day() as i64;
-        let expected = (before + delta).clamp(1, cap);
-        assert_ne!(before, expected, "夹具应让 {label} 真的改变数值");
-
-        let index = label_index(&app, area, label);
-        app.focus = Some(index);
-        press(&mut app, KeyCode::Enter);
-
-        let after = app
-            .boot
-            .base
-            .study_dict()
-            .expect("夹具应有学习词典")
-            .per_day() as i64;
-        assert_eq!(after, expected, "「{label}」应把每日词数改成 clamp 后的值");
-        assert_eq!(app.focus, Some(index), "「{label}」触发后焦点应保持");
-        assert_eq!(app.screen, Screen::Home, "「{label}」不应离开主页");
-    }
-}
-
-/// 焦点在「练习模式」上按 Enter：打开模式弹层，焦点保持。
-#[test]
-fn enter_on_the_mode_label_opens_the_mode_picker_and_keeps_the_focus() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let index = label_index(&app, area, "练习模式");
-    app.focus = Some(index);
-
-    press(&mut app, KeyCode::Enter);
-
-    assert!(app.mode_picker.is_some(), "应打开模式选择弹层");
-    assert_eq!(app.focus, Some(index), "打开弹层后焦点应保持");
-    assert_eq!(app.screen, Screen::Home);
-}
-
-/// Esc 清除焦点，底栏恢复常规快捷键提示。
-#[test]
-fn escape_clears_the_focus_and_restores_the_regular_footer() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let regular_footer = last_line(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    assert!(
-        !regular_footer.contains("选中"),
-        "无焦点时底栏不应出现「选中」：{regular_footer:?}"
-    );
-
+fn returning_from_nav_restores_the_content_selection() {
+    let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Down);
-    let focused_footer = last_line(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    assert!(
-        focused_footer.contains("选中"),
-        "有焦点时底栏应显示「选中」：{focused_footer:?}"
-    );
-
-    press(&mut app, KeyCode::Esc);
-    assert!(app.focus.is_none(), "Esc 应清除焦点");
-    assert_eq!(app.screen, Screen::Home, "Esc 不应离开主页");
-    let footer_after = last_line(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    assert!(
-        !footer_after.contains("选中"),
-        "Esc 后底栏应恢复常规提示：{footer_after:?}"
-    );
-    assert_eq!(footer_after, regular_footer, "底栏应恢复成无焦点时的样子");
-}
-
-/// 底栏有焦点时显示「选中 {label}」与焦点操作键。
-#[test]
-fn the_footer_shows_the_selected_label_and_the_focus_keys() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-
-    for label in ["开始学习", "自由练习"] {
-        let index = label_index(&app, area, label);
-        app.focus = Some(index);
-        let footer = last_line(&app, WIDE_WIDTH, WIDE_HEIGHT);
-        assert!(footer.contains("选中"), "底栏应显示「选中」：{footer:?}");
-        assert!(
-            footer.contains(label),
-            "底栏应显示当前 label「{label}」：{footer:?}"
-        );
-        assert!(footer.contains("↑↓←→"), "底栏应提示方向键：{footer:?}");
-        assert!(footer.contains("enter"), "底栏应提示 enter：{footer:?}");
-        assert!(footer.contains("esc"), "底栏应提示 esc：{footer:?}");
-    }
-}
-
-/// 焦点高亮 = 整块 accent 底 + BOLD（不再用 selection 底 / 左侧竖条 / 反显）。
-#[test]
-fn the_focus_highlight_fills_the_whole_target_with_accent() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
-    let theme = app.theme();
-
-    // 无焦点：全屏没有反显。
-    let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    assert!(
-        reversed_cells(terminal.backend().buffer(), WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
-        "无焦点时全屏不应有反显单元格"
-    );
-
-    // 「每日目标 +」的文字全是 ASCII：高亮可以逐格核对。
-    let plus_index = label_index(&app, area, "每日目标 +");
-    let plus_rect = focus::targets(&app, area)[plus_index].rect;
-    app.focus = Some(plus_index);
-    let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    let buffer = terminal.backend().buffer();
-    for x in plus_rect.x..plus_rect.right() {
-        let cell = buffer.cell((x, plus_rect.y)).expect("cell");
-        assert_eq!(
-            cell.bg, theme.accent,
-            "焦点矩形 ({x}, {}) 应整块是 accent 底色",
-            plus_rect.y
-        );
-        assert!(
-            cell.modifier.contains(Modifier::BOLD),
-            "焦点矩形 ({x}, {}) 应加粗",
-            plus_rect.y
-        );
-    }
-    assert!(
-        reversed_cells(buffer, WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
-        "焦点高亮不应使用 REVERSED"
-    );
-    // 整块高亮不能溢出焦点矩形。
-    let right_of_rect = buffer.cell((plus_rect.right(), plus_rect.y)).expect("cell");
-    assert_ne!(
-        right_of_rect.bg, theme.accent,
-        "accent 高亮不应溢出焦点矩形"
-    );
-
-    // 中文主按钮：宽字符尾随格在 buffer 里可能仍是默认样式，跳过它们。
-    let start_index = label_index(&app, area, "开始学习");
-    let start_rect = focus::targets(&app, area)[start_index].rect;
-    app.focus = Some(start_index);
-    let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    let buffer = terminal.backend().buffer();
-    let mut checked = 0usize;
-    for y in start_rect.y..start_rect.bottom() {
-        for x in start_rect.x..start_rect.right() {
-            if is_wide_tail(buffer, x, y) {
-                continue;
-            }
-            let Some(cell) = buffer.cell((x, y)) else {
-                continue;
-            };
-            assert_eq!(
-                cell.bg, theme.accent,
-                "焦点矩形内 ({x}, {y}) 应整块是 accent 底色"
-            );
-            assert!(
-                cell.modifier.contains(Modifier::BOLD),
-                "焦点矩形内 ({x}, {y}) 应加粗"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 0, "「开始学习」矩形内应有可核对的高亮单元格");
-
-    // Esc 之后：整块高亮应消失，主按钮恢复常态（accent 底，无额外竖条）。
-    press(&mut app, KeyCode::Esc);
-    assert!(app.focus.is_none(), "Esc 应清除焦点");
-    let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
-    let buffer = terminal.backend().buffer();
-    let start_cell = buffer.cell((start_rect.x, start_rect.y)).expect("cell");
-    assert_eq!(
-        start_cell.bg, theme.accent,
-        "Esc 后主按钮应恢复 accent 常态底色"
-    );
-    assert!(
-        reversed_cells(buffer, WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
-        "Esc 后全屏不应有反显单元格"
-    );
-}
-
-/// 120×40 / 80×24 / 60×20 下反复按四个方向键都不 panic，焦点始终在视口内。
-///
-/// 焦点可以落在导航栏或内容区，但任何一栏都不该越出屏幕。
-#[test]
-fn focus_navigation_stays_inside_the_viewport_on_every_terminal_size() {
-    for (width, height) in [
-        (WIDE_WIDTH, WIDE_HEIGHT),
-        (NARROW_WIDTH, NARROW_HEIGHT),
-        (MINIMUM_WIDTH, MINIMUM_HEIGHT),
-    ] {
-        let (_fixture, mut app) = test_app(width, height);
-        let area = Rect::new(0, 0, width, height);
-        let content_x = shell::layout(area, Nav::Home).content.x;
-        if width == WIDE_WIDTH {
-            assert_eq!(content_x, WIDE_CONTENT_X, "120 宽时正文应起于第 28 列");
-        }
-        let targets = focus::targets(&app, area);
-        assert!(!targets.is_empty(), "{width}x{height} 主页应有可聚焦目标");
-
-        // 只按 ↓/→：内容区与导航栏都能走到，焦点不该越出屏幕。
-        let directions = [KeyCode::Down, KeyCode::Right];
-        for (step, direction) in directions.iter().cycle().take(12).enumerate() {
-            press(&mut app, *direction);
-            let rect = focus::focused_rect(&app, area)
-                .unwrap_or_else(|| panic!("{width}x{height} 下第 {} 次按键后应有焦点", step + 1));
-            assert!(
-                rect.width > 0 && rect.height > 0,
-                "{width}x{height} 下焦点矩形不应为空：{rect:?}"
-            );
-            assert!(
-                rect.x >= area.x && rect.right() <= area.right(),
-                "{width}x{height} 下焦点越出了左右边界：{rect:?}"
-            );
-            assert!(
-                rect.y >= area.y && rect.bottom() <= area.bottom(),
-                "{width}x{height} 下焦点越出了上下边界：{rect:?}"
-            );
-        }
-    }
-}
-
-/// 其它页面的方向键语义不变：统计页上下键仍滚动画布，不产生焦点。
-#[test]
-fn arrow_keys_on_the_stats_page_still_scroll_instead_of_moving_focus() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-
-    press(&mut app, KeyCode::Char('4'));
-    assert_eq!(app.screen, Screen::Stats, "数字键 4 应切到统计页");
-    assert!(focus::pane(&app).is_none(), "非主页不应有可聚焦栏");
-    assert!(app.focus.is_none(), "统计页不应出现主页焦点");
-
-    let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;
-    assert!(max_scroll >= 1, "统计页正文应至少有可滚动的一行");
-
     press(&mut app, KeyCode::Down);
-    assert_eq!(
-        app.stats_scroll,
-        1.min(max_scroll),
-        "下方向键应滚动统计页，而不是移动焦点"
-    );
-    assert!(app.focus.is_none(), "统计页滚动不应产生主页焦点");
+    assert_eq!(label(&app), Some("词库页"));
+    press(&mut app, KeyCode::Left);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    press(&mut app, KeyCode::Right);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    assert_eq!(label(&app), Some("词库页"), "回到内容区应恢复原选择");
+}
 
+/// 宽屏侧栏：↑/↓ 走导航项（含「退出」），→ 回内容区。
+#[test]
+fn wide_nav_walks_every_item_including_quit() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("单词"));
+    let expected = ["文章", "词库", "统计", "帮助", "设置", "退出"];
+    for label_text in expected {
+        press(&mut app, KeyCode::Down);
+        assert_eq!(label(&app), Some(label_text), "宽屏侧栏 ↓ 顺序");
+    }
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("退出"), "最后一项继续 ↓ 停住");
     press(&mut app, KeyCode::Up);
-    assert_eq!(app.stats_scroll, 0, "上方向键应把统计页滚回顶部");
+    assert_eq!(label(&app), Some("设置"));
+
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.confirm.is_some(), "Enter 在「退出」上应打开确认弹层");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.confirm.is_none(), "Esc 应取消退出确认");
+}
+
+/// 导航栏 Enter 落在当前页入口：不切页，但要有可感知提示。
+#[test]
+fn enter_on_the_current_nav_entry_gives_feedback() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("单词"));
+    app.toasts.clear();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Home);
+    assert!(!app.toasts.is_empty(), "Enter 在当前页入口上应给出提示");
+    assert_eq!(label(&app), Some("单词"), "焦点应保持");
+}
+
+/// 窄屏顶栏是横向的：←/→ 选标签，↓ 进内容区；内容区最顶带再 ↑ 才回顶栏。
+#[test]
+fn narrow_topbar_is_horizontal_and_down_enters_content() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    assert_eq!(label(&app), Some("单词"));
+    press(&mut app, KeyCode::Right);
+    assert_eq!(label(&app), Some("文章"), "窄屏 → 应向右移到下一个标签");
+    press(&mut app, KeyCode::Right);
+    assert_eq!(label(&app), Some("词库"));
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("文章"));
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(focus::pane(&app), Some(Pane::Content), "窄屏 ↓ 应进内容区");
+    assert_eq!(label(&app), Some("开始学习"));
+    press(&mut app, KeyCode::Up);
+    assert_eq!(label(&app), Some("每日目标 -"), "内容区 ↑ 先走视觉行带");
+    press(&mut app, KeyCode::Up);
+    assert_eq!(label(&app), Some("练习模式"));
+    press(&mut app, KeyCode::Up);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav), "顶带再 ↑ 才回顶栏");
+    assert_eq!(label(&app), Some("单词"));
+}
+
+/// 窄屏顶栏到边停住，不回头回绕。
+#[test]
+fn narrow_topbar_stops_at_the_edges() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("单词"));
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app), Some("单词"), "最左标签继续 ← 停住");
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Right);
+    }
+    assert_eq!(label(&app), Some("设置"), "最后一个标签");
+    press(&mut app, KeyCode::Right);
+    assert_eq!(label(&app), Some("设置"), "最右标签继续 → 停住");
+}
+
+/// 宽屏 resize 后元素消失：Enter 不再触发任何动作，只清焦点并提示。
+#[test]
+fn resize_that_removes_the_focused_target_cannot_trigger_actions() {
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::Free);
+    app.set_viewport(area_of(MINIMUM));
+    assert_eq!(label(&app), None, "60×20 没有自由练习目标");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Home);
+    assert!(app.session.is_none());
+    assert!(app.focus.is_none());
+    assert!(!app.toasts.is_empty(), "失效焦点应给出提示");
+}
+
+/// resize 后元素仍在（只是位置变了）：焦点身份保持，不会指到别人。
+#[test]
+fn resize_keeps_the_same_identity_when_the_target_still_exists() {
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::DailyMinus);
+    app.set_viewport(area_of(MINIMUM));
+    assert_eq!(label(&app), Some("每日目标 -"), "身份应仍指向同一个按钮");
+    let before = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    press(&mut app, KeyCode::Enter);
+    let after = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    assert_eq!(label(&app), Some("每日目标 -"), "调整后焦点保持");
+    assert_eq!(
+        after,
+        before.saturating_sub(5).max(1),
+        "Enter 应仍是每日目标 -5"
+    );
+}
+
+/// 模式名变长导致模式标签消失：焦点失效，Enter 不能进单词测试。
+#[test]
+fn disappearing_mode_target_does_not_start_a_words_test() {
+    let (_fixture, mut app) = test_app(NARROW);
+    app.boot.settings.word_practice_mode = WordPracticeMode::ShuffleWordsTest;
+    set_content(&mut app, ContentId::Mode);
+    assert_eq!(label(&app), None);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Home);
+    assert!(app.word_test.is_none());
+    assert!(app.focus.is_none());
+    assert!(!app.toasts.is_empty());
+}
+
+/// 弹层打开时两栏都不画主页焦点（导航栏与内容区一致）。
+#[test]
+fn modal_hides_focus_on_both_panes() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Left);
+    press(&mut app, KeyCode::Char('m'));
+    assert!(app.mode_picker.is_some());
+    assert!(
+        focus::focused_rect(&app, app.viewport).is_none(),
+        "导航栏焦点应隐藏"
+    );
+    assert!(focus::focused_label(&app, app.viewport).is_none());
+    press(&mut app, KeyCode::Esc);
+
+    press(&mut app, KeyCode::Esc);
+    set_content(&mut app, ContentId::Start);
+    press(&mut app, KeyCode::Char('m'));
+    assert!(app.mode_picker.is_some());
+    assert!(
+        focus::focused_rect(&app, app.viewport).is_none(),
+        "内容区焦点应隐藏"
+    );
+}
+
+/// 终端低于 60×20 时按键被忽略，不能盲操作看不见的主页。
+#[test]
+fn keys_are_ignored_below_the_minimum_terminal_size() {
+    let (_fixture, mut app) = test_app((59, 19));
+    press(&mut app, KeyCode::Down);
+    assert!(app.focus.is_none());
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Home);
+    assert!(app.session.is_none());
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.confirm.is_none());
+}
+
+/// 底栏有焦点时显示「选中 X / ↑↓←→ 移动 / enter 触发 / esc 取消」。
+#[test]
+fn footer_shows_the_selected_label_and_move_hint() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Down);
+    let footer = last_line(&app, WIDE);
+    assert!(footer.contains("选中"), "底栏应显示选中：{footer:?}");
+    assert!(footer.contains("开始学习"), "底栏应显示 label：{footer:?}");
+    assert!(footer.contains("↑↓←→"), "底栏应提示方向键：{footer:?}");
+    assert!(footer.contains("移动"), "底栏提示应为移动：{footer:?}");
+    assert!(footer.contains("enter"));
+    assert!(footer.contains("esc"));
+}
+
+/// Esc 清焦点，底栏恢复常规提示。
+#[test]
+fn escape_clears_focus_and_restores_the_regular_footer() {
+    let (_fixture, mut app) = test_app(WIDE);
+    let regular = last_line(&app, WIDE);
+    press(&mut app, KeyCode::Down);
+    assert!(app.focus.is_some());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.focus.is_none());
+    assert!(app.last_content_focus.is_none());
+    assert_eq!(last_line(&app, WIDE), regular);
+}
+
+/// 焦点高亮 = 整块 accent + BOLD，且不溢出目标矩形。
+#[test]
+fn focus_highlight_fills_the_whole_target() {
+    let (_fixture, mut app) = test_app(WIDE);
+    let theme = app.theme();
+    let plus = focus::content_target(&app, app.viewport, ContentId::DailyPlus).expect("目标");
+    set_content(&mut app, ContentId::DailyPlus);
+    let backend = TestBackend::new(WIDE.0, WIDE.1);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for x in plus.rect.x..plus.rect.right() {
+        let cell = buffer.cell((x, plus.rect.y)).expect("cell");
+        assert_eq!(cell.bg, theme.accent, "焦点矩形应整块 accent");
+        assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
+    }
+    let right_of = buffer.cell((plus.rect.right(), plus.rect.y)).expect("cell");
+    assert_ne!(right_of.bg, theme.accent, "高亮不应溢出");
+}
+
+/// 导航目标：宽屏 7 项（含退出），窄屏 6 项。
+#[test]
+fn nav_targets_match_the_visible_navigation() {
+    let (_fixture, app) = test_app(WIDE);
+    let wide = focus::nav_targets(&app, app.viewport);
+    assert_eq!(wide.len(), 7);
+    assert_eq!(wide.last().and_then(|target| target.label), Some("退出"));
+
+    let (_fixture, app) = test_app(NARROW);
+    let narrow = focus::nav_targets(&app, app.viewport);
+    assert_eq!(narrow.len(), 6);
+    assert!(narrow.iter().all(|target| target.label != Some("退出")));
+}
+
+/// 内容区目标身份唯一且与 label 对应。
+#[test]
+fn content_targets_have_unique_ids() {
+    let (_fixture, app) = test_app(WIDE);
+    let targets = focus::content_targets(&app, app.viewport);
+    let mut ids: Vec<_> = targets.iter().filter_map(|target| target.focus).collect();
+    ids.sort_by_key(|id| format!("{id:?}"));
+    ids.dedup();
+    assert_eq!(ids.len(), targets.len());
+}
+
+/// 数字键切页后焦点与「上次内容选择」都清空。
+#[test]
+fn switching_screens_clears_focus_and_remembered_selection() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(label(&app), Some("自由练习"));
+    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.screen, Screen::DictPicker);
+    assert!(app.focus.is_none());
+    assert!(app.last_content_focus.is_none());
+}
+
+/// 其它页面的方向键语义不受影响：统计页仍是滚动，不产生主页焦点。
+#[test]
+fn stats_arrows_still_scroll_instead_of_moving_focus() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, Screen::Stats);
+    assert!(focus::pane(&app).is_none());
+    let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;
+    assert!(max_scroll >= 1);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.stats_scroll, 1.min(max_scroll));
     assert!(app.focus.is_none());
 }
 
-/// 用数字键切页同样清空焦点（离开主页后旧下标就没有意义了）。
+/// 焦点在弹层关闭后恢复；模式弹层关闭后 Enter 仍是「练习模式」。
 #[test]
-fn switching_screens_clears_the_focus() {
-    let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    press(&mut app, KeyCode::Down);
-    assert!(app.focus.is_some(), "按方向键后应有焦点");
+fn focus_survives_overlay_roundtrip() {
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::Mode);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.mode_picker.is_some());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.mode_picker.is_none());
+    assert_eq!(label(&app), Some("练习模式"));
+    press(&mut app, KeyCode::Enter);
+    assert!(app.mode_picker.is_some(), "再次 Enter 应重新打开模式弹层");
+}
 
-    press(&mut app, KeyCode::Char('3'));
-    assert_eq!(app.screen, Screen::DictPicker, "数字键 3 应切到词库页");
-    assert!(app.focus.is_none(), "切换页面后焦点应清空");
+/// 宽屏内容区最左项不会把「上一项」解释成换栏以外的语义：← 就是进导航。
+#[test]
+fn left_from_the_first_content_band_enters_nav_not_wraps() {
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::Start);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    assert_eq!(label(&app), Some("单词"));
+    assert!(
+        !shell::layout(app.viewport, Nav::Home).narrow,
+        "120×40 应是宽屏布局"
+    );
+}
+
+/// 鼠标点击可聚焦元素会把焦点同步过去；点空白清空焦点。
+#[test]
+fn mouse_click_syncs_the_focus_to_the_clicked_target() {
+    let (_fixture, mut app) = test_app(WIDE);
+    let target = focus::content_target(&app, app.viewport, ContentId::DailyMinus).expect("目标");
+    let before = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + 1,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        app.viewport,
+    );
+    assert_eq!(label(&app), Some("每日目标 -"), "点击后焦点应跟到被点元素");
+    let after = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    assert_eq!(after, before.saturating_sub(5).max(1));
+
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        app.viewport,
+    );
+    assert!(app.focus.is_none(), "点空白应清空焦点");
+}
+
+fn buffer_of(app: &app::App, size: (u16, u16)) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(size.0, size.1);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+/// 焦点在主按钮上时必须有可见变化：常态 element 底，选中 accent 底。
+#[test]
+fn focus_on_the_primary_button_is_visible() {
+    let (_fixture, mut app) = test_app(WIDE);
+    let theme = app.theme();
+    let start = focus::content_target(&app, app.viewport, ContentId::Start).expect("目标");
+    let normal = buffer_of(&app, WIDE);
+    let cell = normal.cell((start.rect.x + 1, start.rect.y)).expect("cell");
+    assert_eq!(cell.bg, theme.element, "主按钮常态应是 element 底");
+
+    set_content(&mut app, ContentId::Start);
+    let focused = buffer_of(&app, WIDE);
+    let cell = focused
+        .cell((start.rect.x + 1, start.rect.y))
+        .expect("cell");
+    assert_eq!(cell.bg, theme.accent, "选中的主按钮应是 accent 底");
+}
+
+/// Enter 仍然触发各内容区动作（开始 / 自由 / 词库 / 每日目标）。
+#[test]
+fn enter_still_triggers_each_content_action() {
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::Start);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Practice);
+    assert!(app.session.is_some());
+
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::Free);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Practice);
+    let session = app.session.as_ref().expect("会话");
+    assert_eq!(session.mode, WordPracticeMode::Free);
+
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::DictPage);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::DictPicker);
+    assert!(app.focus.is_none(), "切页应清焦点");
+
+    let (_fixture, mut app) = test_app(WIDE);
+    set_content(&mut app, ContentId::DailyMinus);
+    let before = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    press(&mut app, KeyCode::Enter);
+    let after = app
+        .boot
+        .base
+        .study_dict()
+        .expect("夹具应有学习词典")
+        .per_day();
+    assert_eq!(after, before.saturating_sub(5).max(1));
+    assert_eq!(label(&app), Some("每日目标 -"), "调整后焦点保持");
+}
+
+/// 导航栏 Enter 仍然切页（文章），并清空焦点。
+#[test]
+fn enter_on_a_nav_item_navigates() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Left);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("文章"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Articles);
+    assert!(app.focus.is_none());
 }

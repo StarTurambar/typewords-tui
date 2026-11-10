@@ -32,10 +32,17 @@ use ratatui::widgets::Block;
 
 use crate::app::{App, Screen};
 
+/// 可交互的最小终端尺寸；低于它只画「终端太小」。
+///
+/// 键盘 / 鼠标分发也按它判断（`App::interactive`），保证「画不出来的界面
+/// 不会被看不见的按键改到」。
+pub const MIN_WIDTH: u16 = 60;
+pub const MIN_HEIGHT: u16 = 20;
+
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
     let theme = app.theme();
-    if area.width < 60 || area.height < 20 {
+    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         shell::render_too_small(frame, area, &theme);
         return;
     }

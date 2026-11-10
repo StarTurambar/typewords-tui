@@ -67,7 +67,7 @@ const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Key("a", "文章背诵"),
     HelpEntry::Key("Ctrl+F", "练习流程"),
     HelpEntry::Key("m", "切换练习模式"),
-    HelpEntry::Key("↑ ↓ ← →", "主页选择 / 切换左右两栏（Enter 触发）"),
+    HelpEntry::Key("↑ ↓ ← →", "主页：栏内选择/换栏（Enter）"),
     HelpEntry::Key("Enter", "开始学习 / 触发选中项"),
     HelpEntry::Key("f", "自由练习"),
     HelpEntry::Key("+ / -", "每日词数 ±5（设置页可精确输入）"),

@@ -1,13 +1,15 @@
-//! 主页键盘焦点：导航区 / 内容区两栏，方向键在栏内逐项移动。
+//! 主页键盘焦点：状态迁移与 Enter 触发。
 //!
-//! 应用层只保存「当前栏 + 焦点下标」，栏内顺序与几何全部交给 `ui::focus`。
-//! 导航栏目标来自 `shell::layout` 的 `nav_targets`（与鼠标命中同源），内容区
-//! 来自 `home::targets`——所以键盘选中的一定是画出来、点得到的那一块。
+//! 焦点身份（FocusId）由 ui::focus 定义，几何与带模型也在那儿；应用层只保存
+//! 「当前焦点 + 内容区上次选择」，并在每次操作前按当前 viewport 解析身份。
+//! 身份失效时绝不回退到 StartPractice——那会让「看不见的高亮」按 Enter 就开练。
 
 use super::{Action, App, Screen};
-use crate::ui::focus::{self, Pane};
+use crate::domain::flow::navigator::NoticeLevel;
+use crate::ui::focus::{self, ContentId, FocusId, NavId, NavOrientation};
+use crate::ui::shell::Nav;
 
-/// 方向键方向：`↑`/`←` 上一项，`↓`/`→` 下一项。
+/// 方向键方向。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusDir {
     Up,
@@ -17,67 +19,123 @@ pub enum FocusDir {
 }
 
 impl App {
-    /// 方向键：栏内逐项移动焦点，`←`/`→` 在导航栏与内容区之间切换。
-    ///
-    /// 还没有焦点时：`↓`/`→` 选中内容区第一项（开始 / 继续学习），
-    /// `↑`/`←` 进入导航栏并选中当前页面对应的入口——两个方向都有确定落点，
-    /// 不会出现「按了没反应」。
+    /// 方向键：按栏的主轴移动；到边时跨栏（宽屏左右跨、窄屏上下跨）。
     pub(crate) fn move_focus(&mut self, direction: FocusDir) {
         if self.screen != Screen::Home {
             return;
         }
-        let in_nav = matches!(self.focus_pane, Some(Pane::Nav));
-        let content = focus::content_targets(self, self.viewport);
-        let nav = focus::nav_targets(self, self.viewport);
-
-        // 跨栏：← 从内容区进导航栏（选中当前页对应的入口），
-        // → 从导航栏回内容区（重新进入选择状态）。
-        if !in_nav && matches!(direction, FocusDir::Left) {
-            self.focus_pane = Some(Pane::Nav);
-            self.focus = focus::nav_current_index(self, self.viewport);
-            return;
-        }
-        if in_nav && matches!(direction, FocusDir::Right) {
-            self.focus_pane = Some(Pane::Content);
+        let area = self.viewport;
+        // 布局变化让当前身份失效时，按「没有焦点」重新起步，而不是继续用旧身份。
+        if self.focus.is_some() && focus::focused_target(self, area).is_none() {
             self.focus = None;
-            return;
         }
-
-        let targets = if in_nav { nav } else { content };
-        if targets.is_empty() {
-            self.focus = None;
-            return;
+        match self.focus {
+            None => self.focus_from_idle(direction, area),
+            Some(FocusId::Content(id)) => self.move_content_focus(id, direction, area),
+            Some(FocusId::Nav(id)) => self.move_nav_focus(id, direction, area),
         }
-        let step = match direction {
-            FocusDir::Down | FocusDir::Right => 1,
-            FocusDir::Up | FocusDir::Left => -1,
-        };
-        self.focus = focus::step(&targets, self.focus, step);
-        self.focus_pane = Some(if in_nav { Pane::Nav } else { Pane::Content });
     }
 
-    /// Enter：触发焦点元素；没有焦点时保持原有语义（开始练习）。
+    /// 无焦点时：上/左进导航栏，下/右落内容区主按钮。
+    fn focus_from_idle(&mut self, direction: FocusDir, area: ratatui::layout::Rect) {
+        match direction {
+            FocusDir::Up | FocusDir::Left => self.enter_nav(area),
+            FocusDir::Down | FocusDir::Right => self.enter_content(area),
+        }
+    }
+
+    fn move_content_focus(
+        &mut self,
+        id: ContentId,
+        direction: FocusDir,
+        area: ratatui::layout::Rect,
+    ) {
+        if let Some(next) = focus::content_move(self, area, id, direction) {
+            self.set_content_focus(next);
+            return;
+        }
+        // 内容区到边才跨栏：宽屏用左，窄屏用上。右/下在内容区永远不跨栏。
+        let narrow = focus::nav_orientation(area) == NavOrientation::Horizontal;
+        let crosses = match direction {
+            FocusDir::Left => !narrow,
+            FocusDir::Up => narrow,
+            _ => false,
+        };
+        if crosses {
+            self.enter_nav(area);
+        }
+    }
+
+    fn move_nav_focus(&mut self, id: NavId, direction: FocusDir, area: ratatui::layout::Rect) {
+        if let Some(next) = focus::nav_move(self, area, id, direction) {
+            self.focus = Some(FocusId::Nav(next));
+            return;
+        }
+        // 导航栏到边才回内容区：宽屏用右，窄屏用下。
+        let narrow = focus::nav_orientation(area) == NavOrientation::Horizontal;
+        let crosses = match direction {
+            FocusDir::Right => !narrow,
+            FocusDir::Down => narrow,
+            _ => false,
+        };
+        if crosses {
+            self.enter_content(area);
+        }
+    }
+
+    fn enter_nav(&mut self, area: ratatui::layout::Rect) {
+        self.focus = focus::nav_entry(self, area).map(FocusId::Nav);
+    }
+
+    fn enter_content(&mut self, area: ratatui::layout::Rect) {
+        let remembered = self
+            .last_content_focus
+            .filter(|id| focus::content_target(self, area, *id).is_some());
+        match remembered.or_else(|| focus::content_default(self, area)) {
+            Some(id) => self.set_content_focus(id),
+            None => self.focus = None,
+        }
+    }
+
+    /// 进入/移动内容区焦点：同时记住它，供跨栏回来时恢复。
+    fn set_content_focus(&mut self, id: ContentId) {
+        self.focus = Some(FocusId::Content(id));
+        self.last_content_focus = Some(id);
+    }
+
+    /// Enter：触发当前焦点；没有焦点时保持原有语义（开始 / 继续学习）。
+    ///
+    /// 焦点身份失效（如窗口缩放后该按钮消失）时只清焦点并提示，绝不回退成
+    /// 开始练习——否则用户会在「看不到任何选中」的状态下被直接丢进练习页。
     pub(crate) fn activate_focus(&mut self) {
         if self.screen != Screen::Home {
             return;
         }
-        let Some(index) = self.focus else {
-            self.apply_action(Action::StartPractice);
+        let Some(target) = focus::focused_target(self, self.viewport) else {
+            if self.focus.is_some() {
+                self.clear_focus();
+                self.toast(NoticeLevel::Info, "选中项已随布局变化失效，请重新选择");
+            } else {
+                self.apply_action(Action::StartPractice);
+            }
             return;
         };
-        let targets = focus::targets(self, self.viewport);
-        let Some(action) = targets.get(index).map(|target| target.action.clone()) else {
-            // 布局变了（例如终端尺寸变化后目标变少）：清掉失效下标并回退。
-            self.focus = None;
-            self.apply_action(Action::StartPractice);
+        // 导航栏当前页入口：Enter 不会改变画面，至少给一条提示，避免「按了没反应」。
+        if let Action::Navigate(screen) = &target.action
+            && *screen == self.screen
+        {
+            self.toast(
+                NoticeLevel::Info,
+                format!("已在「{}」页", Nav::from_screen(*screen).label()),
+            );
             return;
-        };
-        self.apply_action(action);
+        }
+        self.apply_action(target.action);
     }
 
     /// Esc：取消选中，回到「无焦点」状态。
     pub(crate) fn clear_focus(&mut self) {
         self.focus = None;
-        self.focus_pane = None;
+        self.last_content_focus = None;
     }
 }

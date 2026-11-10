@@ -1,159 +1,247 @@
-//! 主页键盘焦点：导航区 / 内容区两栏，方向键在栏内逐项移动。
+//! 主页键盘焦点：焦点身份、两栏与方向移动规则。
 //!
-//! 主页有两个「栏」：宽屏左侧是导航栏（单词 / 文章 / 词库 / 统计 / 帮助 /
-//! 设置），右侧是页面内容（开始学习、每日目标、词库入口…）。窄屏没有侧栏，
-//! 顶栏的标签承担导航栏的角色。
+//! 焦点不存「列表下标」，而存 FocusId（导航栏 NavId / 内容区 ContentId）。
+//! 下标会随终端尺寸、练习模式名、词库数量、区块显隐漂移；身份不会。
+//! 每次按键、Enter、绘制底栏与高亮前，都按当前布局把身份解析成目标；
+//! 解析不到就视为失效（清空焦点，不触发任何动作）。
 //!
-//! `←` 从内容区跳到导航栏（光标落在当前页面对应的入口上），`→` 从导航栏
-//! 回到内容区；`↑`/`↓` 只在当前栏内逐项移动、到头回绕。这样只靠四个方向键
-//! 就能在页面之间切换，不必记 `1`~`6` 数字键。
+//! 主页有两个栏：宽屏左侧导航栏（竖向）/ 右侧内容区；窄屏顶部导航栏（横向）/
+//! 下方内容区。方向键按栏的主轴工作：
 //!
-//! 栏内目标与鼠标命中同源（导航用 `shell::layout` 的 `nav_targets`，内容用
-//! `home::targets`），所以键盘选中的一定是画出来、点得到的那一块。
+//! - 内容区按视觉行分带（带内左右移动，带间上下移动），方向永不反转。
+//! - 宽屏侧栏：上/下选导航项，右回内容区；窄屏顶栏：左/右选标签，下回内容区。
+//!   跨栏时记住内容区上一次的选择，回来即可恢复。
+//! - 无焦点时 下/右 落「开始 / 继续学习」，上/左 进导航栏。
+//! - 到边不回头回绕：焦点始终可见，下键绝不会向上跳。
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
-use crate::app::{Action, App, Screen};
+use crate::app::{Action, App, FocusDir, Screen};
+use crate::ui::home;
 use crate::ui::shell::{self, Nav};
 use crate::ui::target::Target;
+pub use crate::ui::target::{ContentId, FocusId, NavId};
 use crate::ui::theme::Theme;
 
 /// 焦点所在的栏。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
-    /// 左侧导航（宽屏侧栏 / 窄屏顶栏标签）。
+    /// 导航栏（宽屏侧栏 / 窄屏顶栏）。
     Nav,
-    /// 右侧页面内容。
+    /// 页面内容。
     Content,
 }
 
-/// 当前焦点所在的栏；不在主页时返回 `None`。
-///
-/// 默认在内容区：进主页时用户关心的是「开始学习」这类操作；`←` 随时可以
-/// 去导航栏，`→` 再回来。
+/// 导航栏的主轴：宽屏侧栏竖向、窄屏顶栏横向。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavOrientation {
+    Vertical,
+    Horizontal,
+}
+
+impl NavId {
+    pub fn from_nav(nav: Nav) -> Self {
+        match nav {
+            Nav::Home => NavId::Word,
+            Nav::Articles => NavId::Articles,
+            Nav::Dicts => NavId::Dicts,
+            Nav::Stats => NavId::Stats,
+            Nav::Help => NavId::Help,
+            Nav::Settings => NavId::Settings,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NavId::Word => Nav::Home.label(),
+            NavId::Articles => Nav::Articles.label(),
+            NavId::Dicts => Nav::Dicts.label(),
+            NavId::Stats => Nav::Stats.label(),
+            NavId::Help => Nav::Help.label(),
+            NavId::Settings => Nav::Settings.label(),
+            NavId::Quit => "退出",
+        }
+    }
+}
+
+/// 当前焦点所在的栏；不在主页或没有焦点时返回 None。
 pub fn pane(app: &App) -> Option<Pane> {
-    (app.screen == Screen::Home).then_some(match app.focus_pane {
-        Some(Pane::Nav) => Pane::Nav,
-        _ => Pane::Content,
+    if app.screen != Screen::Home {
+        return None;
+    }
+    Some(match app.focus? {
+        FocusId::Nav(_) => Pane::Nav,
+        FocusId::Content(_) => Pane::Content,
     })
 }
 
-/// 导航栏的目标（宽屏侧栏 / 窄屏顶栏）。
-///
-/// 当前页面对应的入口排在最前，这样没有焦点时按 `↓` 就会落在它上面。
+/// 导航栏的主轴（布局在窄屏时是顶栏，否则是侧栏）。
+pub fn nav_orientation(area: Rect) -> NavOrientation {
+    if shell::layout(area, Nav::Home).narrow {
+        NavOrientation::Horizontal
+    } else {
+        NavOrientation::Vertical
+    }
+}
+
+/// 导航栏的可聚焦目标（宽屏侧栏 / 窄屏顶栏，宽屏额外包含底部「退出」）。
 pub fn nav_targets(app: &App, area: Rect) -> Vec<Target> {
+    if app.screen != Screen::Home || super::hit::modal_open(app) {
+        return Vec::new();
+    }
     let shell = shell::layout(area, Nav::Home);
     let mut targets: Vec<Target> = shell
         .nav_targets
         .iter()
         .map(|(screen, rect)| {
-            let mut target = Target::new(*rect, Action::Navigate(*screen));
-            target.label = Some(Nav::from_screen(*screen).label());
-            target
+            let nav = Nav::from_screen(*screen);
+            Target::focusable(
+                *rect,
+                Action::Navigate(*screen),
+                nav.label(),
+                FocusId::Nav(NavId::from_nav(nav)),
+            )
         })
         .collect();
-    let current = targets
-        .iter()
-        .position(|target| match target.action {
-            Action::Navigate(screen) => Nav::from_screen(screen) == Nav::from_screen(app.screen),
-            _ => false,
-        })
-        .unwrap_or(0);
-    if current > 0 {
-        let item = targets.remove(current);
-        targets.insert(0, item);
+    if let Some(quit) = shell.quit_target {
+        targets.push(Target::focusable(
+            quit,
+            Action::QuitRequest,
+            "退出",
+            FocusId::Nav(NavId::Quit),
+        ));
     }
     targets
 }
 
-/// 导航栏里「当前页面对应入口」的下标（进导航栏时的落点）。
-pub fn nav_current_index(app: &App, area: Rect) -> Option<usize> {
-    nav_targets(app, area)
-        .iter()
-        .position(|target| match target.action {
-            Action::Navigate(screen) => Nav::from_screen(screen) == Nav::from_screen(app.screen),
-            _ => false,
-        })
-        .or(Some(0))
-}
-
-/// 内容区的目标（开始学习 / 自由练习 / 每日目标 / 词库入口 / 练习模式）。
+/// 内容区的可聚焦目标（开始 / 自由 / 词库入口 / 每日目标 / 模式）。
 pub fn content_targets(app: &App, area: Rect) -> Vec<Target> {
-    if super::hit::modal_open(app) {
+    if app.screen != Screen::Home || super::hit::modal_open(app) {
         return Vec::new();
     }
     let shell = shell::layout(area, Nav::Home);
-    let mut targets = super::home::targets(app, shell.content);
-    targets.sort_by_key(|target| tour_rank(&target.action));
-    targets
+    home::targets(app, shell.content)
 }
 
 /// 当前栏的全部目标。
 pub fn targets(app: &App, area: Rect) -> Vec<Target> {
     match pane(app) {
         Some(Pane::Nav) => nav_targets(app, area),
-        _ => content_targets(app, area),
+        Some(Pane::Content) => content_targets(app, area),
+        None => Vec::new(),
     }
 }
 
-/// 内容区巡览顺序（越小越靠前）。
-///
-/// 「开始 / 继续学习」必须是第一项：首次按方向键选中它，再按 Enter 就是
-/// 开始练习——即使误按 Enter 也不会改到任何设置。
-fn tour_rank(action: &Action) -> u8 {
-    match action {
-        Action::StartPractice => 0,
-        Action::StartFreePractice => 1,
-        Action::Navigate(Screen::DictPicker) => 2,
-        Action::AdjustDaily(delta) if *delta < 0 => 3,
-        Action::AdjustDaily(_) => 4,
-        Action::OpenModePicker => 5,
-        // 以后主页新增可点元素时排在末尾，不打乱已有顺序。
-        _ => 9,
+/// 指定身份的内容区目标（按当前布局解析）。
+pub fn content_target(app: &App, area: Rect, id: ContentId) -> Option<Target> {
+    content_targets(app, area)
+        .into_iter()
+        .find(|target| target.focus == Some(FocusId::Content(id)))
+}
+
+/// 指定身份的导航栏目标（按当前布局解析）。
+pub fn nav_target(app: &App, area: Rect, id: NavId) -> Option<Target> {
+    nav_targets(app, area)
+        .into_iter()
+        .find(|target| target.focus == Some(FocusId::Nav(id)))
+}
+
+/// 当前焦点对应的目标；焦点失效（布局变化后元素消失）时返回 None。
+pub fn focused_target(app: &App, area: Rect) -> Option<Target> {
+    match app.focus? {
+        FocusId::Nav(id) => nav_target(app, area, id),
+        FocusId::Content(id) => content_target(app, area, id),
     }
 }
 
 /// 当前焦点对应的矩形。
 pub fn focused_rect(app: &App, area: Rect) -> Option<Rect> {
-    let index = app.focus?;
-    targets(app, area).get(index).map(|target| target.rect)
+    focused_target(app, area).map(|target| target.rect)
 }
 
-/// 当前焦点的提示文案（底栏显示「选中 X」）。
+/// 当前焦点的提示文案（底栏「选中 X」）。
 pub fn focused_label(app: &App, area: Rect) -> Option<&'static str> {
-    let index = app.focus?;
-    let targets = targets(app, area);
-    let target = targets.get(index)?;
-    Some(match target.action {
-        // 有断点时按钮文案是「继续学习」，底栏跟着用同一个词。
-        Action::StartPractice if app.has_saved_practice() => "继续学习",
-        _ => target.label?,
-    })
+    focused_target(app, area).and_then(|target| target.label)
 }
 
-/// 栏内移动一步：`step` 为 `+1`（下一项）/ `-1`（上一项），到头回绕。
+/// 无焦点时下/右的落点：优先「开始 / 继续学习」，否则第一项。
+pub fn content_default(app: &App, area: Rect) -> Option<ContentId> {
+    let targets = content_targets(app, area);
+    targets
+        .iter()
+        .find(|target| target.focus == Some(FocusId::Content(ContentId::Start)))
+        .or_else(|| targets.first())
+        .and_then(content_id)
+}
+
+/// 进入导航栏时的落点：当前页面对应的入口，找不到则第一项。
+pub fn nav_entry(app: &App, area: Rect) -> Option<NavId> {
+    let targets = nav_targets(app, area);
+    let wanted = NavId::from_nav(Nav::from_screen(app.screen));
+    targets
+        .iter()
+        .find(|target| target.focus == Some(FocusId::Nav(wanted)))
+        .or_else(|| targets.first())
+        .and_then(nav_id)
+}
+
+/// 内容区一次方向移动；None 表示该方向没有可移动目标（到边）。
 ///
-/// 还没有焦点时：向下的方向从第一项开始、向上的方向从最后一项开始——
-/// 与菜单里「按 ↓ 选第一项、按 ↑ 选最后一项」的直觉一致。
-pub fn step(targets: &[Target], from: Option<usize>, step: i32) -> Option<usize> {
-    let len = targets.len();
-    if len == 0 {
+/// 上 / 下在视觉行带之间移动（目标带内水平中心最近者），永不反向；
+/// 左 / 右在同一带内按 x 移动。带内到达两端时返回 None，由调用方决定
+/// 是否跨栏。
+pub fn content_move(
+    app: &App,
+    area: Rect,
+    from: ContentId,
+    direction: FocusDir,
+) -> Option<ContentId> {
+    let targets = content_targets(app, area);
+    let current = targets
+        .iter()
+        .position(|target| target.focus == Some(FocusId::Content(from)))?;
+    let bands = bands(&targets);
+    let (band_index, position) = bands.iter().enumerate().find_map(|(band_index, band)| {
+        band.iter()
+            .position(|&index| index == current)
+            .map(|position| (band_index, position))
+    })?;
+
+    let next = match direction {
+        FocusDir::Up => nearest_in_band(&targets, &bands, band_index.checked_sub(1)?, current),
+        FocusDir::Down => nearest_in_band(&targets, &bands, band_index + 1, current),
+        FocusDir::Left => {
+            let previous = position.checked_sub(1)?;
+            bands[band_index].get(previous).copied()
+        }
+        FocusDir::Right => bands[band_index].get(position + 1).copied(),
+    }?;
+    content_id(&targets[next])
+}
+
+/// 导航栏一次方向移动（按当前主轴）；None 表示到边或方向不属于主轴。
+pub fn nav_move(app: &App, area: Rect, from: NavId, direction: FocusDir) -> Option<NavId> {
+    let targets = nav_targets(app, area);
+    let current = targets
+        .iter()
+        .position(|target| target.focus == Some(FocusId::Nav(from)))?;
+    let step = match (nav_orientation(area), direction) {
+        (NavOrientation::Vertical, FocusDir::Up) => -1i32,
+        (NavOrientation::Vertical, FocusDir::Down) => 1,
+        (NavOrientation::Horizontal, FocusDir::Left) => -1,
+        (NavOrientation::Horizontal, FocusDir::Right) => 1,
+        _ => return None,
+    };
+    let next = current as i32 + step;
+    if next < 0 {
         return None;
     }
-    Some(match from {
-        Some(index) if index < len => (index as i32 + step).rem_euclid(len as i32) as usize,
-        _ if step > 0 => 0,
-        _ => len - 1,
-    })
+    nav_id(targets.get(next as usize)?)
 }
 
-/// 焦点高亮：整块用 `accent` 铺满。
-///
-/// 主按钮常态就是 `accent` 底、自由练习按钮是 `element` 底；焦点时两者都变成
-/// 整块 `accent` + `bg` 文字 + 加粗——「整块紫 = 选中」。不再画左侧竖条：
-/// 那会盖住主按钮自己的左边距，看起来像按钮样式被改坏了。
+/// 焦点高亮：整块用 accent 铺满。
 pub fn paint(frame: &mut Frame, rect: Rect, theme: &Theme) {
     frame.buffer_mut().set_style(
         rect,
@@ -164,51 +252,105 @@ pub fn paint(frame: &mut Frame, rect: Rect, theme: &Theme) {
     );
 }
 
+fn content_id(target: &Target) -> Option<ContentId> {
+    match target.focus? {
+        FocusId::Content(id) => Some(id),
+        FocusId::Nav(_) => None,
+    }
+}
+
+fn nav_id(target: &Target) -> Option<NavId> {
+    match target.focus? {
+        FocusId::Nav(id) => Some(id),
+        FocusId::Content(_) => None,
+    }
+}
+
+/// 把目标按视觉行分带：按 y 排序，纵向有重叠的算同一带；带内按 x 排序。
+fn bands(targets: &[Target]) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..targets.len()).collect();
+    order.sort_by_key(|&index| (targets[index].rect.y, targets[index].rect.x));
+    let mut bands: Vec<Vec<usize>> = Vec::new();
+    let mut current_bottom = 0u16;
+    for index in order {
+        let rect = targets[index].rect;
+        if bands.is_empty() || rect.y >= current_bottom {
+            bands.push(vec![index]);
+            current_bottom = rect.bottom();
+        } else {
+            bands
+                .last_mut()
+                .expect("bands 非空时才有 last_mut")
+                .push(index);
+            current_bottom = current_bottom.max(rect.bottom());
+        }
+    }
+    for band in &mut bands {
+        band.sort_by_key(|&index| targets[index].rect.x);
+    }
+    bands
+}
+
+/// 目标带内水平中心最近的元素；没有该带时返回 None。
+fn nearest_in_band(
+    targets: &[Target],
+    bands: &[Vec<usize>],
+    band_index: usize,
+    current: usize,
+) -> Option<usize> {
+    let band = bands.get(band_index)?;
+    let center = center_x(targets[current].rect);
+    band.iter()
+        .copied()
+        .min_by_key(|&index| center_x(targets[index].rect).abs_diff(center))
+}
+
+fn center_x(rect: Rect) -> u16 {
+    rect.x.saturating_add(rect.width / 2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::Action;
 
-    fn targets_for(actions: &[Action]) -> Vec<Target> {
-        actions
-            .iter()
-            .enumerate()
-            .map(|(index, action)| Target::new(Rect::new(0, index as u16, 4, 1), action.clone()))
-            .collect()
+    fn target(y: u16, x: u16, height: u16, width: u16) -> Target {
+        Target::new(Rect::new(x, y, width, height), Action::Back)
     }
 
     #[test]
-    fn step_moves_one_item_and_wraps_at_both_ends() {
-        let targets = targets_for(&[
-            Action::StartPractice,
-            Action::StartFreePractice,
-            Action::OpenModePicker,
-        ]);
-        assert_eq!(step(&targets, None, 1), Some(0));
-        assert_eq!(step(&targets, None, -1), Some(2));
-        assert_eq!(step(&targets, Some(0), 1), Some(1));
-        assert_eq!(step(&targets, Some(2), 1), Some(0));
-        assert_eq!(step(&targets, Some(0), -1), Some(2));
-        assert_eq!(step(&targets, Some(0), -3), Some(0));
+    fn bands_group_visual_rows_and_sort_by_x() {
+        let targets = vec![
+            target(5, 90, 1, 3),
+            target(5, 100, 1, 3),
+            target(4, 105, 1, 11),
+            target(12, 30, 1, 22),
+            target(12, 53, 1, 13),
+        ];
+        let bands = bands(&targets);
+        assert_eq!(bands, vec![vec![2], vec![0, 1], vec![3, 4]]);
     }
 
     #[test]
-    fn step_treats_a_stale_index_like_no_focus() {
-        let targets = targets_for(&[Action::StartPractice, Action::StartFreePractice]);
-        assert_eq!(step(&targets, Some(9), 1), Some(0));
-        assert_eq!(step(&targets, Some(9), -1), Some(1));
-        assert_eq!(step(&[], Some(0), 1), None);
+    fn bands_keep_a_tall_card_in_its_own_band() {
+        let targets = vec![
+            target(23, 112, 1, 6),
+            target(24, 100, 5, 17),
+            target(31, 112, 1, 6),
+        ];
+        let bands = bands(&targets);
+        assert_eq!(bands, vec![vec![0], vec![1], vec![2]]);
     }
 
     #[test]
-    fn tour_rank_starts_at_the_primary_action_and_ends_with_unknown_actions() {
-        let start = tour_rank(&Action::StartPractice);
-        let free = tour_rank(&Action::StartFreePractice);
-        let dict = tour_rank(&Action::Navigate(Screen::DictPicker));
-        let minus = tour_rank(&Action::AdjustDaily(-5));
-        let plus = tour_rank(&Action::AdjustDaily(5));
-        let mode = tour_rank(&Action::OpenModePicker);
-        assert!(start < free && free < dict && dict < minus && minus < plus && plus < mode);
-        assert!(mode < tour_rank(&Action::QuitRequest));
+    fn nearest_in_band_prefers_horizontal_center() {
+        let targets = vec![
+            target(5, 90, 1, 3),
+            target(5, 100, 1, 3),
+            target(12, 30, 1, 22),
+            target(12, 53, 1, 13),
+        ];
+        let bands = bands(&targets);
+        assert_eq!(nearest_in_band(&targets, &bands, 1, 1), Some(3));
+        assert_eq!(nearest_in_band(&targets, &bands, 0, 2), Some(0));
     }
 }

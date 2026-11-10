@@ -276,11 +276,9 @@ impl App {
             Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
         }
-        // 焦点只在主页内有意义：页面一换，旧下标就可能指向另一个元素，
-        // 甚至越界。
+        // 焦点只在主页内有意义：页面一换，旧身份就不再对应当前页面。
         if self.screen != screen_before {
-            self.focus = None;
-            self.focus_pane = None;
+            self.clear_focus();
         }
     }
 

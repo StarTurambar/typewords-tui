@@ -491,7 +491,7 @@ fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, &'static str)
     let label = crate::ui::focus::focused_label(app, area)?;
     Some(vec![
         ("选中", label),
-        ("↑↓←→", "选择"),
+        ("↑↓←→", "移动"),
         ("enter", "触发"),
         ("esc", "取消"),
     ])

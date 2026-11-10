@@ -358,10 +358,14 @@ pub struct App {
     pub boot: Bootstrapped,
     pub store: FileStore,
     pub screen: Screen,
-    /// 主页键盘焦点：当前栏目标列表里的下标；`None` 表示没有选中。
-    pub focus: Option<usize>,
-    /// 焦点所在的栏：`Some(Pane::Nav)` 在导航栏，其余在内容区。
-    pub focus_pane: Option<crate::ui::focus::Pane>,
+    /// 主页键盘焦点身份；`None` 表示没有选中。
+    ///
+    /// 存身份而不是列表下标：终端尺寸 / 练习模式名 / 词库数量 / 区块显隐都会
+    /// 改变可聚焦列表，下标会指到另一个按钮。身份每次按键 / Enter / 绘制前
+    /// 按当前布局解析，失效时干净地清空（见 `ui::focus`）。
+    pub focus: Option<crate::ui::focus::FocusId>,
+    /// 内容区上一次的选择：从导航栏切回内容区时恢复，避免丢选中。
+    pub last_content_focus: Option<crate::ui::target::ContentId>,
     /// 最近一次绘制用的终端区域。
     ///
     /// 键盘焦点导航要靠布局算几何，而 `on_key` 不经过渲染；事件循环每帧
@@ -486,6 +490,11 @@ impl App {
         self.viewport = area;
     }
 
+    /// 当前视口是否达到可交互下限（与渲染层「终端太小」判定同源）。
+    pub fn interactive(&self) -> bool {
+        self.viewport.width >= crate::ui::MIN_WIDTH && self.viewport.height >= crate::ui::MIN_HEIGHT
+    }
+
     pub fn theme(&self) -> crate::ui::Theme {
         let (spec, _) = self.boot.themes.resolve(&self.boot.settings.theme);
         crate::ui::Theme::from_spec(spec)
@@ -532,7 +541,7 @@ impl App {
             store,
             screen: Screen::Home,
             focus: None,
-            focus_pane: None,
+            last_content_focus: None,
             viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
             session: None,
             typing: TypingEngine::new(),
@@ -3128,6 +3137,11 @@ impl App {
     // ── 键位分发 ─────────────────────────────────────────────────────────
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        // 屏幕只画「终端太小」时键盘不能作用于看不见的主页：否则方向键 / Enter
+        // 会静默改设置、开弹层甚至开始练习。放大窗口后按键恢复。
+        if !self.interactive() {
+            return;
+        }
         self.last_activity = timer::now_ms();
         self.resume_after_idle();
 
@@ -3602,7 +3616,10 @@ impl App {
                     match event::read()? {
                         Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
                         Event::Mouse(mouse) => self.on_mouse(mouse, terminal_area()),
-                        Event::Resize(_, _) => {}
+                        Event::Resize(_, _) => {
+                            // 缩放后立刻同步尺寸，后面的按键不再按旧布局算焦点。
+                            self.viewport = terminal_area();
+                        }
                         _ => {}
                     }
                     drained += 1;
