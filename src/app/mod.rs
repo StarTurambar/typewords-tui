@@ -358,8 +358,10 @@ pub struct App {
     pub boot: Bootstrapped,
     pub store: FileStore,
     pub screen: Screen,
-    /// 主页键盘焦点：`ui::focus::targets` 列表里的下标；`None` 表示没有选中。
+    /// 主页键盘焦点：当前栏目标列表里的下标；`None` 表示没有选中。
     pub focus: Option<usize>,
+    /// 焦点所在的栏：`Some(Pane::Nav)` 在导航栏，其余在内容区。
+    pub focus_pane: Option<crate::ui::focus::Pane>,
     /// 最近一次绘制用的终端区域。
     ///
     /// 键盘焦点导航要靠布局算几何，而 `on_key` 不经过渲染；事件循环每帧
@@ -426,6 +428,8 @@ pub struct App {
     pub article_book_cursor: usize,
     /// 文章列表的光标
     pub article_cursor: usize,
+    /// 文章页当前所在的栏：`true` = 左栏（书本），`false` = 右栏（文章）。
+    pub article_pane_left: bool,
     /// 进行中的文章练习
     pub article_practice: Option<ArticlePracticeState>,
     /// 文章跟打的断点缓存（启动/进入文章页时读入，离开时刷新）。
@@ -528,6 +532,7 @@ impl App {
             store,
             screen: Screen::Home,
             focus: None,
+            focus_pane: None,
             viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
             session: None,
             typing: TypingEngine::new(),
@@ -570,6 +575,7 @@ impl App {
             article_list: Vec::new(),
             article_book_cursor: 0,
             article_cursor: 0,
+            article_pane_left: true,
             article_practice: None,
             article_resume: None,
             flow_store: Default::default(),
@@ -2131,6 +2137,9 @@ impl App {
         self.screen = Screen::Articles;
         self.article_book_cursor = 0;
         self.article_cursor = 0;
+        // 进页先在左栏（书本列表）：和主页一样，← 进导航、→ 回内容；
+        // 这里左栏是书本、右栏是文章。
+        self.article_pane_left = true;
         self.article_books.clear();
         self.article_list.clear();
         // 列表上的「上次第 N 句」标记来自磁盘上的断点缓存，每次进页都刷新。

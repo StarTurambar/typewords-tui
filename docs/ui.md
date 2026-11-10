@@ -12,7 +12,7 @@
 | `src/ui/theme.rs` | `Theme`（13 个 token 映射为 ratatui `Color`）与 `Theme::from_spec` |
 | `src/ui/shell.rs` | 外壳：响应式侧栏/顶栏/底栏、`Nav`、`ShellLayout`/`SidebarLayout`、颜色提示文案 |
 | `src/ui/home.rs` | 主页 dashboard 与 `targets` |
-| `src/ui/focus.rs` | 主页键盘焦点：`targets`/`tour_rank` 巡览顺序、`step` 逐项移动与回绕、`focused_rect`/`focused_label`、`paint` 选中高亮 |
+| `src/ui/focus.rs` | 主页键盘焦点：`Pane` 两栏、`targets`/`nav_targets`/`content_targets`、`step` 逐项移动与回绕、`focused_rect`/`focused_label`、`paint` 整块高亮 |
 | `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏）与 `PracticeLayout` |
 | `src/ui/bigtext.rs` | 5×7 点阵字体、1×/2× 放大、遮罩占位、折行 |
 | `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs`、`word_test.rs`、`words.rs`、`articles.rs`、`flows.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页、单词测试页、词条管理页、文章背诵页、练习流程页 |
@@ -90,7 +90,7 @@ ui::render(app, frame)
 ### 4.2 侧栏
 
 - `TW` 大字标识：内宽 `width-4`，当 `内宽 >= 22 && 高度 >= 28` 时用 2× 点阵（7 行），否则 1×（4 行）；下面最多一行 `Type Words` 副标题（放得下才画）。
-- 导航项 `Nav::MAIN`（单词 / 文章 / 词库 / 统计 / 帮助）每个占 2 行，从副标题下 2 行开始；与底部保留区冲突时停止追加。
+- 导航项 `Nav::MAIN`（单词 / 文章 / 词库 / 统计 / 帮助）每个占 **1 行**（命中区与绘制行一致），从副标题下 2 行开始；与底部保留区冲突时停止追加。早期命中区占 2 行，键盘选中时高亮会盖住相邻两项。
 - 底部固定 5 行：分隔线 `height-5`、版本号 `height-4`、设置 `height-3`、退出 `height-2`，左侧有一条 1 列宽的分隔边（`Borders::RIGHT`）。
 - 选中项用 `selection` 铺背景、左侧 1 列 `accent`，标签用 `fg`/`accent_alt`，未选中用 `muted`/`dim`。
 
@@ -143,14 +143,16 @@ ui::render(app, frame)
 
 ### 5.4 键盘焦点
 
-- 可聚焦目标与鼠标命中同源：`ui::focus::targets(app, area)` 调 `ui::home::targets(app, shell.content)`，再用 `tour_rank` 做**稳定排序**得到巡览顺序——开始 / 继续学习 → 自由练习 → 词库页 → 管理词典（「+ / d 管理」卡）→ 更多词库 → 每日目标 `-` → 每日目标 `+` → 练习模式；主页以后新增的可点元素统一排在末尾，不打乱已有顺序。有弹层或不在主页时返回空列表——方向键此时属于弹层或其它页面。
-- 移动规则（`ui::focus::step(&targets, from, step)`，纯函数）：`↓` / `→` 是 `+1`（下一项）、`↑` / `←` 是 `-1`（上一项），下标用 `rem_euclid` 回绕——到头继续按会绕回另一端，任何一次按键都有反馈。没有焦点（或旧下标失效）时，`+1` 选中第一项、`-1` 选中最后一项。
-- **为什么不用几何最近邻**：主页布局很稀疏，两个按钮与几个小链接散落在 hero 卡和分区标题上；按几何选「最近的」会让焦点大跨度乱跳（例如从开始按钮按 `↓` 直接蹦到右下角的管理卡），某个方向没有目标时还会停在原地，表现为「按了没反应」。固定顺序 + 回绕在稀疏布局上更可预测。
-- `Enter` 触发焦点元素（等价于鼠标点击该 `Target` 的 `Action`），没有焦点时仍是「开始 / 继续学习」；`Esc` 清空焦点。切屏后焦点一并清空（`App::apply_action` 在 `screen` 变化后置空）。
-- 高亮沿用列表选中行的语言：`selection` 底色 + 正文 `fg` 加粗（`ui::focus::paint`），左侧再画 1 列 `accent` 强调条。强调条优先画在控件自己的第一列（按钮 / 卡片的左边距通常是空白），那一列有字时改画在矩形外一格；两处都压着字就不画，绝不覆盖控件文字。高对比主题里 `selection` 与 `bg` 同为黑色，靠强调条 + 加粗识别焦点。焦点画在页面内容之上、弹层遮罩之下。
-- 底栏联动：`ui::target::Target` 带 `label: Option<&'static str>`（`Target::labeled` 构造），`ui::home::targets` 给 8 个元素标注了中文名（开始学习、自由练习、词库页、管理词典、更多词库、每日目标 -、每日目标 +、练习模式）。有焦点时 `shell::focus_hints` 把底栏从常规快捷键换成「选中 {label}  ↑↓←→ 选择  enter 触发  esc 取消」，`focused_label` 在有断点时把开始按钮显示成「继续学习」；底栏渲染用 `ShellLayout.area`（整屏区域）重新算主页布局取标签。无焦点时恢复常规提示。
-- `App.focus` 存的是巡览列表下标；`App.viewport` 必须与实际渲染面积一致——渲染用 `Frame::area()`，而 `on_key` 不经过渲染，只能读 `App.viewport`（事件循环每帧同步，测试与 `examples/shot` 用 `App::set_viewport` 显式设置）。两者不一致时，按键算出的布局与画面不同，焦点矩形会落到别的元素上。
-- 焦点只覆盖页面内元素，侧栏 / 顶栏仍由数字键与点击负责。
+- 主页分左右两栏（`ui::focus::Pane`）：**导航栏**（宽屏侧栏 / 窄屏顶栏标签）与**内容区**。`pane(app)` 返回当前栏，默认内容区。
+- 两栏目标都与鼠标命中同源：导航栏取 `shell::layout` 的 `nav_targets`（`ui::focus::nav_targets`），内容区取 `ui::home::targets(app, shell.content)`（`ui::focus::content_targets`，用 `tour_rank` 做**稳定排序**）——开始 / 继续学习 → 自由练习 → 词库页 → 管理词典（「+ / d 管理」卡）→ 更多词库 → 每日目标 `-` → 每日目标 `+` → 练习模式；主页以后新增的可点元素统一排在末尾，不打乱已有顺序。有弹层或不在主页时返回空列表——方向键此时属于弹层或其它页面。
+- **其它页面共用同一套方向键语义**：`App::move_selection` / `switch_selection_pane` / `activate_selection` 把「列表 / 卡片光标」集中到一处——`↑`/`↓`（别名 `j`/`k`）移动光标、`Enter` 触发、`Esc` 返回；文章页的 `←`/`→`（`Tab`/`BackTab`）切换书本栏与文章栏（`App.article_pane_left`）。因此词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章各页的方向键行为完全一致，页面特有操作（词库 `+/-`、统计翻页、设置空格）保留为附加键位。
+- 移动规则（`ui::focus::step(&targets, from, step)`，纯函数）：栏内 `↓` / `→` 是 `+1`（下一项）、`↑` / `←` 是 `-1`（上一项），下标用 `rem_euclid` 回绕——到头继续按会绕回另一端，任何一次按键都有反馈。没有焦点（或旧下标失效）时，`+1` 选中第一项、`-1` 选中最后一项。
+- **跨栏**：内容区按 `←` 进导航栏（`nav_current_index` 让光标落在当前页对应的入口上），导航栏按 `→` 回内容区（`focus_pane = Content`，下标清零）。`App::move_focus` 只保存「栏 + 下标」，顺序与几何都在 `ui::focus`。
+- **为什么不用几何最近邻**：主页布局很稀疏，两个按钮与几个小链接散落在 hero 卡和分区标题上；按几何选「最近的」会让焦点大跨度乱跳（例如从开始按钮按 `↓` 直接蹦到右下角的管理卡），某个方向没有目标时还会停在原地，表现为「按了没反应」。固定顺序 + 回绕在稀疏布局上更可预测；两栏模型则让「换页面」和「页面内操作」各有明确的方向键。
+- `Enter` 触发焦点元素（等价于鼠标点击该 `Target` 的 `Action`），没有焦点时仍是「开始 / 继续学习」；`Esc` 清空焦点。切屏后焦点与所在栏一并清空（`App::apply_action` 在 `screen` 变化后置空 `focus` 与 `focus_pane`）。
+- 高亮（`ui::focus::paint`）：**整块用 `accent` 铺满** + 正文 `bg` 色 + 加粗。主按钮常态就是 `accent` 底、自由练习按钮是 `element` 底；焦点时两者都变成整块 `accent`——「整块紫 = 选中」。不再画左侧竖条，也不用 `selection` 底：竖条会盖住主按钮自己的左边距，看起来像按钮样式被改坏了。焦点画在页面内容之上、弹层遮罩之下。
+- 底栏联动：`ui::target::Target` 带 `label: Option<&'static str>`（`Target::labeled` 构造），`ui::home::targets` 给 8 个元素标注了中文名（开始学习、自由练习、词库页、管理词典、更多词库、每日目标 -、每日目标 +、练习模式），`ui::focus::nav_targets` 用 `Nav::label` 标注导航入口。有焦点时 `shell::focus_hints` 把底栏从常规快捷键换成「选中 {label}  ↑↓←→ 选择  enter 触发  esc 取消」，`focused_label` 在有断点时把开始按钮显示成「继续学习」；底栏渲染用 `ShellLayout.area`（整屏区域）重新算主页布局取标签。无焦点时恢复常规提示。
+- `App.focus` 存的是当前栏目标列表的下标，`App.focus_pane` 存所在栏；`App.viewport` 必须与实际渲染面积一致——渲染用 `Frame::area()`，而 `on_key` 不经过渲染，只能读 `App.viewport`（事件循环每帧同步，测试与 `examples/shot` 用 `App::set_viewport` 显式设置）。三者不一致时，按键算出的布局与画面不同，焦点矩形会落到别的元素上。
 
 ## 6. 练习页
 
@@ -346,7 +348,7 @@ ui::render(app, frame)
 
 主页方向键焦点另有独立集成测试 `tests/focus_nav.rs`（顺序巡览、到头回绕、底栏「选中 X」、选中色高亮与 `focused_rect` 一致、不落入侧栏）。
 
-`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / home-focus / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题；`home-focus` 是主页方向键选中「f 自由练习」后的快照。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页方向键焦点](screenshots/home-focus-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
+`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / home-focus / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题；`home-focus` 是主页方向键选中「f 自由练习」后的快照。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页内容区焦点](screenshots/home-focus-120x40-dark.png)、[主页导航栏焦点](screenshots/home-nav-focus-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
 
 ### 12.2 新增/修改页面的检查清单
 

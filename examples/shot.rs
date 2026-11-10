@@ -5,7 +5,7 @@
 //! 用法：
 //!   cargo run --quiet --example shot -- <screen> [width] [height] [theme] [--plain]
 //!
-//!   screen: home | home-focus | practice | wordtest | words | articles | flows |
+//!   screen: home | home-focus | home-nav-focus | practice | wordtest | words | articles | flows |
 //!           articlepractice | dict | stats | settings | shortcuts | help | summary |
 //!           summary-article | edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
@@ -45,6 +45,7 @@ use typewords_tui::paths::{Paths, locate_assets};
 const SUPPORTED_SCREENS: &[&str] = &[
     "home",
     "home-focus",
+    "home-nav-focus",
     "practice",
     "wordtest",
     "words",
@@ -178,13 +179,22 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
     match screen {
         "home" => app.screen = Screen::Home,
         "home-focus" => {
-            // 主页方向键焦点：第一次按下落在「开始 / 继续学习」上（且不移动），
-            // 第二次右移到「f 自由练习」，截图里能看到选中底色与左侧强调条。
+            // 内容区焦点：第一次按下落在「开始 / 继续学习」，第二次右移到
+            // 「f 自由练习」，截图里能看到整块 accent 高亮。
             app.screen = Screen::Home;
             press(app, KeyCode::Right);
             press(app, KeyCode::Right);
             if app.focus.is_none() {
                 bail!("home-focus: arrow keys did not engage the focus");
+            }
+        }
+        "home-nav-focus" => {
+            // 导航栏焦点：← 进左侧导航（落在当前页入口），再 ↓ 移到「文章」。
+            app.screen = Screen::Home;
+            press(app, KeyCode::Left);
+            press(app, KeyCode::Down);
+            if app.focus.is_none() {
+                bail!("home-nav-focus: arrow keys did not engage the focus");
             }
         }
         "practice" => start_practice(app)?,

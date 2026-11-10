@@ -16,6 +16,16 @@ pub enum Action {
     AdjustDaily(i64),
     /// 主页键盘焦点：按方向键移动选中的元素。
     FocusMove(FocusDir),
+    /// 通用选择：列表 / 卡片光标上移（到顶回绕）。
+    SelectUp,
+    /// 通用选择：列表 / 卡片光标下移（到底回绕）。
+    SelectDown,
+    /// 通用选择：切换到左栏（文章页 = 书本列表）。
+    SelectLeftPane,
+    /// 通用选择：切换到右栏（文章页 = 文章列表）。
+    SelectRightPane,
+    /// 通用选择：触发当前选中项。
+    SelectActivate,
     /// 主页键盘焦点：触发选中的元素；没有选中时沿用「开始练习」。
     ActivateFocus,
     /// 主页键盘焦点：取消选中。
@@ -143,6 +153,13 @@ impl App {
             Action::FocusMove(direction) => self.move_focus(direction),
             Action::ActivateFocus => self.activate_focus(),
             Action::ClearFocus => self.clear_focus(),
+            // 通用选择：把「列表 / 卡片光标」的语义集中在一处，各页面只负责
+            // 把自己的光标接进来，方向键行为因此完全一致。
+            Action::SelectUp => self.move_selection(-1),
+            Action::SelectDown => self.move_selection(1),
+            Action::SelectLeftPane => self.switch_selection_pane(true),
+            Action::SelectRightPane => self.switch_selection_pane(false),
+            Action::SelectActivate => self.activate_selection(),
             Action::DictMove(delta) => self.move_dict_cursor(delta),
             Action::SelectDict(index) => {
                 if index < self.boot.catalog.resources().len() {
@@ -259,10 +276,11 @@ impl App {
             Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
         }
-        // 焦点下标只在当前页面内有意义：页面一换，旧下标就可能指向
-        // 另一个元素，甚至越界。
+        // 焦点只在主页内有意义：页面一换，旧下标就可能指向另一个元素，
+        // 甚至越界。
         if self.screen != screen_before {
             self.focus = None;
+            self.focus_pane = None;
         }
     }
 
@@ -501,6 +519,52 @@ impl App {
                 crate::domain::flow::navigator::NoticeLevel::Info,
                 format!("每日词数：{next}"),
             );
+        }
+    }
+
+    /// 通用选择：把「列表 / 卡片光标」的语义集中在一处，各页面只负责把自己的
+    /// 光标接进来，方向键行为因此完全一致（↑/↓ 移动、Enter 触发、Esc 返回）。
+    ///
+    /// 文章页多一维（左栏书本 / 右栏文章），由 `article_pane_left` 区分；
+    /// `←`/`→` 换栏。
+    pub(crate) fn move_selection(&mut self, delta: i32) {
+        match self.screen {
+            Screen::DictPicker => self.move_dict_cursor(delta),
+            Screen::Stats => self.scroll_stats(delta),
+            Screen::Settings => self.move_settings_cursor(delta),
+            Screen::Flows => self.move_flow_edit_cursor(delta),
+            Screen::Words => self.move_words_cursor(delta),
+            Screen::Shortcuts => self.move_shortcut_cursor(delta),
+            // 文章页：↑/↓ 在书本栏换书、在文章栏选文章；←/→ 切栏。
+            Screen::Articles => {
+                if self.article_pane_left {
+                    self.move_article_book(delta)
+                } else {
+                    self.move_article(delta)
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `left = true` 进左栏（书本），否则进右栏（文章）。
+    ///
+    /// 切到书本栏时按 ↑/↓ 换书（并载入该书的文章）；切回文章栏后 ↑/↓ 选文章。
+    pub(crate) fn switch_selection_pane(&mut self, left: bool) {
+        if self.screen == Screen::Articles {
+            self.article_pane_left = left;
+        }
+    }
+
+    pub(crate) fn activate_selection(&mut self) {
+        match self.screen {
+            Screen::DictPicker => self.activate_dict(self.dict_cursor),
+            Screen::Settings => self.activate_setting(self.settings_cursor),
+            Screen::Flows => self.activate_flow(),
+            Screen::Articles => self.select_article(),
+            Screen::Words => self.edit_current_word(),
+            Screen::Shortcuts => self.start_shortcut_capture(),
+            _ => {}
         }
     }
 

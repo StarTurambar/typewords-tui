@@ -14,7 +14,7 @@
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
-| `src/app/focus.rs` | 主页键盘焦点：`FocusDir` 与 `move_focus`/`activate_focus`/`clear_focus`（巡览顺序与几何在 `ui::focus`） |
+| `src/app/focus.rs` | 主页键盘焦点：`FocusDir` 与 `move_focus`/`activate_focus`/`clear_focus`（两栏与几何在 `ui::focus`） |
 | `src/bootstrap.rs` | `Bootstrapped`（存档、词库目录、主题、`notices`、`readonly_dict`）与 `bootstrap::load` |
 | `src/main.rs`、`src/lib.rs` | 入口：`Cli::parse` → `Paths::resolve` → 子命令分发 → `app::run` |
 | `src/cli.rs`、`src/paths.rs` | 参数与 `doctor`/`task`/`import-dict`；数据目录/资源目录解析 |
@@ -284,7 +284,8 @@ app.save_all()
 - **练习中禁止切页**：`navigate_to` 在有 `session` 时直接返回。练习页只能通过 `Ctrl+C` 或完成结算离开（帮助页只是临时覆盖，返回后仍在练习）；鼠标侧栏导航在练习期间也不会生成 target。
 - **弹层模态且互斥**：`summary` 只在练习完成时产生；`edit` 只从设置页数字项产生；`confirm` 只从主页 `q` 或设置页「重置进度」产生。正常交互中三者互斥；若出现异常叠加，键位层按 `edit` → `confirm` → `summary` 处理，渲染层按 `summary` → `edit` → `confirm` 绘制（后画者在上）。
 - **Back 语义**：先尝试关闭弹层（正常流程里弹层已被键位层拦下）；再按屏返回：设置页先 `save_settings_now` 回主页，词库页/统计页回主页，帮助页按是否有会话回练习页或主页，主页/练习页无动作。
-- **主页键盘焦点**：方向键按固定顺序逐项移动焦点（开始 / 继续学习 → 自由练习 → 词库入口 → 每日目标 → 练习模式，到头回绕），`Enter` 触发、`Esc` 取消；焦点下标只在主页内有意义，`apply_action` 在 `screen` 变化后置空 `focus`。焦点目标与鼠标命中同源（`ui::focus::targets` 复用 `ui::home::targets` 再按 `tour_rank` 排序），不含侧栏 / 顶栏，见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
+- **主页键盘焦点**：分导航栏与内容区两栏（`App.focus_pane`）。内容区按固定顺序逐项移动（开始 / 继续学习 → 自由练习 → 词库入口 → 每日目标 → 练习模式，到头回绕）；`←` 从内容区进导航栏（落在当前页入口），`→` 回内容区。`Enter` 触发、`Esc` 取消；焦点与所在栏只在主页内有意义，`apply_action` 在 `screen` 变化后置空 `focus` 与 `focus_pane`。焦点目标与鼠标命中同源（导航栏复用 `shell::layout` 的 `nav_targets`，内容区复用 `ui::home::targets` 再按 `tour_rank` 排序），见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
+- **通用选择**：`move_selection` / `switch_selection_pane` / `activate_selection` 把列表 / 卡片光标的语义集中在一处，`SelectUp` / `SelectDown` / `SelectActivate` / `SelectLeftPane` / `SelectRightPane` 是它们的 `Action`。各页面（词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章）只负责把自己的光标接进来，因此方向键行为一致；文章页用 `article_pane_left` 区分书本栏与文章栏。
 - **帮助页**：从练习页按 `?` 进入时 `session` 仍在，数字切页不生效；除滚动键外任意键都返回练习页。
 - **退出与结算后**：只有主页 `q`（或宽屏侧栏「退出」）请求退出；其它非练习页面的 `q` 是返回（练习页的 `q` 是普通输入）。结算后会话与缓存都已清理，继续/重学用当前设置里的练习模式开启新一轮（自由练习结算后继续，回到设置中的常规模式，而不是继续自由模式）。
 

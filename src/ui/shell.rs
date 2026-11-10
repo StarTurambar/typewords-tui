@@ -191,14 +191,17 @@ fn sidebar_layout(area: Rect, height: u16) -> SidebarLayout {
         (subtitle_y + 1 < height).then(|| Rect::new(area.x + 2, subtitle_y, inner_width, 1));
     let nav_start = subtitle_y + 2;
     let mut top_nav = Vec::new();
+    // 命中区是**一行**：导航项之间不再留空行，视觉间距由 render_nav_row
+    // 自己用 selection 底色区分。早期用 2 行命中区，键盘选中时高亮会盖住
+    // 相邻两项，看起来像一次选了两行。
     for (index, nav) in Nav::MAIN.iter().enumerate() {
-        let y = nav_start + (index as u16) * 2;
-        if y + 1 >= height.saturating_sub(5) {
+        let y = nav_start + index as u16;
+        if y >= height.saturating_sub(5) {
             break;
         }
         top_nav.push((
             nav.screen(),
-            Rect::new(area.x, y, area.width.saturating_sub(1), 2),
+            Rect::new(area.x, y, area.width.saturating_sub(1), 1),
         ));
     }
     let bottom_rule_y = height.saturating_sub(5);

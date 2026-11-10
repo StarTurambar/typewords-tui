@@ -117,12 +117,13 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 18 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
+仓库 `docs/screenshots/` 的 19 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
 | `home-120x40-dark.png` | `home 120 40 dark` |
-| `home-focus-120x40-dark.png` | `home-focus 120 40 dark`（主页方向键选中「f 自由练习」） |
+| `home-focus-120x40-dark.png` | `home-focus 120 40 dark`（内容区焦点选中「f 自由练习」） |
+| `home-nav-focus-120x40-dark.png` | `home-nav-focus 120 40 dark`（导航栏焦点选中「文章」） |
 | `home-90x30-dark.png` | `home 90 30 dark`（窄屏外壳） |
 | `home-120x40-light.png` | `home 120 40 light` |
 | `home-120x40-high-contrast.png` | `home 120 40 high-contrast` |

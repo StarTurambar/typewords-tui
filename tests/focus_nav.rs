@@ -1,9 +1,11 @@
 //! 主页方向键焦点导航的集成测试。
 //!
-//! 交互模型：主页页内的可点元素按固定巡览顺序排成一个环——开始学习 →
-//! 自由练习 → 词库入口 → 每日目标 → 练习模式。↓ / → 走到下一项、↑ / ←
-//! 走到上一项，到头回绕（没有死键）；Enter 触发当前项，Esc 取消。
-//! 焦点用「selection 底色 + 左侧 accent 强调条」高亮（不再反显），底栏同步
+//! 交互模型：主页有导航栏与内容区两栏。内容区按固定巡览顺序排成一个环——
+//! 开始学习 → 自由练习 → 词库入口 → 每日目标 → 练习模式；↓ / → 下一项、
+//! ↑ / ← 上一项，到头回绕。← 从内容区进导航栏（落在当前页入口），→ 从导航栏
+//! 回内容区。Enter 触发当前项，Esc 取消。
+//!
+//! 焦点用整块 accent 高亮（不再用 selection 底 / 左侧竖条 / 反显），底栏同步
 //! 显示「选中 X」与操作提示。
 //!
 //! 所有用例都先 `app.set_viewport(...)` 再按键，渲染用同一个尺寸——焦点
@@ -19,7 +21,6 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use typewords_tui::app::{self, Screen};
 use typewords_tui::domain::types::WordPracticeMode;
-use typewords_tui::ui::Theme;
 use typewords_tui::ui::focus;
 use typewords_tui::ui::shell::{self, Nav};
 use unicode_width::UnicodeWidthStr;
@@ -125,20 +126,6 @@ fn reversed_cells(buffer: &Buffer, width: u16, height: u16) -> Vec<(u16, u16)> {
     cells
 }
 
-/// 焦点矩形左侧的 accent 强调条（优先自身第 1 列，否则左邻 1 列）。
-fn accent_bar(buffer: &Buffer, rect: Rect, theme: &Theme) -> Option<(u16, u16)> {
-    for column in [rect.x, rect.x.saturating_sub(1)] {
-        for y in rect.y..rect.bottom() {
-            if let Some(cell) = buffer.cell((column, y))
-                && cell.bg == theme.accent
-            {
-                return Some((column, y));
-            }
-        }
-    }
-    None
-}
-
 /// 该列是否是宽字符的尾随格。
 ///
 /// ratatui 的 diff 不更新「只改样式」的宽字符尾随格（终端上字形按首格样式
@@ -151,7 +138,7 @@ fn is_wide_tail(buffer: &Buffer, x: u16, y: u16) -> bool {
             .unwrap_or(false)
 }
 
-/// 首次按 ↓ / ↑ 分别选中第一项 / 最后一项（菜单式的进入方式）。
+/// 首次按 ↓ / ↑ 分别选中内容区第一项 / 最后一项。
 #[test]
 fn the_first_down_selects_the_first_item_and_the_first_up_selects_the_last() {
     let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
@@ -216,13 +203,12 @@ fn down_tours_every_target_in_order_and_wraps_at_both_ends() {
     }
 }
 
-/// → 等价于下一项，← 等价于上一项（同样到头回绕）。
+/// 内容区内 → 等价于下一项；← 是跨栏（进导航栏），不是「上一项」。
 #[test]
-fn right_and_left_step_like_down_and_up() {
+fn right_steps_like_down_and_left_switches_to_the_nav() {
     let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
     let area = wide_area();
     let labels = target_labels(&app, area);
-    let len = labels.len();
 
     press(&mut app, KeyCode::Right);
     assert_eq!(app.focus, Some(0), "首次按 → 应像 ↓ 一样选中第一项");
@@ -233,18 +219,11 @@ fn right_and_left_step_like_down_and_up() {
     assert_eq!(focus::focused_label(&app, area), Some(labels[1]));
 
     press(&mut app, KeyCode::Left);
-    assert_eq!(app.focus, Some(0), "← 应后退一项");
-
-    press(&mut app, KeyCode::Left);
     assert_eq!(
-        app.focus,
-        Some(len - 1),
-        "← 在第一项应回绕到最后一项（像 ↑ 一样）"
+        focus::pane(&app),
+        Some(focus::Pane::Nav),
+        "← 应进入导航栏，而不是在内容区里回退"
     );
-    assert_eq!(focus::focused_label(&app, area), Some(labels[len - 1]));
-
-    press(&mut app, KeyCode::Right);
-    assert_eq!(app.focus, Some(0), "→ 在最后一项应回绕到第一项");
 }
 
 /// 焦点在「开始学习」上按 Enter：进入练习页。
@@ -400,9 +379,9 @@ fn the_footer_shows_the_selected_label_and_the_focus_keys() {
     }
 }
 
-/// 焦点高亮 = selection 底色 + BOLD + 左侧 accent 强调条（不再用反显）。
+/// 焦点高亮 = 整块 accent 底 + BOLD（不再用 selection 底 / 左侧竖条 / 反显）。
 #[test]
-fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
+fn the_focus_highlight_fills_the_whole_target_with_accent() {
     let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
     let area = wide_area();
     let theme = app.theme();
@@ -414,7 +393,7 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
         "无焦点时全屏不应有反显单元格"
     );
 
-    // 「每日目标 +」的文字全是 ASCII：高亮与强调条可以逐格核对。
+    // 「每日目标 +」的文字全是 ASCII：高亮可以逐格核对。
     let plus_index = label_index(&app, area, "每日目标 +");
     let plus_rect = focus::targets(&app, area)[plus_index].rect;
     app.focus = Some(plus_index);
@@ -423,8 +402,8 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
     for x in plus_rect.x..plus_rect.right() {
         let cell = buffer.cell((x, plus_rect.y)).expect("cell");
         assert_eq!(
-            cell.bg, theme.selection,
-            "焦点矩形 ({x}, {}) 应有 selection 底色",
+            cell.bg, theme.accent,
+            "焦点矩形 ({x}, {}) 应整块是 accent 底色",
             plus_rect.y
         );
         assert!(
@@ -433,20 +412,15 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
             plus_rect.y
         );
     }
-    let plus_bar = accent_bar(buffer, plus_rect, &theme).expect("焦点矩形旁应有 accent 强调条");
-    assert!(
-        plus_bar.0 == plus_rect.x || plus_bar.0 + 1 == plus_rect.x,
-        "强调条应贴着焦点矩形：{plus_bar:?} vs {plus_rect:?}"
-    );
-    assert_eq!(buffer.cell(plus_bar).expect("bar cell").bg, theme.accent);
     assert!(
         reversed_cells(buffer, WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
-        "焦点高亮不应再使用 REVERSED"
+        "焦点高亮不应使用 REVERSED"
     );
+    // 整块高亮不能溢出焦点矩形。
     let right_of_rect = buffer.cell((plus_rect.right(), plus_rect.y)).expect("cell");
     assert_ne!(
-        right_of_rect.bg, theme.selection,
-        "selection 底色不应溢出焦点矩形"
+        right_of_rect.bg, theme.accent,
+        "accent 高亮不应溢出焦点矩形"
     );
 
     // 中文主按钮：宽字符尾随格在 buffer 里可能仍是默认样式，跳过它们。
@@ -455,12 +429,6 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
     app.focus = Some(start_index);
     let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
     let buffer = terminal.backend().buffer();
-    let start_bar =
-        accent_bar(buffer, start_rect, &theme).expect("「开始学习」旁应有 accent 强调条");
-    assert!(
-        start_bar.0 == start_rect.x || start_bar.0 + 1 == start_rect.x,
-        "强调条应贴着焦点矩形：{start_bar:?} vs {start_rect:?}"
-    );
     let mut checked = 0usize;
     for y in start_rect.y..start_rect.bottom() {
         for x in start_rect.x..start_rect.right() {
@@ -470,13 +438,9 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
             let Some(cell) = buffer.cell((x, y)) else {
                 continue;
             };
-            if x == start_bar.0 {
-                assert_eq!(cell.bg, theme.accent, "强调条 ({x}, {y}) 应有 accent 底色");
-                continue;
-            }
             assert_eq!(
-                cell.bg, theme.selection,
-                "焦点矩形内 ({x}, {y}) 应有 selection 底色"
+                cell.bg, theme.accent,
+                "焦点矩形内 ({x}, {y}) 应整块是 accent 底色"
             );
             assert!(
                 cell.modifier.contains(Modifier::BOLD),
@@ -486,28 +450,16 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
         }
     }
     assert!(checked > 0, "「开始学习」矩形内应有可核对的高亮单元格");
-    assert!(
-        reversed_cells(buffer, WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
-        "焦点高亮不应再使用 REVERSED"
-    );
 
-    // Esc 之后：之前的选中底色与强调条都应消失。
+    // Esc 之后：整块高亮应消失，主按钮恢复常态（accent 底，无额外竖条）。
     press(&mut app, KeyCode::Esc);
     assert!(app.focus.is_none(), "Esc 应清除焦点");
     let terminal = render_terminal(&app, WIDE_WIDTH, WIDE_HEIGHT);
     let buffer = terminal.backend().buffer();
-    for x in plus_rect.x..plus_rect.right() {
-        let cell = buffer.cell((x, plus_rect.y)).expect("cell");
-        assert_ne!(
-            cell.bg, theme.selection,
-            "Esc 后 ({x}, {}) 不应再有选中底色",
-            plus_rect.y
-        );
-    }
-    assert_ne!(
-        buffer.cell(plus_bar).expect("bar cell").bg,
-        theme.accent,
-        "Esc 后强调条应消失"
+    let start_cell = buffer.cell((start_rect.x, start_rect.y)).expect("cell");
+    assert_eq!(
+        start_cell.bg, theme.accent,
+        "Esc 后主按钮应恢复 accent 常态底色"
     );
     assert!(
         reversed_cells(buffer, WIDE_WIDTH, WIDE_HEIGHT).is_empty(),
@@ -515,9 +467,11 @@ fn the_focus_highlight_uses_a_selection_background_and_an_accent_bar() {
     );
 }
 
-/// 120×40 / 80×24 / 60×20 下反复按四个方向键都不 panic，焦点始终在正文区。
+/// 120×40 / 80×24 / 60×20 下反复按四个方向键都不 panic，焦点始终在视口内。
+///
+/// 焦点可以落在导航栏或内容区，但任何一栏都不该越出屏幕。
 #[test]
-fn focus_navigation_stays_inside_the_content_area_on_every_terminal_size() {
+fn focus_navigation_stays_inside_the_viewport_on_every_terminal_size() {
     for (width, height) in [
         (WIDE_WIDTH, WIDE_HEIGHT),
         (NARROW_WIDTH, NARROW_HEIGHT),
@@ -532,7 +486,8 @@ fn focus_navigation_stays_inside_the_content_area_on_every_terminal_size() {
         let targets = focus::targets(&app, area);
         assert!(!targets.is_empty(), "{width}x{height} 主页应有可聚焦目标");
 
-        let directions = [KeyCode::Down, KeyCode::Right, KeyCode::Up, KeyCode::Left];
+        // 只按 ↓/→：内容区与导航栏都能走到，焦点不该越出屏幕。
+        let directions = [KeyCode::Down, KeyCode::Right];
         for (step, direction) in directions.iter().cycle().take(12).enumerate() {
             press(&mut app, *direction);
             let rect = focus::focused_rect(&app, area)
@@ -542,12 +497,12 @@ fn focus_navigation_stays_inside_the_content_area_on_every_terminal_size() {
                 "{width}x{height} 下焦点矩形不应为空：{rect:?}"
             );
             assert!(
-                rect.x >= content_x,
-                "{width}x{height} 下焦点落进了侧栏 / 顶栏：{rect:?}（正文起于第 {content_x} 列）"
+                rect.x >= area.x && rect.right() <= area.right(),
+                "{width}x{height} 下焦点越出了左右边界：{rect:?}"
             );
             assert!(
-                rect.right() <= area.right() && rect.y >= area.y && rect.bottom() <= area.bottom(),
-                "{width}x{height} 下焦点越出了视口：{rect:?}"
+                rect.y >= area.y && rect.bottom() <= area.bottom(),
+                "{width}x{height} 下焦点越出了上下边界：{rect:?}"
             );
         }
     }
@@ -557,14 +512,10 @@ fn focus_navigation_stays_inside_the_content_area_on_every_terminal_size() {
 #[test]
 fn arrow_keys_on_the_stats_page_still_scroll_instead_of_moving_focus() {
     let (_fixture, mut app) = test_app(WIDE_WIDTH, WIDE_HEIGHT);
-    let area = wide_area();
 
     press(&mut app, KeyCode::Char('4'));
     assert_eq!(app.screen, Screen::Stats, "数字键 4 应切到统计页");
-    assert!(
-        focus::targets(&app, area).is_empty(),
-        "非主页不应有可聚焦目标"
-    );
+    assert!(focus::pane(&app).is_none(), "非主页不应有可聚焦栏");
     assert!(app.focus.is_none(), "统计页不应出现主页焦点");
 
     let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;

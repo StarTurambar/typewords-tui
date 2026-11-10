@@ -477,6 +477,9 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
     } else {
         "Enter  开始学习 →"
     };
+    // 主按钮常态就是 accent 底（和自由练习的 element 底区分开）；焦点时
+    // `ui::focus::paint` 会把整块重画成 accent 底 + 深色文字 + 加粗，
+    // 靠「整块紫 + 加粗」识别选中，不再额外画竖条。
     widgets::draw_button(
         frame,
         layout.primary,

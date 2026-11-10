@@ -1,10 +1,15 @@
-//! 主页键盘焦点：可聚焦目标、逐项移动与高亮绘制。
+//! 主页键盘焦点：导航区 / 内容区两栏，方向键在栏内逐项移动。
 //!
-//! 主页布局很稀疏——两个按钮、几个小链接散落在 hero 卡与分区标题上。
-//! 按「几何最近邻」移动会让焦点在大跨度元素之间乱跳（按 ↓ 从开始按钮
-//! 直接蹦到右下角的管理卡），按到底还会因为该方向没有目标而卡住。这里
-//! 改成固定的页面顺序：主按钮 → 自由练习 → 词库入口 → 每日目标 →
-//! 练习模式，方向键逐项移动、到头回绕，每次按键都有反馈。
+//! 主页有两个「栏」：宽屏左侧是导航栏（单词 / 文章 / 词库 / 统计 / 帮助 /
+//! 设置），右侧是页面内容（开始学习、每日目标、词库入口…）。窄屏没有侧栏，
+//! 顶栏的标签承担导航栏的角色。
+//!
+//! `←` 从内容区跳到导航栏（光标落在当前页面对应的入口上），`→` 从导航栏
+//! 回到内容区；`↑`/`↓` 只在当前栏内逐项移动、到头回绕。这样只靠四个方向键
+//! 就能在页面之间切换，不必记 `1`~`6` 数字键。
+//!
+//! 栏内目标与鼠标命中同源（导航用 `shell::layout` 的 `nav_targets`，内容用
+//! `home::targets`），所以键盘选中的一定是画出来、点得到的那一块。
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -15,26 +20,88 @@ use crate::ui::shell::{self, Nav};
 use crate::ui::target::Target;
 use crate::ui::theme::Theme;
 
-/// 主页可聚焦的目标（页面内元素，不含外壳侧栏 / 顶栏）。
+/// 焦点所在的栏。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pane {
+    /// 左侧导航（宽屏侧栏 / 窄屏顶栏标签）。
+    Nav,
+    /// 右侧页面内容。
+    Content,
+}
+
+/// 当前焦点所在的栏；不在主页时返回 `None`。
 ///
-/// 有弹层或不在主页时返回空列表：方向键此时属于弹层 / 其它页面。
-/// 返回顺序就是方向键的巡览顺序。
-pub fn targets(app: &App, area: Rect) -> Vec<Target> {
-    if app.screen != Screen::Home || super::hit::modal_open(app) {
+/// 默认在内容区：进主页时用户关心的是「开始学习」这类操作；`←` 随时可以
+/// 去导航栏，`→` 再回来。
+pub fn pane(app: &App) -> Option<Pane> {
+    (app.screen == Screen::Home).then_some(match app.focus_pane {
+        Some(Pane::Nav) => Pane::Nav,
+        _ => Pane::Content,
+    })
+}
+
+/// 导航栏的目标（宽屏侧栏 / 窄屏顶栏）。
+///
+/// 当前页面对应的入口排在最前，这样没有焦点时按 `↓` 就会落在它上面。
+pub fn nav_targets(app: &App, area: Rect) -> Vec<Target> {
+    let shell = shell::layout(area, Nav::Home);
+    let mut targets: Vec<Target> = shell
+        .nav_targets
+        .iter()
+        .map(|(screen, rect)| {
+            let mut target = Target::new(*rect, Action::Navigate(*screen));
+            target.label = Some(Nav::from_screen(*screen).label());
+            target
+        })
+        .collect();
+    let current = targets
+        .iter()
+        .position(|target| match target.action {
+            Action::Navigate(screen) => Nav::from_screen(screen) == Nav::from_screen(app.screen),
+            _ => false,
+        })
+        .unwrap_or(0);
+    if current > 0 {
+        let item = targets.remove(current);
+        targets.insert(0, item);
+    }
+    targets
+}
+
+/// 导航栏里「当前页面对应入口」的下标（进导航栏时的落点）。
+pub fn nav_current_index(app: &App, area: Rect) -> Option<usize> {
+    nav_targets(app, area)
+        .iter()
+        .position(|target| match target.action {
+            Action::Navigate(screen) => Nav::from_screen(screen) == Nav::from_screen(app.screen),
+            _ => false,
+        })
+        .or(Some(0))
+}
+
+/// 内容区的目标（开始学习 / 自由练习 / 每日目标 / 词库入口 / 练习模式）。
+pub fn content_targets(app: &App, area: Rect) -> Vec<Target> {
+    if super::hit::modal_open(app) {
         return Vec::new();
     }
     let shell = shell::layout(area, Nav::Home);
     let mut targets = super::home::targets(app, shell.content);
-    // 排序是稳定的：同一优先级（三处词库入口）保持主页 target 的注册顺序。
     targets.sort_by_key(|target| tour_rank(&target.action));
     targets
 }
 
-/// 巡览顺序（越小越靠前）。
+/// 当前栏的全部目标。
+pub fn targets(app: &App, area: Rect) -> Vec<Target> {
+    match pane(app) {
+        Some(Pane::Nav) => nav_targets(app, area),
+        _ => content_targets(app, area),
+    }
+}
+
+/// 内容区巡览顺序（越小越靠前）。
 ///
 /// 「开始 / 继续学习」必须是第一项：首次按方向键选中它，再按 Enter 就是
-/// 开始练习——即使误按 Enter 也不会改到任何设置。之后按页面区块向下：
-/// 自由练习 → 词库入口 → 每日目标 → 练习模式。
+/// 开始练习——即使误按 Enter 也不会改到任何设置。
 fn tour_rank(action: &Action) -> u8 {
     match action {
         Action::StartPractice => 0,
@@ -48,7 +115,7 @@ fn tour_rank(action: &Action) -> u8 {
     }
 }
 
-/// 当前焦点对应的矩形；没有焦点、页面不对或下标失效时返回 `None`。
+/// 当前焦点对应的矩形。
 pub fn focused_rect(app: &App, area: Rect) -> Option<Rect> {
     let index = app.focus?;
     targets(app, area).get(index).map(|target| target.rect)
@@ -66,7 +133,7 @@ pub fn focused_label(app: &App, area: Rect) -> Option<&'static str> {
     })
 }
 
-/// 按巡览顺序移动一步：`step` 为 `+1`（下一项）/ `-1`（上一项），到头回绕。
+/// 栏内移动一步：`step` 为 `+1`（下一项）/ `-1`（上一项），到头回绕。
 ///
 /// 还没有焦点时：向下的方向从第一项开始、向上的方向从最后一项开始——
 /// 与菜单里「按 ↓ 选第一项、按 ↑ 选最后一项」的直觉一致。
@@ -82,43 +149,19 @@ pub fn step(targets: &[Target], from: Option<usize>, step: i32) -> Option<usize>
     })
 }
 
-/// 焦点高亮：选中底色 + 加粗正文 + 左侧强调条。
+/// 焦点高亮：整块用 `accent` 铺满。
 ///
-/// 与列表的选中行用同一套语言（`selection` 底 + `accent` 强调条），而不是
-/// 整块反显——反显会把按钮自己的强调色换成反色，看起来像按钮被按下去。
-/// 强调条优先画在控件自身第一列（按钮 / 卡片的左边距通常是空白），有字时
-/// 改画在矩形外面一格；两处都有字就不画，绝不覆盖控件文字。高对比主题的
-/// `selection` 与 `bg` 同为黑色，就靠这条强调条识别焦点。
+/// 主按钮常态就是 `accent` 底、自由练习按钮是 `element` 底；焦点时两者都变成
+/// 整块 `accent` + `bg` 文字 + 加粗——「整块紫 = 选中」。不再画左侧竖条：
+/// 那会盖住主按钮自己的左边距，看起来像按钮样式被改坏了。
 pub fn paint(frame: &mut Frame, rect: Rect, theme: &Theme) {
-    let buffer = frame.buffer_mut();
-    buffer.set_style(
+    frame.buffer_mut().set_style(
         rect,
         Style::default()
-            .fg(theme.fg)
-            .bg(theme.selection)
+            .fg(theme.bg)
+            .bg(theme.accent)
             .add_modifier(Modifier::BOLD),
     );
-    // 左侧强调条优先画在控件自己的第一列（按钮 / 卡片的左边距通常是空白），
-    // 那一列有字时改画在矩形外面一格；两处都压着字就不画，绝不覆盖内容。
-    for column in [rect.x, rect.x.saturating_sub(1)] {
-        if rect.x == 0 && column == 0 {
-            continue;
-        }
-        let bar = Rect::new(column, rect.y, 1, rect.height);
-        if bar.right() > buffer.area.right() {
-            continue;
-        }
-        let blank = (bar.y..bar.bottom()).all(|y| {
-            buffer
-                .cell((bar.x, y))
-                .map(|cell| cell.symbol() == " ")
-                .unwrap_or(false)
-        });
-        if blank {
-            buffer.set_style(bar, Style::default().bg(theme.accent));
-            return;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -146,7 +189,6 @@ mod tests {
         assert_eq!(step(&targets, Some(0), 1), Some(1));
         assert_eq!(step(&targets, Some(2), 1), Some(0));
         assert_eq!(step(&targets, Some(0), -1), Some(2));
-        // 超过一整圈的步长也能回绕。
         assert_eq!(step(&targets, Some(0), -3), Some(0));
     }
 

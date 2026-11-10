@@ -106,13 +106,13 @@ fn words_action(app: &App, key: KeyEvent) -> Option<Action> {
     }
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::WordsMove(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::WordsMove(1)),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
         KeyCode::PageUp => Some(Action::WordsMove(-10)),
         KeyCode::PageDown => Some(Action::WordsMove(10)),
         KeyCode::Home => Some(Action::WordsMove(-100_000)),
         KeyCode::End => Some(Action::WordsMove(100_000)),
-        KeyCode::Enter => Some(Action::WordsEdit),
+        KeyCode::Enter => Some(Action::SelectActivate),
         KeyCode::Char(' ') => Some(Action::WordsToggleMark(
             app.filtered_word_indices()
                 .get(app.words_cursor)
@@ -278,11 +278,14 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
             _ => None,
         },
+        // 列表 / 卡片型页面共用同一套方向键语义：↑/↓ 移动光标、Enter 触发、
+        // Esc 返回。页面特有的操作（词库的 +/-、统计的翻页、设置的空格）保留为
+        // 附加键位，不再占用方向键。
         Screen::DictPicker => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::DictMove(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::DictMove(1)),
-            KeyCode::Enter => Some(Action::ActivateDict(app.dict_cursor)),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
+            KeyCode::Enter => Some(Action::SelectActivate),
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
             KeyCode::Char('w') => Some(Action::OpenSelectedWords),
@@ -291,9 +294,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             _ => None,
         },
         Screen::Stats => match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::StatsScroll(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::StatsScroll(1)),
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
             KeyCode::PageUp => Some(Action::StatsScroll(-5)),
             KeyCode::PageDown => Some(Action::StatsScroll(5)),
             KeyCode::Left => Some(Action::StatsDayMove(-1)),
@@ -305,11 +308,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         },
         Screen::Settings => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SettingsMove(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SettingsMove(1)),
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                Some(Action::ActivateSetting(app.settings_cursor))
-            }
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
+            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SelectActivate),
             _ => None,
         },
         Screen::Flows => match key.code {
@@ -320,10 +321,10 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
                     Some(Action::Back)
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::FlowMove(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::FlowMove(1)),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
             KeyCode::Tab => Some(Action::FlowNextNode),
-            KeyCode::Enter => Some(Action::FlowActivate),
+            KeyCode::Enter => Some(Action::SelectActivate),
             KeyCode::Char('n') => Some(Action::FlowDuplicate),
             KeyCode::Char('e') => Some(Action::FlowEdit),
             KeyCode::Delete => Some(Action::FlowDelete),
@@ -333,13 +334,14 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('g') if app.flow_editing => Some(Action::FlowToggleWordLoop),
             _ => None,
         },
+        // 文章页是双栏：← 进左栏（书本）、→ 进右栏（文章），↑/↓ 在栏内移动。
         Screen::Articles => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Action::ArticleMove(1)),
-            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Action::ArticleMove(-1)),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::ArticleBookMove(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::ArticleBookMove(1)),
-            KeyCode::Enter => Some(Action::ArticleSelect),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
+            KeyCode::Left | KeyCode::BackTab => Some(Action::SelectLeftPane),
+            KeyCode::Right | KeyCode::Tab => Some(Action::SelectRightPane),
+            KeyCode::Enter => Some(Action::SelectActivate),
             _ => None,
         },
         Screen::ArticlePractice => match key.code {
@@ -356,13 +358,13 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         },
         Screen::Shortcuts => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::ShortcutMove(-1)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::ShortcutMove(1)),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
             KeyCode::PageUp => Some(Action::ShortcutMove(-10)),
             KeyCode::PageDown => Some(Action::ShortcutMove(10)),
             KeyCode::Home => Some(Action::ShortcutMove(-100)),
             KeyCode::End => Some(Action::ShortcutMove(100)),
-            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ShortcutCapture),
+            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SelectActivate),
             KeyCode::Delete => Some(Action::ShortcutClear),
             KeyCode::Char('r') => Some(Action::ShortcutReset),
             KeyCode::Char('R') => Some(Action::ShortcutResetAll),
