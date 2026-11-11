@@ -14,8 +14,10 @@ pub enum Action {
     StartPractice,
     StartFreePractice,
     AdjustDaily(i64),
-    /// 主页键盘焦点：按方向键移动选中的元素。
+    /// 键盘焦点：按方向键移动选中的元素（所有套外壳页面）。
     FocusMove(FocusDir),
+    /// 键盘焦点：在导航栏与内容区之间换栏（Tab / Shift+Tab）。
+    SwitchFocusPane,
     /// 通用选择：列表 / 卡片光标上移（到顶回绕）。
     SelectUp,
     /// 通用选择：列表 / 卡片光标下移（到底回绕）。
@@ -151,6 +153,7 @@ impl App {
             Action::StartFreePractice => self.start_free_practice(),
             Action::AdjustDaily(delta) => self.adjust_daily_target(delta),
             Action::FocusMove(direction) => self.move_focus(direction),
+            Action::SwitchFocusPane => self.switch_focus_pane(),
             Action::ActivateFocus => self.activate_focus(),
             Action::ClearFocus => self.clear_focus(),
             // 通用选择：把「列表 / 卡片光标」的语义集中在一处，各页面只负责
@@ -276,14 +279,10 @@ impl App {
             Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
         }
-        // 焦点只在主页内有意义：页面一换，旧身份就不再对应当前页面。
-        // 回到主页时立刻选中主按钮——否则刚回来的界面没有任何高亮，
-        // 方向键又回到「上/左进导航、下/右落按钮」的猜测状态。
+        // 切屏路径（navigate_to / open_articles / back / finish_session …）都通过
+        // set_screen 迁移焦点；这里兜底处理直接改 screen 的遗漏分支。
         if self.screen != screen_before {
-            self.clear_focus();
-            if self.screen == Screen::Home {
-                self.focus_home_default();
-            }
+            self.focus_default();
         }
     }
 
@@ -299,32 +298,32 @@ impl App {
         }
         match screen {
             Screen::Home => {
-                self.screen = Screen::Home;
+                self.set_screen(Screen::Home);
                 self.refresh_stats();
                 self.refresh_task_preview();
             }
             Screen::DictPicker => {
-                self.screen = Screen::DictPicker;
+                self.set_screen(Screen::DictPicker);
                 self.dict_cursor = 0;
             }
             Screen::Stats => {
-                self.screen = Screen::Stats;
+                self.set_screen(Screen::Stats);
                 self.stats_scroll = 0;
             }
             Screen::Settings => {
-                self.screen = Screen::Settings;
+                self.set_screen(Screen::Settings);
                 self.settings_cursor = 0;
             }
             Screen::Shortcuts => {
-                self.screen = Screen::Shortcuts;
+                self.set_screen(Screen::Shortcuts);
                 self.shortcut_cursor = 0;
                 self.shortcut_capturing = false;
             }
             Screen::WordTest => {
-                self.screen = Screen::WordTest;
+                self.set_screen(Screen::WordTest);
             }
             Screen::Words => {
-                self.screen = Screen::Words;
+                self.set_screen(Screen::Words);
                 self.words_cursor = 0;
                 self.words_filter.clear();
                 self.words_search_focus = false;
@@ -337,16 +336,16 @@ impl App {
                 self.open_articles();
             }
             Screen::Flows => {
-                self.screen = Screen::Flows;
+                self.set_screen(Screen::Flows);
                 self.flow_cursor = 0;
                 self.flow_editing = false;
             }
             Screen::ArticlePractice => {
-                self.screen = Screen::ArticlePractice;
+                self.set_screen(Screen::ArticlePractice);
             }
             Screen::Help => {
                 self.help_scroll = 0;
-                self.screen = Screen::Help;
+                self.set_screen(Screen::Help);
             }
             Screen::Practice => {}
         }
@@ -395,7 +394,7 @@ impl App {
                     // 防御：极少数情况下列表没载入过，补一次加载再落地。
                     self.open_articles();
                 } else {
-                    self.screen = Screen::Articles;
+                    self.set_screen(Screen::Articles);
                 }
             }
             Screen::DictPicker | Screen::Stats => self.navigate_to(Screen::Home),
@@ -403,11 +402,12 @@ impl App {
     }
 
     fn help_back(&mut self) {
-        self.screen = if self.session.is_some() {
+        let screen = if self.session.is_some() {
             Screen::Practice
         } else {
             Screen::Home
         };
+        self.set_screen(screen);
     }
 
     fn summary_home(&mut self) {
@@ -418,11 +418,11 @@ impl App {
         self.pending_article_save = None;
         self.session = None;
         self.summary = None;
-        self.screen = Screen::Home;
+        self.set_screen(Screen::Home);
         self.refresh_task_preview();
         self.refresh_stats();
         // 文章结算结束时 screen 已经是 Home（回主页发生在弹层出现时），
-        // 走不到 `apply_action` 的「切屏回主页」分支；这里补上默认选中。
+        // set_screen 不会触发切屏分支；这里补上默认选中。
         self.focus_home_default();
     }
 
@@ -574,6 +574,105 @@ impl App {
         }
     }
 
+    /// 非主页内容区一次方向移动；返回页面自己的光标是否真的动了。
+    ///
+    /// 动不了的那次由调用方按几何决定是否跨到导航栏：宽屏内容区 ←、窄屏内容区
+    /// 最顶部 ↑。统计页左右键在月初 / 月末停住，正好把跨栏机会留给 ←。
+    pub(crate) fn move_selection_page(&mut self, direction: FocusDir) -> bool {
+        let forward = matches!(direction, FocusDir::Down | FocusDir::Right);
+        match (self.screen, direction) {
+            (Screen::Articles, FocusDir::Left) => {
+                if self.article_pane_left {
+                    false
+                } else {
+                    self.switch_selection_pane(true);
+                    true
+                }
+            }
+            (Screen::Articles, FocusDir::Right) => {
+                if self.article_pane_left {
+                    self.switch_selection_pane(false);
+                    true
+                } else {
+                    false
+                }
+            }
+            (Screen::Articles, FocusDir::Up | FocusDir::Down) => {
+                let before = (
+                    self.article_book_cursor,
+                    self.article_cursor,
+                    self.article_pane_left,
+                );
+                self.move_selection(if forward { 1 } else { -1 });
+                before
+                    != (
+                        self.article_book_cursor,
+                        self.article_cursor,
+                        self.article_pane_left,
+                    )
+            }
+            (Screen::DictPicker, FocusDir::Up | FocusDir::Down) => {
+                let before = self.dict_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.dict_cursor
+            }
+            (Screen::Settings, FocusDir::Up | FocusDir::Down) => {
+                let before = self.settings_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.settings_cursor
+            }
+            (Screen::Words, FocusDir::Up | FocusDir::Down) => {
+                let before = self.words_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.words_cursor
+            }
+            (Screen::Flows, FocusDir::Up | FocusDir::Down) => {
+                let before = self.flow_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.flow_cursor
+            }
+            (Screen::Shortcuts, FocusDir::Up | FocusDir::Down) => {
+                let before = self.shortcut_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.shortcut_cursor
+            }
+            (Screen::Stats, FocusDir::Up | FocusDir::Down) => {
+                let before = self.stats_scroll;
+                self.scroll_stats(if forward { 1 } else { -1 });
+                before != self.stats_scroll
+            }
+            (Screen::Stats, FocusDir::Left | FocusDir::Right) => {
+                // 日历里 ±1 天；到本月的 1 号 / 最后一天就停住，让 ← 有机会跨栏。
+                let last = month_last_day(self.stats_month);
+                let day = self.stats_day.day();
+                if direction == FocusDir::Left && day <= 1 {
+                    return false;
+                }
+                if direction == FocusDir::Right && day >= last {
+                    return false;
+                }
+                self.move_stats_day(if forward { 1 } else { -1 });
+                true
+            }
+            (Screen::Help, FocusDir::Up | FocusDir::Down) => {
+                let before = self.help_scroll;
+                self.scroll_help(if forward { 1 } else { -1 });
+                before != self.help_scroll
+            }
+            _ => false,
+        }
+    }
+
+    /// 非主页内容区 Enter：执行页面当前选中项。
+    pub(crate) fn activate_page_selection(&mut self) {
+        match self.screen {
+            // 统计页的内容区是整块仪表盘：Enter 与 `v` 一样切换视图。
+            Screen::Stats => self.toggle_stats_view(),
+            Screen::Help => self.help_back(),
+            _ => self.activate_selection(),
+        }
+    }
+
     fn move_dict_cursor(&mut self, delta: i32) {
         let count = self.boot.catalog.resources().len();
         if count == 0 {
@@ -667,7 +766,7 @@ impl App {
                 self.dict_cursor = index;
                 self.save_dict_now();
                 self.refresh_task_preview();
-                self.screen = Screen::Home;
+                self.set_screen(Screen::Home);
                 self.toast(
                     crate::domain::flow::navigator::NoticeLevel::Success,
                     format!("已切换到词库 {name}"),
@@ -735,4 +834,17 @@ impl App {
         let index = ids.iter().position(|id| *id == current).unwrap_or(0);
         self.boot.settings.theme = ids[(index + 1) % ids.len()].clone();
     }
+}
+
+/// 某年某月的最后一天（统计页日历边界用）。
+fn month_last_day((year, month): (i32, u32)) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)
+        .and_then(|date| date.pred_opt())
+        .map(|date| date.day())
+        .unwrap_or(28)
 }

@@ -35,10 +35,17 @@ pub enum NavId {
 }
 
 /// 焦点身份：导航栏或内容区的某个元素。
+///
+/// - `Nav`：所有套外壳页面共用的导航栏条目（侧栏 / 顶栏 / 退出）。
+/// - `Content`：主页内容区的 8 个固定元素。
+/// - `Page`：其它页面的内容区选中项。页面自己的光标（词库行、设置行、
+///   日历日期、滚动位置……）就是它的身份，由页面状态保存，不需要再存下标；
+///   方向键移动的是这个光标，跨栏回来时页面状态原样保留。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusId {
     Nav(NavId),
     Content(ContentId),
+    Page,
 }
 
 #[derive(Clone, Debug)]

@@ -348,7 +348,7 @@ fn the_article_list_marks_the_saved_article() {
 
 /// 断点属于文章 11；选中另一篇（文章 12）时不能硬套进度。
 ///
-/// 文章页进页在左栏（书本），`→`/`Tab` 切到右栏（文章），`↓` 选第二篇。
+/// 文章页进页在左栏（书本），`→` 切到右栏（文章），`↓` 选第二篇。
 #[test]
 fn selecting_another_article_starts_from_the_beginning() {
     let fixture = common::Fixture::new();
@@ -356,7 +356,7 @@ fn selecting_another_article_starts_from_the_beginning() {
 
     let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
     press(&mut app, KeyCode::Char('a'));
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.screen, app::Screen::ArticlePractice);

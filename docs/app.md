@@ -14,7 +14,7 @@
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
-| `src/app/focus.rs` | 主页键盘焦点：`FocusDir` 与 `move_focus`/`activate_focus`/`clear_focus`/`focus_home_default`（进入主页默认选中主按钮）；保存焦点身份（`FocusId`）与内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
+| `src/app/focus.rs` | 所有套外壳页面的键盘焦点：`FocusDir`、`set_screen`（切屏唯一入口）、`focus_default`（进入页面默认选中内容区）、`move_focus`/`switch_focus_pane`/`activate_focus`/`clear_focus`/`focus_home_default`；保存焦点身份（`FocusId`）与主页内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
 | `src/bootstrap.rs` | `Bootstrapped`（存档、词库目录、主题、`notices`、`readonly_dict`）与 `bootstrap::load` |
 | `src/main.rs`、`src/lib.rs` | 入口：`Cli::parse` → `Paths::resolve` → 子命令分发 → `app::run` |
 | `src/cli.rs`、`src/paths.rs` | 参数与 `doctor`/`task`/`import-dict`；数据目录/资源目录解析 |
@@ -46,7 +46,7 @@
 | --- | --- | --- |
 | 启动装载 | `boot: Bootstrapped`、`store: FileStore` | 存档状态、词库目录、主题注册表、`readonly_dict` |
 | 页面 | `screen`、`dict_cursor`、`settings_cursor`、`stats_scroll`、`help_scroll` | 当前页与三个列表/滚动光标 |
-| 主页焦点 | `focus: Option<ui::focus::FocusId>`、`last_content_focus: Option<ui::target::ContentId>`、`viewport: Rect` | 焦点存稳定身份（导航栏 `NavId` / 内容区 `ContentId`），每次按键与 `Enter` 前按当前布局重新解析；`last_content_focus` 供跨栏回内容区时恢复；`viewport` 是最近一次绘制区域，按键时按它算布局（见 5.4 与 6.1） |
+| 键盘焦点 | `focus: Option<ui::focus::FocusId>`、`last_content_focus: Option<ui::target::ContentId>`、`viewport: Rect` | 焦点存稳定身份（导航栏 `NavId` / 主页内容区 `ContentId` / 其它页面 `Page`）。导航栏与主页内容区每次按键与 `Enter` 前按当前布局重新解析，失效即清空；`Page` 由页面自己的光标表示，不依赖几何。`last_content_focus` 供主页跨栏回内容区时恢复；`viewport` 是最近一次绘制区域，按键时按它算布局（见 5.4 与 6.1） |
 | 会话 | `session: Option<PracticeSession>`、`typing: TypingEngine`、`stat: PracticeState`、`identify_select` | 练习中才有 `session`；开始新一轮时 `typing`/`stat` 重建或重置 |
 | 随机源 | `rng: Rng`、`seed: u64` | `StdRng`；`--seed` 固定后整条事件序列可复现 |
 | 提示与弹层 | `toasts: Vec<Toast>`、`quit: bool`、`edit`、`confirm`、`summary` | 最多保留 4 条 Toast；`quit` 由退出确认置位；三类弹层正常交互中互斥 |
@@ -156,8 +156,8 @@ app.save_all()
 - 先 draw 再 tick：tick 造成的变化在下一帧可见；一帧内的按键事件在 draw 之后处理。
 - 一次 `poll` 最多消费 64 个事件再重绘，防止鼠标事件造成高频重绘；`poll(0)` 只用于判断队列是否还有事件。
 - 只处理 `KeyEventKind::Press`，忽略 Release/Repeat，避免 Windows 上重复触发。
-- 每帧在 `on_tick` 之后、处理事件之前把 `viewport` 同步成 `terminal_area()`：主页方向键焦点要按布局算几何，而 `on_key` 不经过渲染，只能靠这个字段知道当前终端尺寸（测试与 `examples/shot` 用 `App::set_viewport` 显式设置）。
-- `terminal_area()` 由 `crossterm::terminal::size()` 构造 `Rect`，失败回退 `80 × 24`；用于鼠标命中与 `viewport` 同步（主页方向键按它算布局），渲染仍以 `Frame::area()` 为准。退出路径只有两条：主页 `q` → 确认弹层 → `quit = true`，或 `event_loop` 返回错误；两者都走保存与终端恢复。
+- 每帧在 `on_tick` 之后、处理事件之前把 `viewport` 同步成 `terminal_area()`：键盘焦点要按布局算几何，而 `on_key` 不经过渲染，只能靠这个字段知道当前终端尺寸（测试与 `examples/shot` 用 `App::set_viewport` 显式设置）。
+- `terminal_area()` 由 `crossterm::terminal::size()` 构造 `Rect`，失败回退 `80 × 24`；用于鼠标命中与 `viewport` 同步（焦点导航按它算布局），渲染仍以 `Frame::area()` 为准。退出路径只有两条：主页 `q` → 确认弹层 → `quit = true`，或 `event_loop` 返回错误；两者都走保存与终端恢复。
 
 ### 4.2 `on_tick(now)` 的四块逻辑
 
@@ -180,7 +180,7 @@ app.save_all()
 4. `screen == ArticlePractice` 时先截下 `Esc`（`back` 返回文章列表）与 `Ctrl+P`（朗读当前句），其余按键交给 `article_typing_key`——跟打键入同样不经过 `Action`。
 5. 其它屏幕调 `keymap::screen_action`，返回 `Action` 后交给 `apply_action`。
 
-`screen_action` 先处理 Help（「任意键返回」优先），再判断数字切页：`session.is_none()`、当前页属于 `Home` / `Articles` / `DictPicker` / `Stats` / `Settings` / `Help`、无修饰键、按 `1`~`6` 时直接产生 `Navigate`：`1` 单词、`2` 文章、`3` 词库、`4` 统计、`5` 帮助、`6` 设置。
+`screen_action` 先处理练习中打开的整屏帮助页（保持「滚动之外任意键返回」），再判断数字切页：`session.is_none()`、当前页属于 `Home` / `Articles` / `DictPicker` / `Stats` / `Settings` / `Help`、无修饰键、按 `1`~`6` 时直接产生 `Navigate`：`1` 单词、`2` 文章、`3` 词库、`4` 统计、`5` 帮助、`6` 设置。之后先过统一的焦点键（`focus_action`：`↑`/`↓`/`←`/`→` 与 `j`/`k` → `FocusMove`、`Tab`/`Shift+Tab` → `SwitchFocusPane`、`Enter` → `ActivateFocus`，只在 `ui::focus::enabled` 为真时生效），各页面分支只保留自己的特有键位。
 
 ### 5.2 练习页键位（`on_practice_key`）
 
@@ -224,13 +224,20 @@ app.save_all()
 
 ### 5.4 其它屏幕键位（`screen_action`）
 
-| 屏幕 | 键 → `Action` |
+所有套外壳页面（`ui::focus::supports_focus`）共用一组焦点键，由 `focus_action` 在页面分支之前统一处理：`↑`/`↓`/`←`/`→`（`j`/`k` 是上下别名）→ `FocusMove`，`Tab`/`Shift+Tab` → `SwitchFocusPane`，`Enter` → `ActivateFocus`。练习会话进行中、有弹层、词条搜索框获得焦点时 `ui::focus::enabled` 为假，这组键交给原页面逻辑。
+
+| 屏幕 | 特有键 → `Action`（焦点键除外） |
 | --- | --- |
-| 主页 | `↑`/`↓`/`←`/`→`→`FocusMove(Up/Down/Left/Right)`：按所站栏的主轴移动——宽屏侧栏竖向、窄屏顶栏横向；内容区按视觉行带上下换带、同带内左右移动，到边停。宽屏 `←` / 窄屏 `↑` 从内容区进导航栏，宽屏 `→` / 窄屏 `↓` 回内容区；进入主页默认选中主按钮（见 5.7 `FocusMove`）；`Enter`→`ActivateFocus`（无焦点时等同 `StartPractice`）；`Esc`→`ClearFocus`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`a`→`OpenArticles`；`Ctrl+F`→`OpenFlows`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
-| 词库页 | `Esc`/`q`→`Back`；`↑`/`k`→`DictMove(-1)`，`↓`/`j`→`DictMove(1)`；`Enter`→`ActivateDict(cursor)`；`+`/`-`→`AdjustDaily(±5)` |
-| 统计页 | `Esc`/`q`/`Enter`→`Back`；`↑`/`k`→`StatsScroll(-1)`，`↓`/`j`→`StatsScroll(1)`；`PgUp`/`PgDn`→`StatsScroll(∓5)` |
-| 设置页 | `Esc`/`q`→`Back`；`↑`/`k`→`SettingsMove(-1)`，`↓`/`j`→`SettingsMove(1)`；`Enter`/`Space`→`ActivateSetting(cursor)` |
-| 帮助页 | `↑`/`k`、`↓`/`j`、`PgUp`/`PgDn` 滚动；其余任意键→`HelpBack` |
+| 主页 | `Esc`→`ClearFocus`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`a`→`OpenArticles`；`Ctrl+F`→`OpenFlows`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
+| 词库页 | `Esc`/`q`→`Back`；`+`/`-`→`AdjustDaily(±5)`；`w`→`OpenSelectedWords`；`a`→`OpenArticles`；`n`→`WordsNewDict` |
+| 统计页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`→`StatsScroll(∓5)`；`,`/`.`→`StatsMonthMove(∓1)`；`v`→`StatsToggleView` |
+| 设置页 | `Esc`/`q`→`Back`；`Space`→`SelectActivate` |
+| 流程页 | `Esc`→`Back`（编辑中→`FlowEdit`）；`]`→`FlowNextNode`；`n`→`FlowDuplicate`；`e`→`FlowEdit`；`Delete`→`FlowDelete`；编辑中 `a`/`d`/`s`/`g`→加步骤 / 删步骤 / 乱序 / 组内巩固 |
+| 文章页 | `Esc`/`q`→`Back` |
+| 词条页 | 搜索框聚焦时输入搜索词，`Esc` 退出搜索；否则 `Esc`/`q`→`Back`、`PgUp`/`PgDn` 翻 10 行、`Home`/`End` 到首/末、`Space`→勾选当前词、`/`→搜索、`a`/`d`/`n`/`o`/`c` 与 `1`/`2`/`3` 是词条操作（见第 8 节与使用手册） |
+| 快捷键页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`、`Home`/`End`；`Space`→`SelectActivate`；`Delete` 清除绑定；`r`/`R` 恢复当前 / 全部默认 |
+| 帮助页 | 练习中打开的整屏帮助：`↑`/`↓` 滚动、`PgUp`/`PgDn` 翻页、其余任意键→`HelpBack`；正常帮助页：`↑`/`↓`/`←`/`→`/`Tab`/`Enter` 走焦点键，`PgUp`/`PgDn` 滚动，其它键→`HelpBack` |
+| 单词测试页 | 不参与焦点导航：`Esc`/`q`→`WordTestExit`，其余走键位表（`ChooseA`~`ChooseD` / `WordTestingNext` / `PlayWordPronunciation`） |
 
 无会话的非练习页上，无修饰的 `1`~`6` 切到对应页面（1 单词 / 2 文章 / 3 词库 / 4 统计 / 5 帮助 / 6 设置）。
 
@@ -250,7 +257,7 @@ app.save_all()
 
 ### 5.7 `Action` 全表
 
-`Action` 的 88 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
+`Action` 的 89 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
@@ -259,8 +266,9 @@ app.save_all()
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
 | `AdjustDaily(delta)` | 每日词数以显示值 `Dict::per_day()` 为基准 `±delta`，再夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
-| `FocusMove(direction)` | 主页方向键：`move_focus` 先按当前布局解析焦点身份（解析不到就视为无焦点），再按所站栏的主轴移动——内容区交给 `ui::focus::content_move`（`↑`/`↓` 换视觉行带、`←`/`→` 带内左右），导航栏交给 `ui::focus::nav_move`（按 `NavOrientation` 取竖向 / 横向）；栏内到边才跨栏；完全无焦点时 `↑`/`←` 进导航栏、`↓`/`→` 落内容区主按钮。主页在启动 / 切回 / 退出练习 / 结算关闭时由 `focus_home_default` 先选中主按钮，因此正常打开界面后方向键从这个可见选中项开始移动；`Esc` / 点空白取消后才回到完全无焦点 |
-| `ActivateFocus` | 主页 `Enter`：`activate_focus` 按当前布局解析并触发焦点元素的 `Action`；落在导航栏当前页入口上只给 Info Toast「已在「X」页」；焦点身份失效（缩放后元素消失）时只清空焦点并提示，不回退；进入主页默认选中主按钮，正常按 `Enter` 先触发它；完全无焦点（`Esc` / 点空白后）时回退 `StartPractice` |
+| `FocusMove(direction)` | 所有套外壳页面的方向键：`move_focus` 先按当前布局解析身份（导航栏 / 主页内容区失效就视为无焦点），再按所站栏的主轴移动——导航栏交给 `ui::focus::nav_move`（按 `NavOrientation` 取竖向 / 横向）；主页内容区交给 `ui::focus::content_move`（`↑`/`↓` 换视觉行带、`←`/`→` 带内左右）；其它页面的内容区交给 `move_selection_page`（先让页面光标动，动不了再按几何跨栏）。栏内到边才跨栏；完全无焦点时 `↑`/`←` 进导航栏、`↓`/`→` 落内容区。`set_screen` / `focus_default` 在进入页面时先选中内容区（主页是主按钮），所以正常打开界面后方向键从这个可见选中项开始移动 |
+| `SwitchFocusPane` | `Tab` / `Shift+Tab`：`switch_focus_pane` 在导航栏与内容区之间换栏；方向键到边也能跨栏，这个键是固定通路（统计页横向键被页面占用时尤其有用） |
+| `ActivateFocus` | `Enter`：`activate_focus` 按当前焦点触发。导航栏：解析目标并执行其 `Action`，落在当前页入口上只给 Info Toast「已在「X」页」，身份失效（缩放后元素消失）时只清空焦点并提示，不回退。主页内容区：执行焦点元素的 `Action`。其它页面：`activate_page_selection` 调页面自己的激活逻辑（词库设为当前、设置修改、文章开始跟打、词条编辑、快捷键改绑、流程启用、统计切换视图、帮助返回）。主页无焦点时回退 `StartPractice` |
 | `ClearFocus` | 主页 `Esc`：`clear_focus` 清空 `focus` 与 `last_content_focus` |
 | `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
 | `OpenArticles` | 打开文章页：载入书本与当前书本的文章（见 6.3）。主页 `a` 键用它；侧栏 / 数字键走 `Navigate(Articles)`，两者最终落到同一个方法 |
@@ -284,8 +292,8 @@ app.save_all()
 - **练习中禁止切页**：`navigate_to` 在有 `session` 时直接返回。练习页只能通过 `Ctrl+C` 或完成结算离开（帮助页只是临时覆盖，返回后仍在练习）；鼠标侧栏导航在练习期间也不会生成 target。
 - **弹层模态且互斥**：`summary` 只在练习完成时产生；`edit` 只从设置页数字项产生；`confirm` 只从主页 `q` 或设置页「重置进度」产生。正常交互中三者互斥；若出现异常叠加，键位层按 `edit` → `confirm` → `summary` 处理，渲染层按 `summary` → `edit` → `confirm` 绘制（后画者在上）。
 - **Back 语义**：先尝试关闭弹层（正常流程里弹层已被键位层拦下）；再按屏返回：设置页先 `save_settings_now` 回主页，词库页/统计页回主页，帮助页按是否有会话回练习页或主页，主页/练习页无动作。
-- **主页键盘焦点**：状态是 `App.focus: Option<ui::focus::FocusId>` + `App.last_content_focus: Option<ContentId>`——存身份而不是列表下标，每次按键 / `Enter` 前按当前 `viewport` 重新解析，布局变化后元素消失就视为失效。导航栏目标 = `shell::layout` 的 `nav_targets`（单词 / 文章 / 词库 / 统计 / 帮助 / 设置）加宽屏底部的「退出」（`NavId::Quit`）；内容区目标 = `ui::home::targets` 的 8 项（`ContentId::Start` / `Free` / `DictPage` / `ManageDict` / `MoreDicts` / `DailyMinus` / `DailyPlus` / `Mode`）。内容区按视觉行带移动（`↑`/`↓` 换带、`←`/`→` 带内左右、到边停），宽屏侧栏竖向（`↑`/`↓` 选项、`→` 回内容区），窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；回内容区时用 `last_content_focus` 恢复上次选择。导航栏焦点只在主页存在（`ui::focus::pane` 判定 `Screen::Home`）；`apply_action` 在 `screen` 变化后清空焦点与 `last_content_focus`，若新屏幕是主页则立刻用 `focus_home_default` 选中主按钮；启动（`bootstrap`）、`leave_practice`（练习页 `Ctrl+C` 直接回主页）与 `summary_home`（结算关闭，屏幕可能已是 Home）也各自恢复默认选中。`Esc` / 点空白仍会清空焦点。焦点目标与鼠标命中同源，鼠标点击会同步焦点，见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
-- **通用选择**：`move_selection` / `switch_selection_pane` / `activate_selection` 把列表 / 卡片光标的语义集中在一处，`SelectUp` / `SelectDown` / `SelectActivate` / `SelectLeftPane` / `SelectRightPane` 是它们的 `Action`。各页面（词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章）只负责把自己的光标接进来，因此方向键行为一致；文章页用 `article_pane_left` 区分书本栏与文章栏。
+- **键盘焦点（所有套外壳页面）**：状态是 `App.focus: Option<ui::focus::FocusId>` + `App.last_content_focus: Option<ContentId>`。`FocusId` 三态：`Nav(NavId)` 导航栏、`Content(ContentId)` 主页内容区、`Page` 其它页面内容区（页面光标就是身份）。导航栏目标 = `shell::layout` 的 `nav_targets`（单词 / 文章 / 词库 / 统计 / 帮助 / 设置）加宽屏底部「退出」（`NavId::Quit`）；主页内容区目标 = `ui::home::targets` 的 8 项（`ContentId::Start` / `Free` / `DictPage` / `ManageDict` / `MoreDicts` / `DailyMinus` / `DailyPlus` / `Mode`）。导航栏与主页内容区每次按键 / `Enter` 前按当前 `viewport` 重新解析，布局变化后元素消失就视为失效；`Page` 由页面状态保存，不依赖几何。`App::set_screen` 是所有切屏的唯一入口：切屏时 `clear_focus` + `focus_default`，主页选中主按钮、其它套外壳页面选中 `Page`、练习页 / 文章跟打页 / 单词测试页保持无焦点。跨栏时宽屏内容区 `←`、窄屏内容区 `↑` 进导航栏，宽屏侧栏 `→`、窄屏顶栏 `↓` 回内容区，`Tab`/`Shift+Tab` 随处可用；主页回内容区用 `last_content_focus` 恢复上次选择。`Esc` 在主页清空焦点、其它页面返回上一层。鼠标点击导航栏 / 内容区会同步焦点，见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
+- **通用选择**：`move_selection` / `switch_selection_pane` / `activate_selection` 把列表 / 卡片光标的语义集中在一处，`SelectUp` / `SelectDown` / `SelectActivate` / `SelectLeftPane` / `SelectRightPane` 是它们的 `Action`；`move_selection_page` / `activate_page_selection` 是焦点层对它们的补充（统计切视图、帮助返回）。各页面（词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章）只负责把自己的光标接进来；文章页用 `article_pane_left` 区分书本栏与文章栏。
 - **帮助页**：从练习页按 `?` 进入时 `session` 仍在，数字切页不生效；除滚动键外任意键都返回练习页。
 - **退出与结算后**：只有主页 `q`（或宽屏侧栏「退出」：可点击，也可用方向键选中后按 `Enter`）请求退出；其它非练习页面的 `q` 是返回（练习页的 `q` 是普通输入）。结算后会话与缓存都已清理，继续/重学用当前设置里的练习模式开启新一轮（自由练习结算后继续，回到设置中的常规模式，而不是继续自由模式）。
 
@@ -490,12 +498,12 @@ app.save_all()
 - 随机性由 `seed` 决定：`--seed N` 或测试里 `Cli.seed` 固定 `StdRng`；`App::bootstrap`、`begin_session_with_task`、`refresh_task_preview`（内部调用 `create_study_task`）都会消耗随机数，因此**同一路径与种子**下任务与自测题可复现，中间多一次预览刷新会改变后续抽签结果。
 - 时间完全由参数驱动：`on_tick(now)` 接受毫秒时间戳，测试可注入任意 `now` 推进计时、Toast 过期与防抖保存；`on_key`/`on_mouse` 直接吃 crossterm 事件。
 - 可读状态包括 `screen`、`focus`、`viewport`、`session`（`data.index`、`current_word()`、`complete`、`mode` 等）、`stat`、`summary`、`edit`、`confirm`、`toasts`、`boot`、光标与滚动字段；私有字段 `last_timer_tick`/`pending_practice_save` 只能通过时间推进间接触发。
-- 键盘焦点导航按 `viewport` 算几何：测试与 `examples/shot` 先用 `App::set_viewport(Rect)` 把区域设成与渲染一致，再按方向键，否则焦点会按默认 80 × 24 布局算出来。
+- 键盘焦点导航按 `viewport` 算几何：测试与 `examples/shot` 先用 `App::set_viewport(Rect)` 把区域设成与渲染一致，再按方向键，否则焦点会按默认 80 × 24 布局算出来；进入页面要经过真实入口（数字键 / 侧栏 / 快捷键），才会触发 `set_screen` 的默认选中。
 - 测试辅助：`tests/common/mod.rs` 的 `Fixture` 在临时目录生成 12 词的 `toy` 词库与独立 `home`；`app::aggregate_stats` 把 `BaseState` 的逐日统计聚合成 `(day, spend, new, review, wrong)`。渲染测试用 `TestBackend` + `app.render(frame)`，驱动方式与真实事件循环一致（见 [渲染层](ui.md) 与 [开发指南](development.md)）。
 
 ## 11. 扩展指南
 
-1. **新增按键 / Action**：`action.rs` 加变体并在 `apply_action` 实现；非练习页映射到 `keymap.rs` 的 `screen_action`/`overlay_action`，练习页在 `on_practice_key` 加分支；需要点击就在对应 `targets()` 加 `Target::new(rect, action)`；要进主页键盘焦点则在 `ui::target.rs` 的 `ContentId` 加取值，用 `Target::focusable(rect, action, label, FocusId::Content(id))` 注册（导航栏项加到 `shell::layout` 的 `nav_targets` / `quit_target` 即会被 `ui::focus` 采纳）；补 `tests/app_drive.rs`、`tests/focus_nav.rs` 与 `tests/ui_snapshots.rs`。
+1. **新增按键 / Action**：`action.rs` 加变体并在 `apply_action` 实现；非练习页映射到 `keymap.rs` 的 `screen_action`/`overlay_action`，练习页在 `on_practice_key` 加分支；需要点击就在对应 `targets()` 加 `Target::new(rect, action)`；要进键盘焦点则在 `ui::target.rs` 的 `ContentId` 加取值，用 `Target::focusable(rect, action, label, FocusId::Content(id))` 注册（导航栏项加到 `shell::layout` 的 `nav_targets` / `quit_target` 即会被 `ui::focus` 采纳；新页面要参与焦点导航，就在 `ui::focus::supports_focus` 加 screen，并在 `move_selection_page` / `activate_page_selection` / `page_label` 里接上页面光标）；补 `tests/app_drive.rs`、`tests/focus_nav.rs` 与 `tests/ui_snapshots.rs`。
 2. **新增页面**：`Screen` 加变体，`ui::render` 与 `ui/hit.rs` 补分支；需要侧栏时扩展 `ui/shell.rs` 的 `Nav`（`from_screen`/`screen`/`label`/`key`/`ALL`/`MAIN`）；在 `screen_action` 注册键位；页面实现 `layout()` + `render()` + `targets()` 并登记渲染快照。
 3. **新增设置项**：`domain/types.rs` 的 `SettingState` 加字段与默认值 → `SETTING_ROWS` 加行（数字项加 `EditTarget` 并同步 `setting_number_value`/`apply_number_value` 与夹取范围，布尔项同步 `toggle_setting_bool`）→ `ui/settings.rs` 的 `SECTIONS` 与格式化 → `domain/i18n.rs` 文案 → [设置项参考](settings.md) 与测试。
 4. **新增弹层**：`App` 加 `Option<...>` 字段与打开它的 `Action`；`keymap::overlay_action` 按优先级插入键位并同步 `on_key` 的模态判断；`ui/mod.rs` 的 `modal_open` 与渲染顺序、`ui/overlays.rs` 的 `layout`/`render`/`targets`/`target_action` 同步；补最小终端布局单测与渲染快照。

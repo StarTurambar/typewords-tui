@@ -465,7 +465,13 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
         )),
         None => match focus_hints(app, shell.area) {
             // 有键盘焦点时优先说明「选中了什么、能按哪些键」。
-            Some(hints) => Line::from(footer_hints(&hints, hint_width, theme)),
+            Some(hints) => {
+                let hints: Vec<(&str, &str)> = hints
+                    .iter()
+                    .map(|(key, label)| (*key, label.as_str()))
+                    .collect();
+                Line::from(footer_hints(&hints, hint_width, theme))
+            }
             None => {
                 let hints = if app.screen == Screen::Home && hint_width < 52 {
                     HOME_COMPACT_HINTS
@@ -486,14 +492,29 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
     }
 }
 
-/// 主页有键盘焦点时，底栏换成焦点提示：显示选中项与操作键。
-fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, &'static str)>> {
+/// 有键盘焦点时，底栏换成焦点提示：显示选中项与操作键。
+///
+/// 选中项名称在主页是按钮名、在导航栏是页面名、在其它页面由页面自己的
+/// 光标决定（词库名 / 设置项名 / 日期……），所以这里返回 String。
+fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
     let label = crate::ui::focus::focused_label(app, area)?;
+    let pane = crate::ui::focus::pane(app);
+    let home = app.screen == Screen::Home;
+    let enter = if pane == Some(crate::ui::focus::Pane::Nav) {
+        "切换"
+    } else if app.screen == Screen::Help {
+        "返回"
+    } else {
+        "触发"
+    };
+    let esc = if home { "取消" } else { "返回" };
+    // tab 放在末尾：底栏太窄时从尾部丢弃，先保住「选中 / 移动 / enter / esc」。
     Some(vec![
         ("选中", label),
-        ("↑↓←→", "移动"),
-        ("enter", "触发"),
-        ("esc", "取消"),
+        ("↑↓←→", "移动".to_string()),
+        ("enter", enter.to_string()),
+        ("esc", esc.to_string()),
+        ("tab", "换栏".to_string()),
     ])
 }
 

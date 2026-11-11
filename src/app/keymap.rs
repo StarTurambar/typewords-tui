@@ -217,8 +217,31 @@ fn word_test_shortcut_action(app: &App, key: KeyEvent) -> Option<Action> {
     None
 }
 
+/// 所有套外壳页面共用的方向键 / Tab / Enter 焦点语义。
+///
+/// 返回 None 表示按键不属于焦点导航，继续交给页面自己的键位表。
+/// 练习页、文章跟打页、单词测试页不在 `ui::focus` 的支持范围内，因此不受影响。
+fn focus_action(app: &App, key: KeyEvent) -> Option<Action> {
+    if !crate::ui::focus::enabled(app) {
+        return None;
+    }
+    let plain = !has_command_modifier(key);
+    match key.code {
+        KeyCode::Up => Some(Action::FocusMove(FocusDir::Up)),
+        KeyCode::Down => Some(Action::FocusMove(FocusDir::Down)),
+        KeyCode::Left => Some(Action::FocusMove(FocusDir::Left)),
+        KeyCode::Right => Some(Action::FocusMove(FocusDir::Right)),
+        KeyCode::Char('k') | KeyCode::Char('K') if plain => Some(Action::FocusMove(FocusDir::Up)),
+        KeyCode::Char('j') | KeyCode::Char('J') if plain => Some(Action::FocusMove(FocusDir::Down)),
+        KeyCode::Tab | KeyCode::BackTab => Some(Action::SwitchFocusPane),
+        KeyCode::Enter => Some(Action::ActivateFocus),
+        _ => None,
+    }
+}
+
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
-    if app.screen == Screen::Help {
+    // 练习中打开的帮助页是整屏只读页：保持「滚动之外任意键返回」。
+    if app.screen == Screen::Help && app.session.is_some() {
         return match key.code {
             KeyCode::Up | KeyCode::Char('k') => Some(Action::HelpScroll(-1)),
             KeyCode::Down | KeyCode::Char('j') => Some(Action::HelpScroll(1)),
@@ -227,15 +250,20 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             _ => Some(Action::HelpBack),
         };
     }
+    // 菜单帮助页不在练习中：方向键 / Tab / Enter 走统一的焦点语义，
+    // 其余按键保持「任意键返回」（数字键也返回，不切页）。
+    if app.screen == Screen::Help {
+        return match key.code {
+            KeyCode::PageUp => Some(Action::HelpScroll(-5)),
+            KeyCode::PageDown => Some(Action::HelpScroll(5)),
+            _ => focus_action(app, key).or(Some(Action::HelpBack)),
+        };
+    }
+
     // 数字切页只在没有会话、且当前页不占用数字键时生效
     let digits_are_page_switches = matches!(
         app.screen,
-        Screen::Home
-            | Screen::DictPicker
-            | Screen::Stats
-            | Screen::Settings
-            | Screen::Help
-            | Screen::Articles
+        Screen::Home | Screen::DictPicker | Screen::Stats | Screen::Settings | Screen::Articles
     );
     if app.session.is_none()
         && digits_are_page_switches
@@ -253,15 +281,14 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         return Some(Action::Navigate(screen));
     }
 
+    // 统一的焦点键：方向键移动选中、Tab 换栏、Enter 触发。各页面只需保留
+    // 自己的特有键位（词库 +/-、统计翻页、设置空格……）。
+    if let Some(action) = focus_action(app, key) {
+        return Some(action);
+    }
+
     match app.screen {
         Screen::Home => match key.code {
-            // 方向键在主页面板的可点元素之间移动焦点，Enter 触发：
-            // 等价于鼠标「移到按钮上再点下去」。
-            KeyCode::Enter => Some(Action::ActivateFocus),
-            KeyCode::Up => Some(Action::FocusMove(FocusDir::Up)),
-            KeyCode::Down => Some(Action::FocusMove(FocusDir::Down)),
-            KeyCode::Left => Some(Action::FocusMove(FocusDir::Left)),
-            KeyCode::Right => Some(Action::FocusMove(FocusDir::Right)),
             KeyCode::Esc => Some(Action::ClearFocus),
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenFlows)
@@ -278,14 +305,10 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
             _ => None,
         },
-        // 列表 / 卡片型页面共用同一套方向键语义：↑/↓ 移动光标、Enter 触发、
-        // Esc 返回。页面特有的操作（词库的 +/-、统计的翻页、设置的空格）保留为
-        // 附加键位，不再占用方向键。
+        // 列表 / 卡片型页面：方向键与 Enter 已由 focus_action 接管，
+        // 这里只留页面特有操作。
         Screen::DictPicker => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
-            KeyCode::Enter => Some(Action::SelectActivate),
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::AdjustDaily(5)),
             KeyCode::Char('-') => Some(Action::AdjustDaily(-5)),
             KeyCode::Char('w') => Some(Action::OpenSelectedWords),
@@ -295,12 +318,8 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         },
         Screen::Stats => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
             KeyCode::PageUp => Some(Action::StatsScroll(-5)),
             KeyCode::PageDown => Some(Action::StatsScroll(5)),
-            KeyCode::Left => Some(Action::StatsDayMove(-1)),
-            KeyCode::Right => Some(Action::StatsDayMove(1)),
             KeyCode::Char(',') => Some(Action::StatsMonthMove(-1)),
             KeyCode::Char('.') => Some(Action::StatsMonthMove(1)),
             KeyCode::Char('v') => Some(Action::StatsToggleView),
@@ -308,9 +327,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         },
         Screen::Settings => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
-            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SelectActivate),
+            // 空格是设置页的附加「修改」键：与 Enter 走同一个焦点动作，
+            // 焦点在导航栏时就是切换页面，不会隔着焦点去改下面的设置项。
+            KeyCode::Char(' ') => Some(Action::ActivateFocus),
             _ => None,
         },
         Screen::Flows => match key.code {
@@ -321,10 +340,8 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
                     Some(Action::Back)
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
-            KeyCode::Tab => Some(Action::FlowNextNode),
-            KeyCode::Enter => Some(Action::SelectActivate),
+            // Tab 已改为换栏，流程编辑的「下一个节点」换到 `]`。
+            KeyCode::Char(']') => Some(Action::FlowNextNode),
             KeyCode::Char('n') => Some(Action::FlowDuplicate),
             KeyCode::Char('e') => Some(Action::FlowEdit),
             KeyCode::Delete => Some(Action::FlowDelete),
@@ -334,14 +351,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('g') if app.flow_editing => Some(Action::FlowToggleWordLoop),
             _ => None,
         },
-        // 文章页是双栏：← 进左栏（书本）、→ 进右栏（文章），↑/↓ 在栏内移动。
+        // 文章页双栏：←/→ 在书本栏与文章栏之间切换；到左栏最左边再 ← 进导航栏。
         Screen::Articles => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
-            KeyCode::Left | KeyCode::BackTab => Some(Action::SelectLeftPane),
-            KeyCode::Right | KeyCode::Tab => Some(Action::SelectRightPane),
-            KeyCode::Enter => Some(Action::SelectActivate),
             _ => None,
         },
         Screen::ArticlePractice => match key.code {
@@ -358,13 +370,11 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         },
         Screen::Shortcuts => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::SelectDown),
             KeyCode::PageUp => Some(Action::ShortcutMove(-10)),
             KeyCode::PageDown => Some(Action::ShortcutMove(10)),
             KeyCode::Home => Some(Action::ShortcutMove(-100)),
             KeyCode::End => Some(Action::ShortcutMove(100)),
-            KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SelectActivate),
+            KeyCode::Char(' ') => Some(Action::ActivateFocus),
             KeyCode::Delete => Some(Action::ShortcutClear),
             KeyCode::Char('r') => Some(Action::ShortcutReset),
             KeyCode::Char('R') => Some(Action::ShortcutResetAll),

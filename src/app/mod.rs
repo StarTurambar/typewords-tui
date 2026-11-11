@@ -651,7 +651,7 @@ impl App {
         app.refresh_task_preview();
         // 首帧就选中主页主按钮：否则「初次打开」没有任何高亮，方向键的
         // 落点只能靠试。身份与几何解耦，此时 viewport 还是默认值也无妨。
-        app.focus_home_default();
+        app.focus_default();
         Ok(app)
     }
 
@@ -686,7 +686,7 @@ impl App {
             return false;
         }
         self.session = Some(session);
-        self.screen = Screen::Practice;
+        self.set_screen(Screen::Practice);
         self.typing.reset();
         // 恢复的是上一轮的统计快照，本轮尚未落盘——与新开一轮同理。
         self.stats_recorded = false;
@@ -957,7 +957,7 @@ impl App {
         self.stat = PracticeState::default();
         session.initialize_task(task, &mut self.rng, &mut self.stat, timer::now_ms());
         self.session = Some(session);
-        self.screen = Screen::Practice;
+        self.set_screen(Screen::Practice);
         self.summary = None;
         self.identify_select = None;
         // 新的一轮：统计还没落盘。
@@ -986,7 +986,7 @@ impl App {
         }
         self.session = None;
         self.summary = None;
-        self.screen = Screen::Home;
+        self.set_screen(Screen::Home);
         self.typing = TypingEngine::new();
         self.refresh_task_preview();
         self.refresh_stats();
@@ -1209,7 +1209,7 @@ impl App {
             // 列表没载入过（理论上到不了这里）：补一次加载再落地。
             self.open_articles();
         } else {
-            self.screen = Screen::Articles;
+            self.set_screen(Screen::Articles);
         }
     }
 
@@ -1702,7 +1702,7 @@ impl App {
         // 单词测试有自己的计时起点，不复用上一轮练习的 `stat.spend`。
         self.word_test_spend = 0;
         self.last_timer_tick = timer::now_ms();
-        self.screen = Screen::WordTest;
+        self.set_screen(Screen::WordTest);
         self.summary = None;
         // 对齐上游 `words-test/[id].vue` 的 `init()`：开着「单词自动发音」
         // 时，进入测试就朗读当前题。
@@ -1830,14 +1830,14 @@ impl App {
         });
         // 单词测试没有练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。
-        self.screen = Screen::Home;
+        self.set_screen(Screen::Home);
     }
 
     /// 退出单词测试，回主页。
     pub fn leave_word_test(&mut self) {
         self.word_test = None;
         self.word_test_spend = 0;
-        self.screen = Screen::Home;
+        self.set_screen(Screen::Home);
         self.refresh_stats();
         self.refresh_task_preview();
     }
@@ -1877,7 +1877,7 @@ impl App {
 
     /// 打开流程页。
     pub fn open_flows(&mut self) {
-        self.screen = Screen::Flows;
+        self.set_screen(Screen::Flows);
         self.flow_cursor = 0;
         self.flow_editing = false;
         self.flow_node_cursor = 0;
@@ -2149,7 +2149,7 @@ impl App {
     pub fn open_articles(&mut self) {
         // 先切页再载入：读取失败时也留在文章页并提示，而不是把用户
         // 留在原地、让人以为点击没生效。
-        self.screen = Screen::Articles;
+        self.set_screen(Screen::Articles);
         self.article_book_cursor = 0;
         self.article_cursor = 0;
         // 进页先在左栏（书本列表）：和主页一样，← 进导航、→ 回内容；
@@ -2297,7 +2297,7 @@ impl App {
             wrong_sentences,
             spend,
         });
-        self.screen = Screen::ArticlePractice;
+        self.set_screen(Screen::ArticlePractice);
         self.stat = PracticeState::default();
         self.last_timer_tick = timer::now_ms();
         if resumed {
@@ -2511,7 +2511,7 @@ impl App {
         });
         // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。
-        self.screen = Screen::Home;
+        self.set_screen(Screen::Home);
         // 整篇练完了，断点缓存没有意义——删掉，否则下次进文章页会「恢复」
         // 一篇已经练完的文章。
         let _ = self.store.remove_practice_article();
@@ -2542,7 +2542,7 @@ impl App {
             self.toast(NoticeLevel::Warning, "没有可管理的词库");
             return;
         }
-        self.screen = Screen::Words;
+        self.set_screen(Screen::Words);
         self.words_cursor = 0;
         self.words_filter.clear();
         self.words_search_focus = false;
@@ -3048,7 +3048,7 @@ impl App {
 
     /// 打开快捷键编辑页（从设置页进入）。
     pub fn open_shortcuts(&mut self) {
-        self.screen = Screen::Shortcuts;
+        self.set_screen(Screen::Shortcuts);
         self.shortcut_cursor = 0;
         self.shortcut_capturing = false;
     }
@@ -3373,7 +3373,7 @@ impl App {
         match key.code {
             KeyCode::Char('?') => {
                 self.help_scroll = 0;
-                self.screen = Screen::Help;
+                self.set_screen(Screen::Help);
                 true
             }
             // 暂停计时：上游没有手动暂停，这是 TUI 专有键位

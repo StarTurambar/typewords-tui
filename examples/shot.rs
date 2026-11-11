@@ -205,11 +205,51 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
         "articles" => start_articles(app)?,
         "flows" => start_flows(app)?,
         "articlepractice" => start_article_practice(app)?,
-        "dict" => app.screen = Screen::DictPicker,
-        "stats" => app.screen = Screen::Stats,
-        "settings" => app.screen = Screen::Settings,
-        "shortcuts" => app.screen = Screen::Shortcuts,
-        "help" => app.screen = Screen::Help,
+        // 走真实入口（数字键 / 快捷键），页面的默认选中与底栏「选中 X」才会
+        // 和用户实际操作看到的一致；直接改 screen 会留下上一个页面的焦点身份。
+        "dict" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('3'));
+            if app.screen != Screen::DictPicker {
+                bail!("could not open dict picker (screen={:?})", app.screen);
+            }
+        }
+        "stats" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('4'));
+            if app.screen != Screen::Stats {
+                bail!("could not open stats (screen={:?})", app.screen);
+            }
+        }
+        "settings" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('s'));
+            if app.screen != Screen::Settings {
+                bail!("could not open settings (screen={:?})", app.screen);
+            }
+        }
+        "shortcuts" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('s'));
+            let row = SETTING_ROWS
+                .iter()
+                .position(|(key, _)| *key == "shortcut_settings")
+                .ok_or_else(|| anyhow::anyhow!("shortcut_settings row missing"))?;
+            while app.settings_cursor < row {
+                press(app, KeyCode::Down);
+            }
+            press(app, KeyCode::Enter);
+            if app.screen != Screen::Shortcuts {
+                bail!("could not open shortcuts (screen={:?})", app.screen);
+            }
+        }
+        "help" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('?'));
+            if app.screen != Screen::Help {
+                bail!("could not open help (screen={:?})", app.screen);
+            }
+        }
         "confirm" => {
             // 主页按 q 请求退出 → 确认弹层（不构造 ConfirmState）。
             app.screen = Screen::Home;
@@ -220,7 +260,8 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
         }
         "edit" => {
             // 设置页逐行 Enter，直到某个数字项打开编辑弹层。
-            app.screen = Screen::Settings;
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('s'));
             open_edit_overlay(app)?;
         }
         "summary" => {

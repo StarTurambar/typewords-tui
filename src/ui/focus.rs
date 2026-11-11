@@ -1,24 +1,31 @@
-//! 主页键盘焦点：焦点身份、两栏与方向移动规则。
+//! 键盘焦点：焦点身份、两栏与方向移动规则。
 //!
-//! 焦点不存「列表下标」，而存 FocusId（导航栏 NavId / 内容区 ContentId）。
+//! 焦点不存「列表下标」，而存 FocusId（导航栏 NavId / 主页 ContentId / 其它页面 Page）。
 //! 下标会随终端尺寸、练习模式名、词库数量、区块显隐漂移；身份不会。
 //! 每次按键、Enter、绘制底栏与高亮前，都按当前布局把身份解析成目标；
 //! 解析不到就视为失效（清空焦点，不触发任何动作）。
 //!
-//! 主页有两个栏：宽屏左侧导航栏（竖向）/ 右侧内容区；窄屏顶部导航栏（横向）/
-//! 下方内容区。方向键按栏的主轴工作：
+//! 所有套外壳的页面（主页、文章、词库、统计、设置、词条、流程、快捷键、帮助）
+//! 共用同一套两栏模型：宽屏左侧导航栏（竖向）/ 右侧内容区；窄屏顶部导航栏
+//! （横向）/ 下方内容区。方向键按栏的主轴工作：
 //!
-//! - 内容区按视觉行分带（带内左右移动，带间上下移动），方向永不反转。
+//! - 内容区：主页按视觉行分带（带内左右移动，带间上下移动），方向永不反转；
+//!   其它页面的内容区就是页面自己的光标（列表行 / 日历日期 / 滚动位置），
+//!   上下键移动它，左右键执行页面自己的横向操作（文章页换栏、统计页选日期）。
 //! - 宽屏侧栏：上/下选导航项，右回内容区；窄屏顶栏：左/右选标签，下回内容区。
-//!   跨栏时记住内容区上一次的选择，回来即可恢复。
-//! - 无焦点时 下/右 落「开始 / 继续学习」，上/左 进导航栏。
-//! - 到边不回头回绕：焦点始终可见，下键绝不会向上跳。
+//! - 跨栏：宽屏内容区在左边缘再按 ←、窄屏内容区在最顶部再按 ↑；
+//!   另外 Tab / Shift+Tab 在所有页面都能直接换栏。跨栏时内容区状态原样保留。
+//! - 无焦点时 下/右 落内容区，上/左 进导航栏。到边不回头回绕。
+//!
+//! 底栏的「选中 X」文案在 navigation 栏取导航项名，在主页取按钮名，
+//! 其它页面取页面当前选中项（词库名 / 设置项名 / 日期 / 词条……）。
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use crate::app::{Action, App, FocusDir, Screen};
+use crate::domain::shortcut::ShortcutAction;
 use crate::ui::home;
 use crate::ui::shell::{self, Nav};
 use crate::ui::target::Target;
@@ -39,6 +46,36 @@ pub enum Pane {
 pub enum NavOrientation {
     Vertical,
     Horizontal,
+}
+
+/// 该页面是否套外壳、共用两栏焦点模型。
+///
+/// 练习页与文章跟打页是全屏页面，不画侧栏；单词测试页是专用答题页，
+/// 键位由键位表单独处理。这些页面不参与焦点导航。
+pub fn supports_focus(screen: Screen) -> bool {
+    matches!(
+        screen,
+        Screen::Home
+            | Screen::Articles
+            | Screen::DictPicker
+            | Screen::Stats
+            | Screen::Settings
+            | Screen::Words
+            | Screen::Flows
+            | Screen::Shortcuts
+            | Screen::Help
+    )
+}
+
+/// 当前是否启用键盘焦点导航。
+///
+/// 练习会话进行中（含练习中打开的帮助页）、有弹层、或词条搜索框正在输入时
+/// 方向键属于别的东西，焦点导航整套让位。
+pub fn enabled(app: &App) -> bool {
+    app.session.is_none()
+        && supports_focus(app.screen)
+        && !app.words_search_focus
+        && !super::hit::modal_open(app)
 }
 
 impl NavId {
@@ -66,14 +103,14 @@ impl NavId {
     }
 }
 
-/// 当前焦点所在的栏；不在主页或没有焦点时返回 None。
+/// 当前焦点所在的栏；不在支持焦点的页面或没有焦点时返回 None。
 pub fn pane(app: &App) -> Option<Pane> {
-    if app.screen != Screen::Home {
+    if !enabled(app) {
         return None;
     }
     Some(match app.focus? {
         FocusId::Nav(_) => Pane::Nav,
-        FocusId::Content(_) => Pane::Content,
+        FocusId::Content(_) | FocusId::Page => Pane::Content,
     })
 }
 
@@ -88,10 +125,10 @@ pub fn nav_orientation(area: Rect) -> NavOrientation {
 
 /// 导航栏的可聚焦目标（宽屏侧栏 / 窄屏顶栏，宽屏额外包含底部「退出」）。
 pub fn nav_targets(app: &App, area: Rect) -> Vec<Target> {
-    if app.screen != Screen::Home || super::hit::modal_open(app) {
+    if !enabled(app) {
         return Vec::new();
     }
-    let shell = shell::layout(area, Nav::Home);
+    let shell = shell::layout(area, Nav::from_screen(app.screen));
     let mut targets: Vec<Target> = shell
         .nav_targets
         .iter()
@@ -116,16 +153,16 @@ pub fn nav_targets(app: &App, area: Rect) -> Vec<Target> {
     targets
 }
 
-/// 内容区的可聚焦目标（开始 / 自由 / 词库入口 / 每日目标 / 模式）。
+/// 主页内容区的可聚焦目标（开始 / 自由 / 词库入口 / 每日目标 / 模式）。
 pub fn content_targets(app: &App, area: Rect) -> Vec<Target> {
-    if app.screen != Screen::Home || super::hit::modal_open(app) {
+    if app.screen != Screen::Home || !enabled(app) {
         return Vec::new();
     }
     let shell = shell::layout(area, Nav::Home);
     home::targets(app, shell.content)
 }
 
-/// 当前栏的全部目标。
+/// 当前栏的全部目标（导航栏或主页内容区）。
 pub fn targets(app: &App, area: Rect) -> Vec<Target> {
     match pane(app) {
         Some(Pane::Nav) => nav_targets(app, area),
@@ -148,25 +185,85 @@ pub fn nav_target(app: &App, area: Rect, id: NavId) -> Option<Target> {
         .find(|target| target.focus == Some(FocusId::Nav(id)))
 }
 
-/// 当前焦点对应的目标；焦点失效（布局变化后元素消失）时返回 None。
+/// 当前焦点对应的目标；仅导航栏与主页内容区有几何目标。
+///
+/// 其它页面的内容区焦点是页面自己的光标（`FocusId::Page`），没有独立的
+/// 矩形：选中效果由页面自己的行高亮提供，这里返回 None。
 pub fn focused_target(app: &App, area: Rect) -> Option<Target> {
     match app.focus? {
         FocusId::Nav(id) => nav_target(app, area, id),
         FocusId::Content(id) => content_target(app, area, id),
+        FocusId::Page => None,
     }
 }
 
-/// 当前焦点对应的矩形。
+/// 当前焦点对应的矩形（用于整块高亮）。
 pub fn focused_rect(app: &App, area: Rect) -> Option<Rect> {
+    pane(app)?;
     focused_target(app, area).map(|target| target.rect)
 }
 
 /// 当前焦点的提示文案（底栏「选中 X」）。
-pub fn focused_label(app: &App, area: Rect) -> Option<&'static str> {
-    focused_target(app, area).and_then(|target| target.label)
+pub fn focused_label(app: &App, area: Rect) -> Option<String> {
+    pane(app)?;
+    match app.focus? {
+        FocusId::Nav(id) => Some(id.label().to_string()),
+        FocusId::Content(id) => content_target(app, area, id)
+            .and_then(|target| target.label)
+            .map(str::to_string),
+        FocusId::Page => page_label(app),
+    }
 }
 
-/// 无焦点时下/右的落点：优先「开始 / 继续学习」，否则第一项。
+/// 非主页内容区的选中项名称（底栏「选中 X」）。
+///
+/// 页面自己的光标是唯一来源；拿不到名称时返回 None（底栏退回常规提示）。
+pub fn page_label(app: &App) -> Option<String> {
+    match app.screen {
+        Screen::Articles => {
+            if app.article_pane_left {
+                app.article_books
+                    .get(app.article_book_cursor)
+                    .map(|book| book.name.clone())
+            } else {
+                app.article_list
+                    .get(app.article_cursor)
+                    .map(|article| article.title.clone())
+            }
+        }
+        Screen::DictPicker => app
+            .boot
+            .catalog
+            .resources()
+            .get(app.dict_cursor)
+            .map(|resource| resource.name.clone()),
+        Screen::Settings => crate::app::SETTING_ROWS
+            .get(app.settings_cursor)
+            .map(|(key, _)| crate::domain::i18n::tr(key)),
+        Screen::Stats => Some(format!("统计 {}", app.stats_day.format("%m-%d"))),
+        Screen::Words => {
+            let indices = app.filtered_word_indices();
+            let index = *indices.get(app.words_cursor)?;
+            app.boot
+                .base
+                .study_dict()?
+                .words
+                .get(index)
+                .map(|word| word.word.clone())
+        }
+        Screen::Flows => app
+            .flow_entries()
+            .get(app.flow_cursor)
+            .map(|entry| entry.name.clone()),
+        Screen::Shortcuts => ShortcutAction::ALL
+            .get(app.shortcut_cursor)
+            .map(|action| action.label().to_string()),
+        Screen::Help => Some("帮助".to_string()),
+        _ => None,
+    }
+}
+
+/// 无焦点时下/右的落点：主页优先「开始 / 继续学习」，否则第一项。
 pub fn content_default(app: &App, area: Rect) -> Option<ContentId> {
     let targets = content_targets(app, area);
     targets
@@ -187,7 +284,7 @@ pub fn nav_entry(app: &App, area: Rect) -> Option<NavId> {
         .and_then(nav_id)
 }
 
-/// 内容区一次方向移动；None 表示该方向没有可移动目标（到边）。
+/// 主页内容区一次方向移动；None 表示该方向没有可移动目标（到边）。
 ///
 /// 上 / 下在视觉行带之间移动（目标带内水平中心最近者），永不反向；
 /// 左 / 右在同一带内按 x 移动。带内到达两端时返回 None，由调用方决定
@@ -255,14 +352,14 @@ pub fn paint(frame: &mut Frame, rect: Rect, theme: &Theme) {
 fn content_id(target: &Target) -> Option<ContentId> {
     match target.focus? {
         FocusId::Content(id) => Some(id),
-        FocusId::Nav(_) => None,
+        _ => None,
     }
 }
 
 fn nav_id(target: &Target) -> Option<NavId> {
     match target.focus? {
         FocusId::Nav(id) => Some(id),
-        FocusId::Content(_) => None,
+        _ => None,
     }
 }
 

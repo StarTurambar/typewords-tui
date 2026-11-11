@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **321 个测试**：93 个单元测试 + 228 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **336 个测试**：93 个单元测试 + 243 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -80,7 +80,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | --- | --- | --- |
 | `tests/app_drive.rs` | 51 | 用合成按键/鼠标驱动 `App`：开始练习与键入推进、Tab 跳过、断点恢复、设置保存、大字开关、错词收录、退出确认、自由练习不改设置、每日词数持久化、数字键切页、鼠标（主页开始/侧栏导航/滚轮/弹层内外点击/结算按钮）、自定义主题循环与渲染、`--theme` 覆盖、setting 版本过高只读、自定义重复次数、跨天统计去重 |
 | `tests/interaction_fixes.rs` | 27 | 已修复交互缺陷的回归：三个弹层的鼠标命中、主页 `+`/`-` 的像素对齐、滚动指示器不被行 target 抢走、命中矩形与渲染一致 |
-| `tests/focus_nav.rs` | 32 | 主页方向键焦点：启动/回主页默认选中主按钮（首帧高亮与底栏）、无焦点落点、内容区换带不反向、带内左右、跨栏与恢复上次选中、宽屏侧栏逐项（含「退出」）、窄屏顶栏横向与到边、resize 让焦点失效时不触发动作、底栏文案、高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
+| `tests/focus_nav.rs` | 47 | 所有标签页的键盘焦点：启动/回主页默认选中主按钮（首帧高亮与底栏）、无焦点落点、主页内容区换带不反向与带内左右、每个标签页落地选中内容区、`Tab`/`←`/`↑` 换栏与跨栏、词库/设置/统计/帮助页各自的页面光标移动、弹层与搜索框让位、resize 让焦点失效时不触发动作、底栏文案、高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
 | `tests/articles.rs` | 21 | 书本/文章列表、断句与整篇跟打（空格可省略、错字落位、文章结算口径） |
 | `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/三套主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
 | `tests/resume_cache.rs` | 13 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
@@ -136,7 +136,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 19 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）：
+仓库 `docs/screenshots/` 的 19 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |

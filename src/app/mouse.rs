@@ -38,25 +38,45 @@ impl App {
         }
     }
 
-    /// 主页鼠标点击与键盘焦点共用同一个「当前对象」。
+    /// 鼠标点击与键盘焦点共用同一个「当前对象」。
     ///
-    /// 点击可聚焦元素 → 焦点移到它（随后按 Enter 会重复该动作）；点空白 →
-    /// 清空焦点。否则会出现「高亮停在 A，用户刚点了 B，再按 Enter 又触发 A」。
+    /// 主页：点击可聚焦元素 → 焦点移到它（随后按 Enter 会重复该动作）；点空白 →
+    /// 清空焦点。其它页面：点导航栏 → 导航栏焦点；点内容区 → 页面内容区焦点
+    /// （页面自己的行高亮 / 光标就是选中效果）；点别处保持原样。
     fn sync_focus_from_pointer(&mut self, area: Rect, column: u16, row: u16) {
-        if self.screen != Screen::Home || crate::ui::hit::modal_open(self) {
+        if crate::ui::hit::modal_open(self) || !crate::ui::focus::enabled(self) {
             return;
         }
-        let hit = crate::ui::focus::nav_targets(self, area)
-            .into_iter()
-            .chain(crate::ui::focus::content_targets(self, area))
-            .find(|target| target.contains(column, row));
-        match hit.and_then(|target| target.focus) {
-            Some(FocusId::Content(id)) => {
-                self.focus = Some(FocusId::Content(id));
-                self.last_content_focus = Some(id);
+        if self.screen == Screen::Home {
+            let hit = crate::ui::focus::nav_targets(self, area)
+                .into_iter()
+                .chain(crate::ui::focus::content_targets(self, area))
+                .find(|target| target.contains(column, row));
+            match hit.and_then(|target| target.focus) {
+                Some(FocusId::Content(id)) => {
+                    self.focus = Some(FocusId::Content(id));
+                    self.last_content_focus = Some(id);
+                }
+                Some(id) => self.focus = Some(id),
+                None => self.clear_focus(),
             }
-            Some(id) => self.focus = Some(id),
-            None => self.clear_focus(),
+            return;
+        }
+        let nav_hit = crate::ui::focus::nav_targets(self, area)
+            .into_iter()
+            .find(|target| target.contains(column, row));
+        if let Some(id) = nav_hit.and_then(|target| target.focus) {
+            self.focus = Some(id);
+            return;
+        }
+        let shell = crate::ui::shell::layout(area, crate::ui::shell::Nav::from_screen(self.screen));
+        let content = shell.content;
+        let inside = column >= content.x
+            && column < content.right()
+            && row >= content.y
+            && row < content.bottom();
+        if inside {
+            self.focus = Some(FocusId::Page);
         }
     }
 }
