@@ -14,7 +14,7 @@
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
-| `src/app/focus.rs` | 主页键盘焦点：`FocusDir` 与 `move_focus`/`activate_focus`/`clear_focus`；保存焦点身份（`FocusId`）与内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
+| `src/app/focus.rs` | 主页键盘焦点：`FocusDir` 与 `move_focus`/`activate_focus`/`clear_focus`/`focus_home_default`（进入主页默认选中主按钮）；保存焦点身份（`FocusId`）与内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
 | `src/bootstrap.rs` | `Bootstrapped`（存档、词库目录、主题、`notices`、`readonly_dict`）与 `bootstrap::load` |
 | `src/main.rs`、`src/lib.rs` | 入口：`Cli::parse` → `Paths::resolve` → 子命令分发 → `app::run` |
 | `src/cli.rs`、`src/paths.rs` | 参数与 `doctor`/`task`/`import-dict`；数据目录/资源目录解析 |
@@ -226,7 +226,7 @@ app.save_all()
 
 | 屏幕 | 键 → `Action` |
 | --- | --- |
-| 主页 | `↑`/`↓`/`←`/`→`→`FocusMove(Up/Down/Left/Right)`：按所站栏的主轴移动——宽屏侧栏竖向、窄屏顶栏横向；内容区按视觉行带上下换带、同带内左右移动，到边停。宽屏 `←` / 窄屏 `↑` 从内容区进导航栏，宽屏 `→` / 窄屏 `↓` 回内容区；`Enter`→`ActivateFocus`（无焦点时等同 `StartPractice`）；`Esc`→`ClearFocus`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`a`→`OpenArticles`；`Ctrl+F`→`OpenFlows`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
+| 主页 | `↑`/`↓`/`←`/`→`→`FocusMove(Up/Down/Left/Right)`：按所站栏的主轴移动——宽屏侧栏竖向、窄屏顶栏横向；内容区按视觉行带上下换带、同带内左右移动，到边停。宽屏 `←` / 窄屏 `↑` 从内容区进导航栏，宽屏 `→` / 窄屏 `↓` 回内容区；进入主页默认选中主按钮（见 5.7 `FocusMove`）；`Enter`→`ActivateFocus`（无焦点时等同 `StartPractice`）；`Esc`→`ClearFocus`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`a`→`OpenArticles`；`Ctrl+F`→`OpenFlows`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
 | 词库页 | `Esc`/`q`→`Back`；`↑`/`k`→`DictMove(-1)`，`↓`/`j`→`DictMove(1)`；`Enter`→`ActivateDict(cursor)`；`+`/`-`→`AdjustDaily(±5)` |
 | 统计页 | `Esc`/`q`/`Enter`→`Back`；`↑`/`k`→`StatsScroll(-1)`，`↓`/`j`→`StatsScroll(1)`；`PgUp`/`PgDn`→`StatsScroll(∓5)` |
 | 设置页 | `Esc`/`q`→`Back`；`↑`/`k`→`SettingsMove(-1)`，`↓`/`j`→`SettingsMove(1)`；`Enter`/`Space`→`ActivateSetting(cursor)` |
@@ -259,8 +259,8 @@ app.save_all()
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
 | `AdjustDaily(delta)` | 每日词数以显示值 `Dict::per_day()` 为基准 `±delta`，再夹在 `1..=词表长度`；变化时保存词典、刷新任务预览并 Toast |
-| `FocusMove(direction)` | 主页方向键：`move_focus` 先按当前布局解析焦点身份（解析不到就视为无焦点），再按所站栏的主轴移动——内容区交给 `ui::focus::content_move`（`↑`/`↓` 换视觉行带、`←`/`→` 带内左右），导航栏交给 `ui::focus::nav_move`（按 `NavOrientation` 取竖向 / 横向）；栏内到边才跨栏；完全无焦点时 `↑`/`←` 进导航栏、`↓`/`→` 落内容区主按钮 |
-| `ActivateFocus` | 主页 `Enter`：`activate_focus` 按当前布局解析并触发焦点元素的 `Action`；落在导航栏当前页入口上只给 Info Toast「已在「X」页」；焦点身份失效（缩放后元素消失）时只清空焦点并提示，不回退；完全无焦点时回退 `StartPractice` |
+| `FocusMove(direction)` | 主页方向键：`move_focus` 先按当前布局解析焦点身份（解析不到就视为无焦点），再按所站栏的主轴移动——内容区交给 `ui::focus::content_move`（`↑`/`↓` 换视觉行带、`←`/`→` 带内左右），导航栏交给 `ui::focus::nav_move`（按 `NavOrientation` 取竖向 / 横向）；栏内到边才跨栏；完全无焦点时 `↑`/`←` 进导航栏、`↓`/`→` 落内容区主按钮。主页在启动 / 切回 / 退出练习 / 结算关闭时由 `focus_home_default` 先选中主按钮，因此正常打开界面后方向键从这个可见选中项开始移动；`Esc` / 点空白取消后才回到完全无焦点 |
+| `ActivateFocus` | 主页 `Enter`：`activate_focus` 按当前布局解析并触发焦点元素的 `Action`；落在导航栏当前页入口上只给 Info Toast「已在「X」页」；焦点身份失效（缩放后元素消失）时只清空焦点并提示，不回退；进入主页默认选中主按钮，正常按 `Enter` 先触发它；完全无焦点（`Esc` / 点空白后）时回退 `StartPractice` |
 | `ClearFocus` | 主页 `Esc`：`clear_focus` 清空 `focus` 与 `last_content_focus` |
 | `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
 | `OpenArticles` | 打开文章页：载入书本与当前书本的文章（见 6.3）。主页 `a` 键用它；侧栏 / 数字键走 `Navigate(Articles)`，两者最终落到同一个方法 |
@@ -284,7 +284,7 @@ app.save_all()
 - **练习中禁止切页**：`navigate_to` 在有 `session` 时直接返回。练习页只能通过 `Ctrl+C` 或完成结算离开（帮助页只是临时覆盖，返回后仍在练习）；鼠标侧栏导航在练习期间也不会生成 target。
 - **弹层模态且互斥**：`summary` 只在练习完成时产生；`edit` 只从设置页数字项产生；`confirm` 只从主页 `q` 或设置页「重置进度」产生。正常交互中三者互斥；若出现异常叠加，键位层按 `edit` → `confirm` → `summary` 处理，渲染层按 `summary` → `edit` → `confirm` 绘制（后画者在上）。
 - **Back 语义**：先尝试关闭弹层（正常流程里弹层已被键位层拦下）；再按屏返回：设置页先 `save_settings_now` 回主页，词库页/统计页回主页，帮助页按是否有会话回练习页或主页，主页/练习页无动作。
-- **主页键盘焦点**：状态是 `App.focus: Option<ui::focus::FocusId>` + `App.last_content_focus: Option<ContentId>`——存身份而不是列表下标，每次按键 / `Enter` 前按当前 `viewport` 重新解析，布局变化后元素消失就视为失效。导航栏目标 = `shell::layout` 的 `nav_targets`（单词 / 文章 / 词库 / 统计 / 帮助 / 设置）加宽屏底部的「退出」（`NavId::Quit`）；内容区目标 = `ui::home::targets` 的 8 项（`ContentId::Start` / `Free` / `DictPage` / `ManageDict` / `MoreDicts` / `DailyMinus` / `DailyPlus` / `Mode`）。内容区按视觉行带移动（`↑`/`↓` 换带、`←`/`→` 带内左右、到边停），宽屏侧栏竖向（`↑`/`↓` 选项、`→` 回内容区），窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；回内容区时用 `last_content_focus` 恢复上次选择。导航栏焦点只在主页存在（`ui::focus::pane` 判定 `Screen::Home`）；`apply_action` 在 `screen` 变化后清空焦点与 `last_content_focus`。焦点目标与鼠标命中同源，鼠标点击会同步焦点，见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
+- **主页键盘焦点**：状态是 `App.focus: Option<ui::focus::FocusId>` + `App.last_content_focus: Option<ContentId>`——存身份而不是列表下标，每次按键 / `Enter` 前按当前 `viewport` 重新解析，布局变化后元素消失就视为失效。导航栏目标 = `shell::layout` 的 `nav_targets`（单词 / 文章 / 词库 / 统计 / 帮助 / 设置）加宽屏底部的「退出」（`NavId::Quit`）；内容区目标 = `ui::home::targets` 的 8 项（`ContentId::Start` / `Free` / `DictPage` / `ManageDict` / `MoreDicts` / `DailyMinus` / `DailyPlus` / `Mode`）。内容区按视觉行带移动（`↑`/`↓` 换带、`←`/`→` 带内左右、到边停），宽屏侧栏竖向（`↑`/`↓` 选项、`→` 回内容区），窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；回内容区时用 `last_content_focus` 恢复上次选择。导航栏焦点只在主页存在（`ui::focus::pane` 判定 `Screen::Home`）；`apply_action` 在 `screen` 变化后清空焦点与 `last_content_focus`，若新屏幕是主页则立刻用 `focus_home_default` 选中主按钮；启动（`bootstrap`）、`leave_practice`（练习页 `Ctrl+C` 直接回主页）与 `summary_home`（结算关闭，屏幕可能已是 Home）也各自恢复默认选中。`Esc` / 点空白仍会清空焦点。焦点目标与鼠标命中同源，鼠标点击会同步焦点，见 [渲染层 · 键盘焦点](ui.md#54-键盘焦点)。
 - **通用选择**：`move_selection` / `switch_selection_pane` / `activate_selection` 把列表 / 卡片光标的语义集中在一处，`SelectUp` / `SelectDown` / `SelectActivate` / `SelectLeftPane` / `SelectRightPane` 是它们的 `Action`。各页面（词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章）只负责把自己的光标接进来，因此方向键行为一致；文章页用 `article_pane_left` 区分书本栏与文章栏。
 - **帮助页**：从练习页按 `?` 进入时 `session` 仍在，数字切页不生效；除滚动键外任意键都返回练习页。
 - **退出与结算后**：只有主页 `q`（或宽屏侧栏「退出」：可点击，也可用方向键选中后按 `Enter`）请求退出；其它非练习页面的 `q` 是返回（练习页的 `q` 是普通输入）。结算后会话与缓存都已清理，继续/重学用当前设置里的练习模式开启新一轮（自由练习结算后继续，回到设置中的常规模式，而不是继续自由模式）。

@@ -133,6 +133,24 @@ impl App {
         self.apply_action(target.action);
     }
 
+    /// 进入主页时的默认选中项：内容区主按钮（开始 / 继续学习）。
+    ///
+    /// 不带方向地「打开界面」不能没有选中项：没有高亮时用户既看不出方向键
+    /// 会作用在哪，也不知道上一次按到哪里。启动、从其它页面回到主页、结算
+    /// 返回主页都先把主按钮选上，底栏随之显示「选中 X」，方向键从它开始
+    /// 移动。`Esc` 与点击空白仍会清空选中，回到「无焦点」状态。
+    ///
+    /// 只写身份、不读布局：主按钮（`ContentId::Start`）在主页始终由
+    /// `ui::home::targets` 无条件注册，因此启动首帧之前（`viewport` 还是
+    /// 默认 80 × 24）也能安全写入；真正的矩形每次绘制 / 按键时按当前
+    /// viewport 重新解析。
+    pub(crate) fn focus_home_default(&mut self) {
+        if self.screen != Screen::Home {
+            return;
+        }
+        self.set_content_focus(ContentId::Start);
+    }
+
     /// Esc：取消选中，回到「无焦点」状态。
     pub(crate) fn clear_focus(&mut self) {
         self.focus = None;

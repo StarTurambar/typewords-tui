@@ -5,7 +5,8 @@
 //! - 内容区按视觉行分带：上下键在带间移动（永不反向），左右键在带内移动。
 //! - 宽屏：侧栏竖向（上/下选、右进内容区、左在内容区到边时进导航）；
 //!   窄屏：顶栏横向（左/右选、下进内容区、上在内容区到顶带时进导航）。
-//! - 无焦点：下/右落「开始 / 继续学习」，上/左进导航栏。
+//! - 启动与从其它页面回到主页时默认选中「开始 / 继续学习」，首帧就有高亮；
+//!   Esc / 点空白清空后才是「无焦点」状态：下/右落主按钮、上/左进导航栏。
 //! - 到边不回头回绕；失效焦点 Enter 只清空并提示，不开练习。
 //!
 //! 所有用例都先 set_viewport 再按键，渲染用同一个尺寸。
@@ -42,6 +43,19 @@ fn test_app(size: (u16, u16)) -> (common::Fixture, app::App) {
 
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn press_ctrl(app: &mut app::App, code: KeyCode) {
+    app.on_key(KeyEvent::new(code, KeyModifiers::CONTROL));
+}
+
+/// 清掉主页的默认选中，回到「无焦点」状态。
+///
+/// 主页现在一打开就选中主按钮；历史用例验证的是「取消选中之后」的方向键
+/// 语义，所以先显式 Esc 一次。
+fn idle(app: &mut app::App) {
+    press(app, KeyCode::Esc);
+    assert!(app.focus.is_none(), "Esc 应清空默认选中");
 }
 
 fn label(app: &app::App) -> Option<&'static str> {
@@ -96,6 +110,7 @@ fn last_line(app: &app::App, size: (u16, u16)) -> String {
 fn idle_arrows_have_a_predictable_landing() {
     for size in [WIDE, NARROW, MINIMUM] {
         let (_fixture, mut app) = test_app(size);
+        idle(&mut app);
         press(&mut app, KeyCode::Down);
         assert_eq!(focus::pane(&app), Some(Pane::Content));
         assert_eq!(label(&app), Some("开始学习"), "{size:?} 下 ↓ 应落主按钮");
@@ -124,10 +139,132 @@ fn idle_arrows_have_a_predictable_landing() {
     }
 }
 
+/// 初次打开界面：首帧就选中主按钮，整块高亮可见、底栏说明选中项。
+///
+/// 早期实现启动时焦点为 `None`：画面没有任何高亮，底栏只有一长串快捷键，
+/// 用户不知道方向键会作用在哪；这条用例锁住「打开即可见选中」。
+#[test]
+fn home_opens_with_the_primary_action_selected() {
+    for size in [WIDE, NARROW, MINIMUM] {
+        let (_fixture, app) = test_app(size);
+        assert_eq!(
+            app.focus,
+            Some(FocusId::Content(ContentId::Start)),
+            "{size:?} 启动应默认选中主按钮"
+        );
+        assert_eq!(label(&app), Some("开始学习"), "{size:?}");
+
+        let theme = app.theme();
+        let start = focus::content_target(&app, app.viewport, ContentId::Start).expect("主按钮");
+        let buffer = buffer_of(&app, size);
+        // 整行都应是强调色底。CJK 宽字符右侧的续接单元在 ratatui 的测试后端
+        // 不参与 diff（真实终端由宽字形覆盖），保留默认样式是预期行为，
+        // 这里只要求它们不是「被高亮漏掉的原底色」。
+        let mut skipped = 0;
+        for x in start.rect.x..start.rect.right() {
+            let cell = buffer.cell((x, start.rect.y)).expect("cell");
+            if cell.bg == theme.accent {
+                continue;
+            }
+            assert_eq!(
+                cell.bg,
+                ratatui::style::Color::Reset,
+                "{size:?} 高亮不应留下原底色"
+            );
+            skipped += 1;
+        }
+        assert!(
+            skipped <= 8,
+            "{size:?} 除宽字符续接单元外都应高亮（{skipped} 个空单元）"
+        );
+
+        let footer = last_line(&app, size);
+        assert!(
+            footer.contains("选中"),
+            "{size:?} 底栏应说明选中：{footer:?}"
+        );
+        assert!(
+            footer.contains("开始学习"),
+            "{size:?} 底栏应显示选中项：{footer:?}"
+        );
+    }
+}
+
+/// 默认选中项的文案与按钮同源：有学习进度时是「继续学习」。
+#[test]
+fn the_initial_selection_follows_the_primary_label() {
+    let (_fixture, mut app) = test_app(WIDE);
+    app.boot
+        .base
+        .study_dict_mut()
+        .expect("夹具应有学习词典")
+        .last_learn_index = 3;
+    assert_eq!(label(&app), Some("继续学习"), "有进度时应选中「继续学习」");
+    let footer = last_line(&app, WIDE);
+    assert!(
+        footer.contains("继续学习"),
+        "底栏文案应与按钮一致：{footer:?}"
+    );
+}
+
+/// 从其它页面回到主页：重新选中主按钮，而不是留下一个没有高亮的界面。
+#[test]
+fn returning_to_home_selects_the_primary_action() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, Screen::Stats);
+    assert!(app.focus.is_none(), "切页应清焦点");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Home);
+    assert_eq!(label(&app), Some("开始学习"), "统计页返回应选中主按钮");
+    assert!(last_line(&app, WIDE).contains("选中"));
+
+    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.screen, Screen::DictPicker);
+    assert!(app.focus.is_none());
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Home);
+    assert_eq!(label(&app), Some("开始学习"), "词库页返回应选中主按钮");
+}
+
+/// 练习页 `Ctrl+C` 直接回主页（不经过 `apply_action` 的切屏分支）也要选中主按钮。
+#[test]
+fn leaving_practice_returns_with_the_primary_action_selected() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::Practice);
+    assert!(app.session.is_some());
+    assert!(app.focus.is_none(), "进入练习应清焦点");
+
+    press_ctrl(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.screen, Screen::Home);
+    // 退出练习会留下断点缓存，主按钮文案随之变成「继续学习」——焦点应在
+    // 主按钮上，且底栏文案与按钮同源。
+    assert_eq!(app.focus, Some(FocusId::Content(ContentId::Start)));
+    let expected = typewords_tui::ui::home::primary_label(&app);
+    assert_eq!(label(&app), Some(expected), "退出练习回主页应选中主按钮");
+    assert!(app.session.is_none());
+}
+
+/// 结算弹层关闭时 `screen` 可能已经是 Home（文章跟打结束时先回主页再弹层），
+/// 没有切屏动作可依赖，`summary_home` 必须自己恢复默认选中。
+#[test]
+fn closing_a_summary_on_home_selects_the_primary_action() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Esc);
+    assert!(app.focus.is_none());
+    app.summary = Some(app::SummaryData::default());
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.summary.is_none());
+    assert_eq!(app.screen, Screen::Home);
+    assert_eq!(label(&app), Some("开始学习"));
+}
+
 /// 内容区连按 ↓：y 单调不降，到最后一个带后停住，不回绕。
 #[test]
 fn down_moves_downwards_and_never_reverses() {
     let (_fixture, mut app) = test_app(WIDE);
+    idle(&mut app);
     press(&mut app, KeyCode::Down);
     assert_eq!(label(&app), Some("开始学习"));
     let mut previous = rect(&app).y;
@@ -146,6 +283,7 @@ fn down_moves_downwards_and_never_reverses() {
 #[test]
 fn minimum_size_keeps_down_downwards() {
     let (_fixture, mut app) = test_app(MINIMUM);
+    idle(&mut app);
     press(&mut app, KeyCode::Down);
     assert_eq!(label(&app), Some("开始学习"));
     let start_y = rect(&app).y;
@@ -161,6 +299,7 @@ fn minimum_size_keeps_down_downwards() {
 #[test]
 fn left_and_right_move_inside_the_row() {
     let (_fixture, mut app) = test_app(WIDE);
+    idle(&mut app);
     press(&mut app, KeyCode::Down);
     assert_eq!(label(&app), Some("开始学习"));
     press(&mut app, KeyCode::Right);
@@ -182,6 +321,7 @@ fn left_and_right_move_inside_the_row() {
 #[test]
 fn returning_from_nav_restores_the_content_selection() {
     let (_fixture, mut app) = test_app(WIDE);
+    idle(&mut app);
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Down);
     assert_eq!(label(&app), Some("词库页"));
@@ -232,6 +372,7 @@ fn enter_on_the_current_nav_entry_gives_feedback() {
 #[test]
 fn narrow_topbar_is_horizontal_and_down_enters_content() {
     let (_fixture, mut app) = test_app(NARROW);
+    idle(&mut app);
     press(&mut app, KeyCode::Left);
     assert_eq!(focus::pane(&app), Some(Pane::Nav));
     assert_eq!(label(&app), Some("单词"));
@@ -258,6 +399,7 @@ fn narrow_topbar_is_horizontal_and_down_enters_content() {
 #[test]
 fn narrow_topbar_stops_at_the_edges() {
     let (_fixture, mut app) = test_app(NARROW);
+    idle(&mut app);
     press(&mut app, KeyCode::Left);
     assert_eq!(label(&app), Some("单词"));
     press(&mut app, KeyCode::Left);
@@ -354,8 +496,11 @@ fn modal_hides_focus_on_both_panes() {
 #[test]
 fn keys_are_ignored_below_the_minimum_terminal_size() {
     let (_fixture, mut app) = test_app((59, 19));
+    // 默认选中在启动时写入，与 viewport 无关；终端过小时按键必须完全忽略，
+    // 既不能移动它，也不能用 Enter / q 作用在看不见的主页上。
+    let before = app.focus;
     press(&mut app, KeyCode::Down);
-    assert!(app.focus.is_none());
+    assert_eq!(app.focus, before, "太小终端不应移动焦点");
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.screen, Screen::Home);
     assert!(app.session.is_none());
@@ -363,11 +508,10 @@ fn keys_are_ignored_below_the_minimum_terminal_size() {
     assert!(app.confirm.is_none());
 }
 
-/// 底栏有焦点时显示「选中 X / ↑↓←→ 移动 / enter 触发 / esc 取消」。
+/// 初始主页就选中主按钮：底栏直接显示「选中 X / ↑↓←→ 移动 / enter 触发 / esc 取消」。
 #[test]
 fn footer_shows_the_selected_label_and_move_hint() {
-    let (_fixture, mut app) = test_app(WIDE);
-    press(&mut app, KeyCode::Down);
+    let (_fixture, app) = test_app(WIDE);
     let footer = last_line(&app, WIDE);
     assert!(footer.contains("选中"), "底栏应显示选中：{footer:?}");
     assert!(footer.contains("开始学习"), "底栏应显示 label：{footer:?}");
@@ -375,18 +519,31 @@ fn footer_shows_the_selected_label_and_move_hint() {
     assert!(footer.contains("移动"), "底栏提示应为移动：{footer:?}");
     assert!(footer.contains("enter"));
     assert!(footer.contains("esc"));
+
+    // 方向键移动后底栏跟随新的选中项。
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(label(&app), Some("自由练习"));
+    assert!(
+        last_line(&app, WIDE).contains("自由练习"),
+        "底栏应跟随新选中项"
+    );
 }
 
-/// Esc 清焦点，底栏恢复常规提示。
+/// Esc 清掉默认选中，底栏恢复常规提示；此时方向键回到「无焦点」规则。
 #[test]
 fn escape_clears_focus_and_restores_the_regular_footer() {
     let (_fixture, mut app) = test_app(WIDE);
-    let regular = last_line(&app, WIDE);
-    press(&mut app, KeyCode::Down);
-    assert!(app.focus.is_some());
+    assert!(app.focus.is_some(), "初始应默认选中主按钮");
     press(&mut app, KeyCode::Esc);
     assert!(app.focus.is_none());
     assert!(app.last_content_focus.is_none());
+    let regular = last_line(&app, WIDE);
+    assert!(!regular.contains("选中"), "取消选中后底栏应恢复常规提示");
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(label(&app), Some("开始学习"), "无焦点时 ↓ 应落回主按钮");
+    press(&mut app, KeyCode::Esc);
     assert_eq!(last_line(&app, WIDE), regular);
 }
 
@@ -439,7 +596,6 @@ fn content_targets_have_unique_ids() {
 #[test]
 fn switching_screens_clears_focus_and_remembered_selection() {
     let (_fixture, mut app) = test_app(WIDE);
-    press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Right);
     assert_eq!(label(&app), Some("自由练习"));
     press(&mut app, KeyCode::Char('3'));
@@ -544,6 +700,8 @@ fn focus_on_the_primary_button_is_visible() {
     let (_fixture, mut app) = test_app(WIDE);
     let theme = app.theme();
     let start = focus::content_target(&app, app.viewport, ContentId::Start).expect("目标");
+    // 先取消默认选中，才能看到主按钮的常态（次级底）。
+    press(&mut app, KeyCode::Esc);
     let normal = buffer_of(&app, WIDE);
     let cell = normal.cell((start.rect.x + 1, start.rect.y)).expect("cell");
     assert_eq!(cell.bg, theme.element, "主按钮常态应是 element 底");

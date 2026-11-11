@@ -649,6 +649,9 @@ impl App {
         }
         app.refresh_stats();
         app.refresh_task_preview();
+        // 首帧就选中主页主按钮：否则「初次打开」没有任何高亮，方向键的
+        // 落点只能靠试。身份与几何解耦，此时 viewport 还是默认值也无妨。
+        app.focus_home_default();
         Ok(app)
     }
 
@@ -987,6 +990,9 @@ impl App {
         self.typing = TypingEngine::new();
         self.refresh_task_preview();
         self.refresh_stats();
+        // 练习页 `Ctrl+C` 直接调用这里（不经过 `apply_action` 的切屏分支），
+        // 回主页后同样要选中主按钮，否则「刚退出练习」的界面又没有任何高亮。
+        self.focus_home_default();
     }
 
     /// 把本轮练习的统计落进词典。

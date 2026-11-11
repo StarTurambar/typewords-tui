@@ -277,8 +277,13 @@ impl App {
             Action::HelpBack => self.help_back(),
         }
         // 焦点只在主页内有意义：页面一换，旧身份就不再对应当前页面。
+        // 回到主页时立刻选中主按钮——否则刚回来的界面没有任何高亮，
+        // 方向键又回到「上/左进导航、下/右落按钮」的猜测状态。
         if self.screen != screen_before {
             self.clear_focus();
+            if self.screen == Screen::Home {
+                self.focus_home_default();
+            }
         }
     }
 
@@ -416,6 +421,9 @@ impl App {
         self.screen = Screen::Home;
         self.refresh_task_preview();
         self.refresh_stats();
+        // 文章结算结束时 screen 已经是 Home（回主页发生在弹层出现时），
+        // 走不到 `apply_action` 的「切屏回主页」分支；这里补上默认选中。
+        self.focus_home_default();
     }
 
     fn confirm_accept(&mut self) {

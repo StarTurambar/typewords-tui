@@ -177,19 +177,21 @@ fn build_cli(theme: &str) -> Cli {
 
 fn prepare(app: &mut App, screen: &str) -> Result<()> {
     match screen {
+        // 初始主页：启动时的默认选中（主按钮）会保留在快照里——这正是
+        // 用户打开界面看到的状态。
         "home" => app.screen = Screen::Home,
         "home-focus" => {
-            // 内容区焦点：第一次按下落在「开始 / 继续学习」，第二次右移到
+            // 内容区焦点：主页启动默认选中「开始 / 继续学习」，按一次 → 右移到
             // 「f 自由练习」，截图里能看到整块 accent 高亮。
             app.screen = Screen::Home;
-            press(app, KeyCode::Right);
             press(app, KeyCode::Right);
             if app.focus.is_none() {
                 bail!("home-focus: arrow keys did not engage the focus");
             }
         }
         "home-nav-focus" => {
-            // 导航栏焦点：← 进左侧导航（落在当前页入口），再 ↓ 移到「文章」。
+            // 导航栏焦点：启动默认选中内容区主按钮，← 进左侧导航（落在当前页
+            // 入口），再 ↓ 移到「文章」。
             app.screen = Screen::Home;
             press(app, KeyCode::Left);
             press(app, KeyCode::Down);

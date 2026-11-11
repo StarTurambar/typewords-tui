@@ -122,7 +122,7 @@ ui::render(app, frame)
 
 - 外框 `panel` 背景、左侧 1 列 `accent` 竖条，中间 1 列 `border` 分隔左右两栏（58% / 1 列 / `Min(18)`）。
 - 左栏：词库名（bold）、预计完成日期（`insights::estimated_finish`；已学完为 `已学完 · 总复习阶段`；未选词库为「按 d 选择词库」）、细线进度条 + 百分比（`thin_bar_spans`，完成用 `good` 否则 `accent_alt`）、「已学 N / M 词」。
-- 底部按钮：主按钮宽 `min(22, 左栏宽)`，文案取 `home::primary_label`（词典已学、已学完或有练习断点时「继续学习」，否则「开始学习」）——按钮、键盘焦点的 `Target.label` 与底栏「选中 X」共用它。主按钮常态是 `element` 底 + `accent` 文字 + 加粗，不再用 `accent` 底：否则选中主按钮与常态完全相同，看不到选中变化。`f 自由练习` 按钮宽 13、`element` 底 + `fg`，放得下才出现。
+- 底部按钮：主按钮宽 `min(22, 左栏宽)`，文案取 `home::primary_label`（词典已学、已学完或有练习断点时「继续学习」，否则「开始学习」）——按钮、键盘焦点的 `Target.label` 与底栏「选中 X」共用它。主按钮常态是 `element` 底 + `accent` 文字 + 加粗，不再用 `accent` 底：否则选中主按钮与常态完全相同，看不到选中变化。进入主页时默认选中它（见 5.4），所以首帧就是整块 `accent` 高亮。`f 自由练习` 按钮宽 13、`element` 底 + `fg`，放得下才出现。
 - 右栏「今日任务」：`◆`（`warn`）+ 标题；右端是「模式 X ▾」标签（`accent_alt`），点击打开模式选择弹层；每日目标行 `[-] N [+] `，右栏宽度 `< 24` 时用短文案「目标 [-] N [+]」；下面两块数字卡：新词、复习，复习卡在 `review == 0 && due == 0` 时补「无到期」小字。
 - 目标按钮的命中矩形由**绘制用的同一行文本**算出：`goal_line_text` 生成文本，`goal_buttons` 在其中找 `[-]` 与 `[+]` 的字符位置，按显示宽度换算成列号。早期实现用固定偏移（`hero_right.x+9` / `+21`）估算，与实际排版差 2 列，所有终端尺寸下点 `+` 都没反应。
 - 「模式 X ▾」标签的宽度按**当前模式名**算（`mode_label_text`），不能写死「学习」——写死会让「自由练习」「随机复习」「单词测试」等 6 个模式被截成「模式 随机…」，连下拉三角 `▾` 都被吃掉。
@@ -145,12 +145,13 @@ ui::render(app, frame)
 
 - **焦点身份**：`App.focus: Option<ui::focus::FocusId>`（`FocusId::Nav(NavId)` 或 `FocusId::Content(ContentId)`），`App.last_content_focus: Option<ContentId>` 记住内容区上次选中的元素；都不再保存「列表下标」。身份定义在 `src/ui/target.rs`（`ContentId` 8 项、`NavId` 7 项），解析与移动规则在 `src/ui/focus.rs`，状态迁移在 `src/app/focus.rs`。下标会随终端尺寸、练习模式名长度、词库数量、区块显隐漂移，身份不会。导航栏焦点只在主页存在（`ui::focus::pane` 在 `screen != Home` 时返回 `None`）。
 - **目标来源**：两栏都与鼠标命中同源。`ui::focus::nav_targets` 取 `shell::layout` 的 `nav_targets`（`Nav::MAIN` + 设置）再追加 `quit_target`（宽屏「退出」）；`ui::focus::content_targets` 取 `ui::home::targets(app, shell.content)` 的 8 项，每项都带 `ContentId` 与中文 `label`。有弹层或不在主页时两者都返回空列表——方向键此时属于弹层或其它页面。
+- **默认选中**：不带方向地打开 / 回到主页时不能没有选中项，否则用户看不出方向键会作用在哪。`App::bootstrap`（启动首帧）、`apply_action` 的「切屏回主页」分支、`App::leave_practice`（练习页 `Ctrl+C` 直接回主页，不经过 `apply_action`）与 `App::summary_home`（结算关闭，此时屏幕可能已经是 Home）都会调用 `App::focus_home_default` 把焦点设为 `ContentId::Start`（开始 / 继续学习）。首帧即整块 `accent` 高亮，底栏显示「选中 X」，方向键从主按钮开始移动；`Esc` 与点击空白仍清空焦点，之后才落到下表「无焦点」一行。
 - **其它页面共用同一套方向键语义**：`App::move_selection` / `switch_selection_pane` / `activate_selection` 把「列表 / 卡片光标」集中到一处——`↑`/`↓`（别名 `j`/`k`）移动光标、`Enter` 触发、`Esc` 返回；文章页的 `←`/`→`（`Tab`/`BackTab`）切换书本栏与文章栏（`App.article_pane_left`）。因此词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 文章各页的方向键行为完全一致，页面特有操作（词库 `+/-`、统计翻页、设置空格）保留为附加键位。
 - **键 × 栏 × 结果**（宽屏指 `>= 100` 列；到边停、不回绕；有弹层时方向键属于弹层）：
 
 | 状态 | `↑` | `↓` | `←` | `→` | `Enter` | `Esc` |
 | --- | --- | --- | --- | --- | --- | --- |
-| 无焦点 | 进导航栏（落在当前页入口） | 落「开始 / 继续学习」 | 同 `↑` | 同 `↓` | 开始 / 继续学习（`StartPractice`） | 无动作 |
+| 无焦点（`Esc` / 点空白后） | 进导航栏（落在当前页入口） | 落「开始 / 继续学习」 | 同 `↑` | 同 `↓` | 开始 / 继续学习（`StartPractice`） | 无动作 |
 | 宽屏侧栏（竖向） | 上一项（含「退出」） | 下一项 | 无动作 | 回内容区（恢复上次选中） | 触发选中项；当前页入口只给提示 | 清空焦点 |
 | 宽屏内容区（按行带） | 上一带（带内水平中心最近者） | 下一带 | 同带左移；无左邻时进侧栏 | 同带右移；到边停 | 触发选中项 | 清空焦点 |
 | 窄屏顶栏（横向） | 无动作 | 回内容区 | 上一标签 | 下一标签 | 同上 | 清空焦点 |
@@ -159,8 +160,8 @@ ui::render(app, frame)
 - **内容区按视觉行分带**（`ui::focus::bands` / `content_move`）：目标先按 `(y, x)` 排序，纵向范围有重叠的算同一带，带内再按 `x` 排序；`↑` / `↓` 在带之间移动，落点是目标带内**水平中心**离当前元素最近的元素，`←` / `→` 在同一带内前后移动。因此下键不会向上跳、右键不会向左跳。120 × 40 的带序是：练习模式 → 每日目标 `-` / `+` → 开始 / 继续学习、自由练习 → 词库页 → 管理词典（整张卡自成一带）→ 更多词库；终端变矮时「推荐」「我的词典」区先收起，变窄时模式标签也可能先消失。
 - **跨栏只发生在到边之后**：`App::move_focus` 先尝试栏内移动，返回 `None`（该方向没有目标）才判断是否换栏——宽屏内容区 `←`、窄屏内容区 `↑` 进导航栏，宽屏侧栏 `→`、窄屏顶栏 `↓` 回内容区；其余方向到边就停。回内容区优先恢复 `last_content_focus`（仍存在时），否则落「开始 / 继续学习」；进导航栏落当前页面对应的入口（主页即「单词」），找不到则第一项。
 - **为什么不用固定顺序**：早期按「动作优先级」排序并回绕（到头绕回另一端），移动顺序与画面方向无关——`↓` 会从右下角跳回右上角，跨栏后还会清空选中。现在顺序由几何决定、到边停，跨栏记住内容区上次的选择。
-- **失效与触发**：`Enter` 时按当前 `viewport` 重新解析身份；解析不到（窗口缩放后元素消失、模式名变长把标签挤掉）只清空焦点并 Toast「选中项已随布局变化失效，请重新选择」，绝不回退成开始练习。焦点元素的 `Action` 就是鼠标点击同一个 `Target` 会执行的 `Action`；落在导航栏当前页入口上时给 Info Toast「已在「X」页」，避免「按了没反应」。`Esc` 清空焦点。切屏后 `apply_action` 清空焦点与 `last_content_focus`。
-- **高亮**：`ui::focus::paint` 把整个目标矩形铺成 `accent` 底 + `bg` 文字 + 加粗，画在页面内容之上、弹层遮罩之下。主按钮常态是 `element` 底 + `accent` 文字 + 加粗（自由练习按钮是 `element` 底 + `fg`），所以选中主按钮时画面有明显变化；侧栏「当前页」用 `selection` 底 + 左侧 1 列 `accent` 条，与焦点高亮可以同屏共存。
+- **失效与触发**：`Enter` 时按当前 `viewport` 重新解析身份；解析不到（窗口缩放后元素消失、模式名变长把标签挤掉）只清空焦点并 Toast「选中项已随布局变化失效，请重新选择」，绝不回退成开始练习。焦点元素的 `Action` 就是鼠标点击同一个 `Target` 会执行的 `Action`；落在导航栏当前页入口上时给 Info Toast「已在「X」页」，避免「按了没反应」。`Esc` 清空焦点。切屏后 `apply_action` 清空焦点与 `last_content_focus`；切回主页时会再默认选中主按钮（见上文「默认选中」）。
+- **高亮**：`ui::focus::paint` 把整个目标矩形铺成 `accent` 底 + `bg` 文字 + 加粗，画在页面内容之上、弹层遮罩之下。主按钮常态是 `element` 底 + `accent` 文字 + 加粗（自由练习按钮是 `element` 底 + `fg`），所以选中主按钮时画面有明显变化；启动 / 回主页默认选中主按钮，首帧就能看到这个变化。侧栏「当前页」用 `selection` 底 + 左侧 1 列 `accent` 条，与焦点高亮可以同屏共存。
 - **底栏联动**：`Target.label` 带中文名（开始 / 继续学习、自由练习、每日目标 `-` / `+`、练习模式、词库页、管理词典、更多词库、导航项名、退出），`ui::home::targets` 与 `ui::focus::nav_targets` 各自标注。有焦点时 `shell::focus_hints` 把底栏换成「选中 {label}  ↑↓←→ 移动  enter 触发  esc 取消」；标签渲染用 `ShellLayout.area`（整屏区域）重新算主页布局。无焦点时恢复常规快捷键提示。开始按钮的 `label` 与按钮文案统一由 `home::primary_label` 决定（有断点缓存或已学词时都是「继续学习」）。
 - **鼠标**：点击可聚焦元素会把焦点同步过去（`src/app/mouse.rs` 的 `sync_focus_from_pointer`，内容项同时写 `last_content_focus`），点空白清空焦点；弹层打开或不在主页时不同步。见第 11 节。
 - **`App.viewport`**：按键时按 `App.viewport` 重新算布局（`on_key` 不经过渲染），而渲染用 `Frame::area()`；两者必须一致——事件循环每帧同步，测试与 `examples/shot` 用 `App::set_viewport` 显式设置。不一致时按到的目标与画面上的位置不同。
@@ -357,9 +358,9 @@ ui::render(app, frame)
 | `article_summary_renders_article_labels` | 文章结算弹层用文章口径（文章标题 / 完成 N / M 句 / 错句 / 返回列表按钮）而不是单词会话口径 |
 | `mouse_target_rects_match_rendered_text` / `help_scrolls_at_min_size` | 命中矩形与渲染文本一致、帮助页在小终端可滚动 |
 
-主页方向键焦点另有独立集成测试 `tests/focus_nav.rs`：无焦点落点、内容区换带单调不反向、带内左右移动、跨栏后恢复上次选中、宽屏侧栏逐项（含「退出」）、窄屏顶栏横向与到边行为、窗口缩放导致焦点失效时 `Enter` 不触发动作、底栏文案、高亮矩形与 `focused_rect` 一致、最小终端忽略按键、鼠标点击同步焦点等。
+主页方向键焦点另有独立集成测试 `tests/focus_nav.rs`：启动 / 回主页默认选中主按钮（首帧高亮与底栏、状态页 / 词库页返回、练习 `Ctrl+C` 返回、结算关闭）、无焦点落点、内容区换带单调不反向、带内左右移动、跨栏后恢复上次选中、宽屏侧栏逐项（含「退出」）、窄屏顶栏横向与到边行为、窗口缩放导致焦点失效时 `Enter` 不触发动作、底栏文案、高亮矩形与 `focused_rect` 一致、最小终端忽略按键、鼠标点击同步焦点等。
 
-`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / home-focus / home-nav-focus / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题；`home-focus` 是内容区焦点选中「f 自由练习」后的快照，`home-nav-focus` 是侧栏焦点选中「文章」后的快照（先 `←` 进侧栏、再 `↓` 到「文章」）。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页内容区焦点](screenshots/home-focus-120x40-dark.png)、[主页导航栏焦点](screenshots/home-nav-focus-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
+`examples/shot.rs` 用同一套 `TestBackend` 输出带样式的 JSON（cell 的字符/前景/背景/修饰/宽度），再由 `tools/render-snapshot.py` 生成 PNG；`shot` 支持 `home / home-focus / home-nav-focus / practice / wordtest / words / articles / flows / articlepractice / dict / stats / settings / shortcuts / help / summary / summary-article / edit / confirm` 与自定义宽高、主题；`home` 是启动首帧（默认选中主按钮）的快照，`home-focus` 是内容区焦点选中「f 自由练习」后的快照（启动默认选中主按钮，按一次 `→`），`home-nav-focus` 是侧栏焦点选中「文章」后的快照（先 `←` 进侧栏、再 `↓` 到「文章」）。截图文件： [主页](screenshots/home-120x40-dark.png)、[主页内容区焦点](screenshots/home-focus-120x40-dark.png)、[主页导航栏焦点](screenshots/home-nav-focus-120x40-dark.png)、[主页 90×30](screenshots/home-90x30-dark.png)、[主页浅色](screenshots/home-120x40-light.png)、[主页高对比](screenshots/home-120x40-high-contrast.png)、[练习](screenshots/practice-120x40-dark.png)、[词库](screenshots/dict-120x40-dark.png)、[统计](screenshots/stats-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)、[帮助](screenshots/help-120x40-dark.png)、[结算](screenshots/summary-120x40-dark.png)、[文章结算](screenshots/summary-article-120x40-dark.png)。生成命令与字体要求见 [开发指南](development.md)。
 
 ### 12.2 新增/修改页面的检查清单
 
