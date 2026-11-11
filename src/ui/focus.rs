@@ -198,9 +198,116 @@ pub fn focused_target(app: &App, area: Rect) -> Option<Target> {
 }
 
 /// 当前焦点对应的矩形（用于整块高亮）。
+///
+/// 导航栏与主页内容区取目标自身的矩形；其它页面取「页面当前选中项」的
+/// 矩形（词库行 / 设置行 / 文章 / 书本行 / 词条行 / 流程行 / 快捷键行 /
+/// 日历日期），同样用整块 accent 高亮，与主页保持同一套选中语言。
 pub fn focused_rect(app: &App, area: Rect) -> Option<Rect> {
     pane(app)?;
-    focused_target(app, area).map(|target| target.rect)
+    match app.focus? {
+        FocusId::Page => page_selection_rect(app, area),
+        _ => focused_target(app, area).map(|target| target.rect),
+    }
+}
+
+/// 非主页内容区的选中项矩形；页面没有可高亮的选中项（帮助页 / 按词典
+/// 视图）时返回 None。
+///
+/// 绘制用的行矩形统一由各页面的 layout 计算，和 targets / 渲染同源，
+/// 因此高亮不会随滚动或分栏变化而漂移。
+fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
+    let shell = shell::layout(area, Nav::from_screen(app.screen));
+    let content = shell.content;
+    match app.screen {
+        Screen::DictPicker => {
+            let layout = crate::ui::dict_picker::layout(app, content);
+            let (_, rect) = layout
+                .rows
+                .iter()
+                .find(|(index, _)| *index == app.dict_cursor)?;
+            Some(row_rect(*rect, 1))
+        }
+        Screen::Settings => {
+            let layout = crate::ui::settings::layout(app, content);
+            let (_, rect) = layout
+                .rows
+                .iter()
+                .find(|(entry, _)| *entry == Some(app.settings_cursor))?;
+            Some(row_rect(*rect, 1))
+        }
+        Screen::Shortcuts => {
+            let layout = crate::ui::shortcuts::layout(app, content);
+            let (_, rect) = layout
+                .rows
+                .iter()
+                .find(|(index, _)| *index == app.shortcut_cursor)?;
+            Some(*rect)
+        }
+        Screen::Words => {
+            let layout = crate::ui::words::layout(app, content);
+            let total = app.filtered_word_indices().len();
+            if total == 0 || app.words_cursor >= total || layout.list.height == 0 {
+                return None;
+            }
+            let row = app.words_cursor.saturating_sub(layout.offset) as u16;
+            let y = layout.list.y.saturating_add(row);
+            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+        }
+        Screen::Flows => {
+            let layout = crate::ui::flows::layout(app, content);
+            if app.flow_cursor >= app.flow_entries().len() || layout.list.height == 0 {
+                return None;
+            }
+            let y = layout.list.y.saturating_add(app.flow_cursor as u16);
+            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+        }
+        Screen::Articles => {
+            let layout = crate::ui::articles::layout(content);
+            let (pane, cursor, count) = if app.article_pane_left {
+                (
+                    layout.books,
+                    app.article_book_cursor,
+                    app.article_books.len(),
+                )
+            } else {
+                (layout.articles, app.article_cursor, app.article_list.len())
+            };
+            if count == 0 || cursor >= count || pane.width < 2 || pane.height < 3 {
+                return None;
+            }
+            // 列表有边框：行从边框内侧开始，最后一行同样让出下边框。
+            let y = pane.y.saturating_add(1).saturating_add(cursor as u16);
+            if y >= pane.bottom().saturating_sub(1) {
+                return None;
+            }
+            Some(Rect::new(
+                pane.x.saturating_add(1),
+                y,
+                pane.width.saturating_sub(2),
+                1,
+            ))
+        }
+        Screen::Stats => {
+            // 按词典视图没有日历选中项；日历视图高亮选中那一天（含记录点）。
+            if app.stats_by_dict {
+                return None;
+            }
+            let target = crate::ui::stats::targets(app, content)
+                .into_iter()
+                .find(|target| match &target.action {
+                    Action::StatsSelectDay(date) => *date == app.stats_day,
+                    _ => false,
+                })?;
+            let width = 5.min(content.right().saturating_sub(target.rect.x));
+            (width > 0).then(|| Rect::new(target.rect.x, target.rect.y, width, 1))
+        }
+        _ => None,
+    }
+}
+
+/// 缩到行内、并让出右侧的滚动指示列（词库页 / 设置页用）。
+fn row_rect(rect: Rect, reserved_right: u16) -> Rect {
+    Rect::new(rect.x, rect.y, rect.width.saturating_sub(reserved_right), 1)
 }
 
 /// 当前焦点的提示文案（底栏「选中 X」）。

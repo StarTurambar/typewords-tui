@@ -850,6 +850,15 @@ fn stats_arrows_scroll_and_pick_dates() {
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('4'));
     assert_eq!(focus::pane(&app), Some(Pane::Content));
+    // 日历里选中的那一天同样有整块高亮。
+    let theme = app.theme();
+    let day_rect = focus::focused_rect(&app, app.viewport).expect("日历选中日应有高亮矩形");
+    let buffer = buffer_of(&app, WIDE);
+    assert_eq!(
+        buffer.cell((day_rect.x, day_rect.y)).expect("cell").bg,
+        theme.accent,
+        "日历选中日应整块 accent 高亮"
+    );
     let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;
     assert!(max_scroll >= 1);
     press(&mut app, KeyCode::Down);
@@ -974,6 +983,42 @@ fn mouse_click_on_page_syncs_focus() {
         app.viewport,
     );
     assert_eq!(focus::pane(&app), Some(Pane::Nav));
+}
+
+/// 非主页的页面内容区：当前选中行同样用整块 accent 高亮；焦点进导航栏后
+/// 页面行让位给导航项，回到内容区再恢复。
+#[test]
+fn page_focus_highlights_the_selected_row() {
+    for key in [KeyCode::Char('3'), KeyCode::Char('s')] {
+        let (_fixture, mut app) = test_app(WIDE);
+        press(&mut app, key);
+        let theme = app.theme();
+        let rect = focus::focused_rect(&app, app.viewport).expect("页面选中行应有高亮矩形");
+        let buffer = buffer_of(&app, WIDE);
+        let mut previous_width = 1usize;
+        for x in rect.x..rect.right() {
+            if previous_width == 2 {
+                // CJK 宽字符的续接单元由前一个宽字形覆盖，测试后端保留默认样式。
+                previous_width = 1;
+                continue;
+            }
+            let cell = buffer.cell((x, rect.y)).expect("cell");
+            previous_width = UnicodeWidthStr::width(cell.symbol());
+            assert_eq!(
+                cell.bg, theme.accent,
+                "{key:?} 页面选中行应整块 accent 高亮（x={x}）"
+            );
+        }
+
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(focus::pane(&app), Some(Pane::Nav));
+        let buffer = buffer_of(&app, WIDE);
+        let cell = buffer.cell((rect.x + 1, rect.y)).expect("cell");
+        assert_ne!(
+            cell.bg, theme.accent,
+            "{key:?} 导航栏聚焦时页面行不应继续整块高亮"
+        );
+    }
 }
 
 /// 帮助页的「任意键返回」仍然优先：不在练习中时按数字键也返回，不切页。

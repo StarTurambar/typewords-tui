@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use typewords_tui::app;
 use unicode_width::UnicodeWidthStr;
@@ -169,6 +170,45 @@ fn install_article_assets(assets_root: &std::path::Path) {
             .join("NCE_1.json"),
     )
     .expect("复制文章资源");
+}
+
+/// 文章页的选中行要有可见高亮：书本栏选中整块 accent，切到文章栏后
+/// 高亮跟着移动到右侧。
+#[test]
+fn the_selected_row_is_highlighted_on_the_articles_page() {
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.screen, app::Screen::Articles);
+
+    let theme = app.theme();
+    let book_rect = typewords_tui::ui::focus::focused_rect(&app, app.viewport)
+        .expect("书本栏选中行应有高亮矩形");
+    let buffer = render_buffer(&app, 120, 40);
+    let mut previous_width = 1usize;
+    for x in book_rect.x..book_rect.right() {
+        if previous_width == 2 {
+            // CJK 宽字符的续接单元由前一个宽字形覆盖，测试后端保留默认样式。
+            previous_width = 1;
+            continue;
+        }
+        let cell = buffer.cell((x, book_rect.y)).expect("cell");
+        previous_width = UnicodeWidthStr::width(cell.symbol());
+        assert_eq!(
+            cell.bg, theme.accent,
+            "书本栏选中行应整块 accent 高亮（x={x}）"
+        );
+    }
+
+    press(&mut app, KeyCode::Right);
+    let article_rect = typewords_tui::ui::focus::focused_rect(&app, app.viewport)
+        .expect("文章栏选中行应有高亮矩形");
+    assert!(
+        article_rect.x >= book_rect.right(),
+        "切到文章栏后高亮应移到右侧：{article_rect:?} vs {book_rect:?}"
+    );
 }
 
 #[test]
