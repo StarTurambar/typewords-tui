@@ -4,6 +4,7 @@
 
 mod common;
 
+use chrono::Datelike;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{
@@ -367,6 +368,71 @@ fn clicking_a_calendar_day_selects_it() {
     let action = typewords_tui::ui::hit::action_at(&app, area, target.rect.x, target.rect.y);
     app.apply_action(action.expect("action"));
     assert_eq!(app.stats_day, day, "点日历里的日期应选中那一天");
+}
+
+/// 统计页日历：命中区 / 高亮矩形必须和画出来的日期数字对齐。
+///
+/// 早期命中区起点多加了 2 列（日期数字列的末尾），只盖住最后一个数字与
+/// 记录点：鼠标点数字左半边没反应，键盘高亮复用这块矩形时会整体向右歪一格。
+#[test]
+fn calendar_day_rects_cover_the_rendered_day_numbers() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let area = Rect::new(0, 0, 120, 40);
+    app.set_viewport(area);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, Screen::Stats);
+
+    let (year, month) = app.stats_month;
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, 12).expect("month day");
+    app.select_stats_day(date);
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    let mut days: Vec<(chrono::NaiveDate, Rect)> = targets
+        .iter()
+        .filter_map(|target| match target.action {
+            Action::StatsSelectDay(day) => Some((day, target.rect)),
+            _ => None,
+        })
+        .collect();
+    let (_, rect) = days
+        .iter()
+        .copied()
+        .find(|(day, _)| *day == date)
+        .expect("该日期应有命中区");
+
+    // 高亮矩形与命中区同源。
+    let highlight =
+        typewords_tui::ui::focus::focused_rect(&app, app.viewport).expect("选中日应有高亮矩形");
+    assert_eq!(highlight, rect, "日历高亮应与日期格命中区一致");
+
+    // 命中区里画出来的正是这一天（两位数最容易看出偏列）。
+    let rows = logical_rows(&app, 120, 40);
+    let text: String = rows[rect.y as usize]
+        .iter()
+        .filter(|(_, column)| *column >= rect.x && *column < rect.right())
+        .map(|(character, _)| *character)
+        .collect();
+    assert_eq!(
+        text.trim(),
+        date.day().to_string(),
+        "命中区应正好盖住日期数字，实际盖到 {text:?}"
+    );
+
+    // 同一周的日期格首尾相接、宽度一致，不重叠也不留缝。
+    days.sort_by_key(|(_, rect)| (rect.y, rect.x));
+    let row: Vec<Rect> = days
+        .iter()
+        .filter(|(_, candidate)| candidate.y == rect.y)
+        .map(|(_, candidate)| *candidate)
+        .collect();
+    assert!(row.len() >= 5, "一行应有至少 5 个日期格");
+    for pair in row.windows(2) {
+        assert_eq!(pair[0].right(), pair[1].x, "相邻日期格应首尾相接");
+        assert_eq!(
+            pair[0].width, 5,
+            "日期格应覆盖整格（3 列数字 + 2 列记录点）"
+        );
+    }
 }
 
 // ── 滚动指示器不能被行 target 抢走 ──────────────────────────────────────

@@ -275,7 +275,7 @@ ui::render(app, frame)
 
 - 6 块总览卡：累计时长、学习天数、新词、复习、错误、正确率；内容宽度 `>= 90` 时 6 列 × 1 行（卡高 3，带「今日 N」小字），否则 3 列 × 2 行（卡高 2，无小字行）。
 - 「最近 14 天」：`insights::recent_days(base, 14)` 按日期倒序；每行「MM-DD 周x / 今天 + 相对最长时长的小进度条（最多 24 格）+ 时长 + 新 N 复 N + 错 N」；今天整行用 `selection` 背景。记录多于一屏时列表少画一行并给出 `↑`/`↓` 提示；行宽不足 28 列时跳过明细。
-- `app.stats_scroll` 在渲染时被夹到 `total - visible`，不会越界。日历里的每一天、页头的「v 切换」都是鼠标 target（`StatsSelectDay` / `StatsToggleView`），滚轮与 `PgUp` / `PgDn` 滚动正文。键盘焦点在内容区时 `↑`/`↓` 滚动、`←`/`→` 选日期、`Enter` 切换视图；月初再按 `←` 进侧栏。截图见 [统计页](screenshots/stats-120x40-dark.png)。
+- `app.stats_scroll` 在渲染时被夹到 `total - visible`，不会越界。日历里每一天的整格（3 列日期 + 2 列记录点）都是一个鼠标 target（`StatsSelectDay`），页头的「v 切换」是 `StatsToggleView`；滚轮与 `PgUp` / `PgDn` 滚动正文。键盘焦点在内容区时 `↑`/`↓` 滚动、`←`/`→` 选日期、`Enter` 切换视图；月初再按 `←` 进侧栏。当天的高亮矩形直接复用 `StatsSelectDay` 的命中区，因此高亮与点得中的格子永远同一块（早期命中区从数字列末尾开始，高亮会向右歪一格）。截图见 [统计页](screenshots/stats-120x40-dark.png)。
 
 ### 8.3 设置页（settings.rs）
 

@@ -120,8 +120,6 @@ struct CalendarGrid {
 
 /// 日历里每格占 5 列（3 列日期 + 2 列记录点）。
 const CALENDAR_CELL_WIDTH: u16 = 5;
-/// 日历每行的日期数字占 3 列（右对齐）。
-const CALENDAR_NUMBER_WIDTH: u16 = 3;
 /// 日历块第一列前的缩进。
 const CALENDAR_INDENT: u16 = 2;
 
@@ -482,15 +480,15 @@ fn calendar_targets(app: &App, layout: &StatsLayout) -> Vec<crate::ui::target::T
                 continue;
             }
             let y = layout.list.y + visible_row as u16;
-            let x = layout.list.x
-                + CALENDAR_INDENT
-                + (weekday as u16) * CALENDAR_CELL_WIDTH
-                + (CALENDAR_CELL_WIDTH - CALENDAR_NUMBER_WIDTH);
+            // 每格 = 3 列右对齐日期 + 2 列记录点，从单元格第一列开始。
+            // 早期把命中区起点放在数字列的末尾（+ CELL_WIDTH - NUMBER_WIDTH），
+            // 只盖住最后一个数字与记录点，键盘高亮复用这块矩形时就会歪一格。
+            let x = layout.list.x + CALENDAR_INDENT + (weekday as u16) * CALENDAR_CELL_WIDTH;
             let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day as u32) else {
                 continue;
             };
             result.push(Target::new(
-                Rect::new(x, y, CALENDAR_NUMBER_WIDTH, 1),
+                Rect::new(x, y, CALENDAR_CELL_WIDTH, 1),
                 crate::app::Action::StatsSelectDay(date),
             ));
         }

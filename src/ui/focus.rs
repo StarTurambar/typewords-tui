@@ -292,14 +292,13 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
             if app.stats_by_dict {
                 return None;
             }
-            let target = crate::ui::stats::targets(app, content)
+            crate::ui::stats::targets(app, content)
                 .into_iter()
                 .find(|target| match &target.action {
                     Action::StatsSelectDay(date) => *date == app.stats_day,
                     _ => false,
-                })?;
-            let width = 5.min(content.right().saturating_sub(target.rect.x));
-            (width > 0).then(|| Rect::new(target.rect.x, target.rect.y, width, 1))
+                })
+                .map(|target| target.rect)
         }
         _ => None,
     }
