@@ -69,10 +69,10 @@ pub fn supports_focus(screen: Screen) -> bool {
 
 /// 当前是否启用键盘焦点导航。
 ///
-/// 练习会话进行中（含练习中打开的帮助页）、有弹层、或词条搜索框正在输入时
-/// 方向键属于别的东西，焦点导航整套让位。
+/// 键入练习进行中（单词练习会话 / 文章跟打，含它们打开的整屏帮助页）、
+/// 有弹层、或词条搜索框正在输入时，方向键属于别的东西，焦点导航整套让位。
 pub fn enabled(app: &App) -> bool {
-    app.session.is_none()
+    !app.in_typing_session()
         && supports_focus(app.screen)
         && !app.words_search_focus
         && !super::hit::modal_open(app)

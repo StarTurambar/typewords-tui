@@ -261,8 +261,8 @@ fn focus_action(app: &App, key: KeyEvent) -> Option<Action> {
 }
 
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
-    // 练习中打开的帮助页是整屏只读页：保持「滚动之外任意键返回」。
-    if app.screen == Screen::Help && app.session.is_some() {
+    // 练习 / 跟打中打开的帮助页是整屏只读页：保持「滚动之外任意键返回」。
+    if app.screen == Screen::Help && app.in_typing_session() {
         return match key.code {
             KeyCode::Up | KeyCode::Char('k') => Some(Action::HelpScroll(-1)),
             KeyCode::Down | KeyCode::Char('j') => Some(Action::HelpScroll(1)),
@@ -377,13 +377,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
             _ => None,
         },
-        Screen::ArticlePractice => match key.code {
-            KeyCode::Esc => Some(Action::Back),
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(Action::ArticleSpeak)
-            }
-            _ => None,
-        },
+        // 跟打页的按键不走 Action：它和练习页一样是高频键入路径，
+        // 由 `App::on_article_practice_key` 直接分流（键位表 → TUI 键位 → 输入）。
+        Screen::ArticlePractice => None,
         Screen::Words => words_action(app, key),
         Screen::WordTest => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::WordTestExit),

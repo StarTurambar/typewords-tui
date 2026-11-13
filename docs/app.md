@@ -164,7 +164,7 @@ app.save_all()
 | 顺序 | 逻辑 | 细节 |
 | --- | --- | --- |
 | 1 | Toast 过期 | 所有 Toast 都满足 `until <= now` 时清空 `toasts`；渲染侧用 `current_toast(now)` 过滤未过期项 |
-| 2 | 练习计时 | 仅当 `screen == Practice` 且有 `session`；距 `last_timer_tick` 满 1000 ms 时先记下 `spend`，再 `timer::tick(...)`（累加 1000 ms，空闲 180 秒自动暂停）；若本次 tick 确实增加了时长且新值跨过 30 秒整数倍，则 `schedule_practice_save()` |
+| 2 | 练习计时 | 单词练习：`screen == Practice` 且有 `session`；距 `last_timer_tick` 满 1000 ms 时先记下 `spend`，再 `timer::tick(...)`（累加 1000 ms，空闲 180 秒自动暂停）；若本次 tick 确实增加了时长且新值跨过 30 秒整数倍，则 `schedule_practice_save()`。文章跟打：`screen == ArticlePractice` 且有 `article_practice`，同样按 1000 ms 推进 `spend`（30 秒整点排一次 `schedule_article_save()`）；`article_practice.paused`（`Ctrl+,`）为真时只把 `last_timer_tick` 推到 `now`、不累加，恢复后的第一次 tick 不会把暂停的整段算进用时 |
 | 3 | 键入定时 | 同一条件下构造 `TypingContext` 并调 `typing.on_tick(&ctx, now)`，事件交给 `handle_typing_events`（自动下一词、重复练习、错误清除等定时器） |
 | 4 | 防抖保存 | `pending_practice_save` 到期（`now >= deadline`）时 `save_practice_now()` |
 
@@ -177,7 +177,7 @@ app.save_all()
 1. 更新 `last_activity = now_ms()`（供空闲暂停使用）。
 2. 若 `edit`/`confirm`/`summary` 任一存在：调 `keymap::overlay_action`，有返回值就 `apply_action`，然后**直接返回**——弹层是模态的，未识别的键被吞掉；优先级 `edit` → `confirm` → `summary`。
 3. `screen == Practice` 时进入 `on_practice_key`（练习页键盘不经过 `Action`）。
-4. `screen == ArticlePractice` 时先截下 `Esc`（`back` 返回文章列表）与 `Ctrl+P`（朗读当前句），其余按键交给 `article_typing_key`——跟打键入同样不经过 `Action`。
+4. `screen == ArticlePractice` 时进入 `on_article_practice_key`——跟打页与练习页同一套分流：先查键位表（只认两页共用的 `PlayWordPronunciation` / `ToggleShowTranslate` / `ToggleTheme`），再走 TUI 专有键位（`Ctrl+C` / `Ctrl+,` / `?` / `Esc`），剩下的字符才进 `article_typing_key`。跟打键入同样不经过 `Action`。
 5. 其它屏幕调 `keymap::screen_action`，返回 `Action` 后交给 `apply_action`。
 
 `screen_action` 先处理练习中打开的整屏帮助页（保持「滚动之外任意键返回」），再判断数字切页：`session.is_none()`、当前页属于 `Home` / `Articles` / `DictPicker` / `Stats` / `Settings` / `Help`、无修饰键、按 `1`~`6` 时直接产生 `Navigate`：`1` 单词、`2` 文章、`3` 词库、`4` 统计、`5` 帮助、`6` 设置。之后先过统一的焦点键（`focus_action`：`↑`/`↓`/`←`/`→` 与 `j`/`k` → `FocusMove`、`Tab`/`Shift+Tab` → `SwitchFocusPane`、`Enter` → `ActivateFocus`，只在 `ui::focus::enabled` 为真时生效），各页面分支只保留自己的特有键位。
@@ -205,9 +205,11 @@ app.save_all()
 
 `Ctrl+J` 是 `Shift+→` 的 ASCII 别名；部分终端会吞掉 `Ctrl+方向键` 或 `Alt+数字`，帮助页也提示了这一点。
 
-### 5.3 文章跟打页键位（`article_typing_key`）
+`Ctrl+P`（朗读）、`Ctrl+Z`（翻译）、`Ctrl+Q`（主题）、`Ctrl+,`（暂停计时）、`Ctrl+C`（保存并离开）、`?`（帮助）与[文章跟打页](#53-文章跟打页键位on_article_practice_key)**同一个键**做同一件事：前三个从键位表取（改绑后两页一起变），后三个是 TUI 专有键位。两页唯一的键位差异是 `Esc`——练习页的它被上游绑成「显示单词」，跟打页没有遮罩，`Esc` 保持全站通用的「返回上一层」。
 
-跟打页和练习页一样不经过 `screen_action`：`App::on_key` 先处理 `Esc` 与 `Ctrl+P`，其余交给 `App::article_typing_key`。
+### 5.3 文章跟打页键位（`on_article_practice_key`）
+
+跟打页和练习页一样不经过 `screen_action`：`App::on_key` 交给 `App::on_article_practice_key`，它按「键位表 → TUI 专有键位 → 跟打输入」三段分流。键位表里只认两页共用的三个动作；其它动作（跳过 / 收藏 / 自测 / 逐句播放……）在跟打页没有对应物，一律让位给输入——`1`~`3`、空格、`Enter` 仍然是跟打内容或空操作，不会被键位表吞掉。
 
 | 键 | 行为 |
 | --- | --- |
@@ -216,9 +218,14 @@ app.save_all()
 | 空格位置上按了别的字母 / 数字 | 视为空格已正确输入：先补上空格，再把这个字符记到下一个目标位置——打对则不计错，打错则错字落在下一个单词的首字母位置（红色显示实际按下的字符，不带下划线），后面的字母不会错位。空格位置永远不会出现错字，因此「一句话没按空格、字母全打对」不计入错误句 |
 | 标点、符号 | 不是跟打内容（`is_typing_char` 为假）：忽略，不计错也不前进 |
 | `Backspace` | `SentenceTyping::backspace` 删除最后输入的字符；本句的 `wrong` 标记不因此清除 |
-| `Ctrl+P` | `speak_current_sentence` 用系统 TTS 朗读当前句 |
-| `Esc` | `back()` 保存文章断点并返回文章列表 |
-| 其它（含 `Ctrl` / `Alt` 组合） | 忽略 |
+| `Ctrl+P`（`PlayWordPronunciation`） | `speak_current_sentence` 用系统 TTS 朗读当前句；改绑后新键位同样生效 |
+| `Ctrl+Z`（`ToggleShowTranslate`） | 切换当前句译文面板（关掉后把它占的 4 行还给正文）；与练习页的「切换翻译」是同一个键、同一张键位表 |
+| `Ctrl+Q`（`ToggleTheme`） | 切换主题；与练习页同一个键、同一张键位表 |
+| `Ctrl+,` | 暂停 / 恢复计时：暂停只停止累加 `spend`，状态行显示「已暂停」 |
+| `Ctrl+C` | `back()`：保存文章断点并返回文章列表（与练习页的「保存并返回主页」同义） |
+| `?` | 整屏帮助页（`help_scroll = 0`）；返回时回到跟打页，跟打进度不变 |
+| `Esc` | `back()` 保存文章断点并返回文章列表；跟打页没有遮罩，`Esc` 保持全站通用的「返回」语义 |
+| 其它（含未映射的 `Ctrl` / `Alt` 组合） | 忽略 |
 
 输入长度达到当前句 `typing_target`（字母、数字与词间空格按顺序排成的字符序列，见 `Sentence::typing_cells`；词间空格可省略，省略时 `SentenceTyping::input` 自动补成正确输入，不会因此记错）的字符数就调用 `finish_article_sentence`：本句出现过错误时 `wrong_sentences += 1`，然后推进句子下标、排一次防抖保存并朗读下一句；`advance_over_empty_article_sentences` 会跳过没有跟打内容的纯标点 / 空白句（按已完成计），跳过之后到篇尾则直接结算。结算走 `finish_article_practice`，按文章口径生成 `SummaryKind::Article`（完成句数 / 总句数 / 错句数 / 文章标题），去向是文章列表 / 重打本篇 / 主页，见 7.5。
 
@@ -236,7 +243,7 @@ app.save_all()
 | 文章页 | `Esc`/`q`→`Back` |
 | 词条页 | 搜索框聚焦时输入搜索词，`Esc` 退出搜索；否则 `Esc`/`q`→`Back`、`PgUp`/`PgDn` 翻 10 行、`Home`/`End` 到首/末、`Space`→勾选当前词、`/`→搜索、`a`/`d`/`n`/`o`/`c` 与 `1`/`2`/`3` 是词条操作（见第 8 节与使用手册） |
 | 快捷键页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`、`Home`/`End`；`Space`→`SelectActivate`；`Delete` 清除绑定；`r`/`R` 恢复当前 / 全部默认 |
-| 帮助页 | 练习中打开的整屏帮助：`↑`/`↓` 滚动、`PgUp`/`PgDn` 翻页、其余任意键→`HelpBack`；正常帮助页：`↑`/`↓`/`←`/`→`/`Tab`/`Enter` 走焦点键，`PgUp`/`PgDn` 滚动，其它键→`HelpBack` |
+| 帮助页 | 练习 / 跟打中打开的整屏帮助：`↑`/`↓` 滚动、`PgUp`/`PgDn` 翻页、其余任意键→`HelpBack`（`help_back` 按 `session` / `article_practice` 回到对应练习页）；正常帮助页：`↑`/`↓`/`←`/`→`/`Tab`/`Enter` 走焦点键，`PgUp`/`PgDn` 滚动，其它键→`HelpBack` |
 | 单词测试页 | 不参与焦点导航：`Esc`/`q`→`WordTestExit`，其余走键位表（`ChooseA`~`ChooseD` / `WordTestingNext` / `PlayWordPronunciation`） |
 
 无会话的非练习页上，无修饰的 `1`~`6` 切到对应页面（1 单词 / 2 文章 / 3 词库 / 4 统计 / 5 帮助 / 6 设置）。

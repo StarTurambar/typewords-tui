@@ -39,6 +39,15 @@ use crate::app::{App, Screen};
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 20;
 
+/// TUI 专有键位的展示写法：保存并离开当前练习页。
+///
+/// 单词练习页与文章跟打页**共用同一个键**，提示文案也必须同源，
+/// 否则改了一处、另一处还写着旧键位。
+pub const TUI_EXIT_KEY: &str = "Ctrl+C";
+
+/// TUI 专有键位的展示写法：暂停 / 恢复计时（两个练习页共用）。
+pub const TUI_PAUSE_KEY: &str = "Ctrl+,";
+
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
     let theme = app.theme();

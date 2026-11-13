@@ -58,6 +58,19 @@ const PRACTICE: &[HelpEntry] = &[
     HelpEntry::Key("Ctrl+C", "保存并返回主页"),
 ];
 
+/// 文章跟打页的键位。
+///
+/// 朗读 / 译文 / 主题三个键与练习页**同一个来源**（键位表），这里只列默认
+/// 绑定；`Esc` 是页面级返回，`Ctrl+C` 与 `Ctrl+,` 与练习页共用同一个键。
+const ARTICLE: &[HelpEntry] = &[
+    HelpEntry::Section("文章跟打"),
+    HelpEntry::Key("字母 / 数字 / 空格", "跟打当前句（标点不用打）"),
+    HelpEntry::Key("Esc / Ctrl+C", "返回 / 保存并返回文章列表"),
+    HelpEntry::Key("Ctrl+P", "朗读当前句"),
+    HelpEntry::Key("Ctrl+Z", "切换当前句译文"),
+    HelpEntry::Key("Ctrl+,", "暂停 / 恢复计时"),
+];
+
 const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Section("导航/查看"),
     HelpEntry::Key("1 ~ 6", "切换页面"),
@@ -83,13 +96,18 @@ const NAVIGATION: &[HelpEntry] = &[
 ];
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    // 练习中进入帮助：整屏显示，不画侧栏。
+    // 练习 / 跟打中进入帮助：整屏显示，不画侧栏。
     //
     // 练习中侧栏的导航是禁用的，画出来却点不动，用户会以为鼠标坏了。
-    if app.session.is_some() {
+    if app.in_typing_session() {
+        let title = if app.session.is_some() {
+            "帮助（Esc 返回练习）"
+        } else {
+            "帮助（Esc 返回跟打）"
+        };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "帮助（Esc 返回练习）",
+                title,
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -139,7 +157,8 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) 
     // 早期实现两栏都固定从第 0 行开始画，且不响应 `help_scroll`：
     // 终端高度不够时，最后几行（Ctrl+C / Ctrl+Q 等）被裁掉且滚不出来。
     let visible = content.height as usize;
-    let left_max = PRACTICE.len().saturating_sub(visible);
+    let left_entries = typing_entries();
+    let left_max = left_entries.len().saturating_sub(visible);
     let right_entries_len = NAVIGATION.len() + 4; // 含末尾的鼠标说明
     let right_max = right_entries_len.saturating_sub(visible);
     let (left_offset, right_offset) = if left_max.max(right_max) == 0 {
@@ -149,7 +168,7 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) 
         let offset = (scroll as usize).min(left_max.max(right_max));
         (offset.min(left_max), offset.min(right_max))
     };
-    render_entries(frame, left, PRACTICE, theme, left_offset);
+    render_entries(frame, left, &left_entries, theme, left_offset);
     let mut right_entries: Vec<HelpEntry> = NAVIGATION.to_vec();
     push_mouse_notes(&mut right_entries);
     render_entries(frame, right, &right_entries, theme, right_offset);
@@ -170,8 +189,7 @@ fn render_columns(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) 
 }
 
 fn render_single(frame: &mut Frame, content: Rect, theme: &Theme, scroll: u16) {
-    let mut entries: Vec<HelpEntry> = Vec::new();
-    entries.extend_from_slice(PRACTICE);
+    let mut entries = typing_entries();
     entries.extend_from_slice(NAVIGATION);
     push_mouse_notes(&mut entries);
     let list = Rect::new(
@@ -261,11 +279,18 @@ pub fn max_scroll() -> u16 {
 
 /// 帮助页的条目总数（两栏 / 单栏共用）。
 fn help_entry_count() -> usize {
-    let mut entries: Vec<HelpEntry> = Vec::new();
-    entries.extend_from_slice(PRACTICE);
+    let mut entries = typing_entries();
     entries.extend_from_slice(NAVIGATION);
     push_mouse_notes(&mut entries);
     entries.len()
+}
+
+/// 两个练习页的键位分区（练习 + 文章跟打）。
+fn typing_entries() -> Vec<HelpEntry> {
+    let mut entries: Vec<HelpEntry> = Vec::new();
+    entries.extend_from_slice(PRACTICE);
+    entries.extend_from_slice(ARTICLE);
+    entries
 }
 
 fn push_mouse_notes(entries: &mut Vec<HelpEntry>) {

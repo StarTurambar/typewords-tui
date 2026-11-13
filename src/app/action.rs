@@ -67,7 +67,6 @@ pub enum Action {
     FlowToggleWordLoop,
     // 文章
     OpenArticles,
-    ArticleSpeak,
     ArticleBookMove(i32),
     ArticleMove(i32),
     ArticleSelect,
@@ -213,9 +212,6 @@ impl App {
             Action::ArticleBookMove(delta) => self.move_article_book(delta),
             Action::ArticleMove(delta) => self.move_article(delta),
             Action::ArticleSelect => self.select_article(),
-            Action::ArticleSpeak => {
-                self.speak_current_sentence();
-            }
             Action::OpenSelectedWords => self.open_selected_words(),
             Action::WordsMove(delta) => self.move_words_cursor(delta),
             Action::WordsSearchChar(character) => self.words_search_push(character),
@@ -434,9 +430,15 @@ impl App {
         }
     }
 
+    /// 退出帮助页：从哪来就回哪去。
+    ///
+    /// 练习 / 跟打中按 `?` 打开的是整屏帮助（不画外壳），返回时回到对应
+    /// 的练习页而不是主页——否则跟打进度还在、人却已经站在主页上了。
     fn help_back(&mut self) {
         let screen = if self.session.is_some() {
             Screen::Practice
+        } else if self.article_practice.is_some() {
+            Screen::ArticlePractice
         } else {
             Screen::Home
         };

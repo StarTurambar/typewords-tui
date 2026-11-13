@@ -196,6 +196,8 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页面、`m` 循环练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键` 等组合键，TUI 因此提供了 ASCII 别名并允许直接拼写代替选择题；完整键表见 [使用手册](usage.md) 与 [快捷键](shortcuts.md)。
 
+**文章跟打页的键位**：两端都让跟打页吃同一张键位表。上游 `(articles)/practice-articles/[id].vue` 监听 `ShortcutKey.PreviousChapter` / `RepeatChapter` / `ToggleShowTranslate` / `ToggleTheme` / `PlayWordPronunciation` / `ShowWord` 等；TUI 的跟打页认 `PlayWordPronunciation`（朗读当前句）、`ToggleShowTranslate`（切换当前句译文）、`ToggleTheme` 三个，另有共用的 `Ctrl+,` / `Ctrl+C` / `?`。差异：上游的 `ShowWord` 是「按下高亮当前跟打位置、松手恢复」（`TypingArticle.showSentence` / `hideSentence` 改 `hoverIndex`），TUI 的跟打页把整篇正文一直显示、没有这层高亮，`Esc` 因此让给页面级返回，不再绑定 `ShowWord`；上游跟打的「上一章 / 下一章 / 重学本章」在 TUI 由文章结算弹层（「返回列表 / 重打本篇 / 主页」）承担。
+
 ### 4.3 设置建模范围
 
 上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：40 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 18 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 29 个 `SettingState` 配置项，另加「每日词数」一行（写 `dict.json` 的词典元数据）与 2 个动作项（清空练习进度、清除所有数据），共 32 行。

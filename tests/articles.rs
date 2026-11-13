@@ -816,6 +816,20 @@ fn the_article_hint_fits_the_minimum_terminal_width() {
         text.contains("Backspace 退格"),
         "提示末尾不该被裁掉:\n{text}"
     );
+    // 键位提示与练习页同一套：退出键（Ctrl+C / Esc）落在最后一行的末尾，
+    // 一旦整行超宽就会先把它裁掉，所以要看完整的键位文案。
+    assert!(
+        text.contains("? 帮助"),
+        "朗读 / 译文 / 主题 / 帮助的键位提示应完整显示:\n{text}"
+    );
+    assert!(
+        text.contains("Ctrl+C 保存并返回列表"),
+        "退出键位提示不该被裁掉:\n{text}"
+    );
+    assert!(
+        text.contains("Esc 返回列表"),
+        "返回键位提示不该被裁掉:\n{text}"
+    );
 }
 
 /// 整篇文章显示在同一页，仍按句子逐句跟打。

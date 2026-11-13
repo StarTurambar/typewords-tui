@@ -93,6 +93,10 @@ pub struct ArticlePracticeState {
     pub wrong_sentences: usize,
     /// 本轮用时（毫秒）
     pub spend: i64,
+    /// 是否显示当前句译文（`Ctrl+Z` 切换，与练习页的「切换翻译」同一个键）
+    pub show_translate: bool,
+    /// 计时是否暂停（`Ctrl+,` 切换，与练习页的「暂停计时」同一个键）
+    pub paused: bool,
 }
 
 /// 流程列表项：内置流程 + 自建流程。
@@ -566,6 +570,16 @@ impl App {
     /// 当前视口是否达到可交互下限（与渲染层「终端太小」判定同源）。
     pub fn interactive(&self) -> bool {
         self.viewport.width >= crate::ui::MIN_WIDTH && self.viewport.height >= crate::ui::MIN_HEIGHT
+    }
+
+    /// 是否处在进行中的键入练习里（单词练习会话或文章跟打）。
+    ///
+    /// 两者都独占整屏、按键直连键入引擎，所以「练习中的整屏帮助页」「键盘
+    /// 焦点让位」「侧栏不画也不注册命中区」这些判断必须同时认这两种状态——
+    /// 只认 `session` 时，文章跟打里按 `?` 打开的帮助页会被当普通页面，
+    /// 画上侧栏、方向键被焦点导航吃掉，返回时还会跳到主页。
+    pub fn in_typing_session(&self) -> bool {
+        self.session.is_some() || self.article_practice.is_some()
     }
 
     pub fn theme(&self) -> crate::ui::Theme {
@@ -2372,6 +2386,10 @@ impl App {
             finished,
             wrong_sentences,
             spend,
+            // 两个开关都跟练习页保持一致：译文默认开、计时默认走。
+            // 它们只影响本次跟打的显示与计时，不写进断点缓存。
+            show_translate: true,
+            paused: false,
         });
         self.set_screen(Screen::ArticlePractice);
         self.stat = PracticeState::default();
@@ -3258,15 +3276,7 @@ impl App {
         }
 
         if self.screen == Screen::ArticlePractice {
-            if key.code == KeyCode::Esc {
-                self.back();
-                return;
-            }
-            if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                self.speak_current_sentence();
-                return;
-            }
-            self.article_typing_key(key);
+            self.on_article_practice_key(key);
             return;
         }
 
@@ -3295,6 +3305,114 @@ impl App {
             crate::audio::play_key(&self.boot.settings);
             self.handle_typing_key(input);
         }
+    }
+
+    /// 文章跟打页按键：与练习页走同一套分流。
+    ///
+    /// 顺序也是「键位表里的共用动作 → TUI 专有键位 → 跟打输入的字符」：
+    /// 朗读 / 译文 / 主题三个动作和练习页**同一个键**（都从键位表取，改绑后
+    /// 两边一起变）；`Ctrl+C` / `Ctrl+,` / `?` 是两页共用的 TUI 专有键位。
+    /// 剩下的字符才进跟打引擎——按键表里没被这里消费的动作绝不会抢走字母、
+    /// 数字与空格，跟打内容不会因为键位表里绑了 `1`~空格 而被吞掉。
+    fn on_article_practice_key(&mut self, key: KeyEvent) {
+        if let Some(shortcut) = keymap::to_shortcut_key(key) {
+            for action in self.shortcuts.actions_for(&shortcut) {
+                if self.handle_article_shortcut(action) {
+                    return;
+                }
+            }
+        }
+        if self.handle_article_tui_key(key) {
+            return;
+        }
+        self.article_typing_key(key);
+    }
+
+    /// 处理跟打页共用的键位表动作；返回 `true` 表示该动作已消费按键。
+    ///
+    /// 只接两页都有的功能：练习页的「显示单词」「跳过」「收藏」「自测」
+    /// 在跟打页没有对应物，落在 `_` 分支里让位给跟打输入（默认绑定的
+    /// `1`/`2`/`3`/`Enter`/`Tab` 仍是普通输入或页面键，不会被吞）。
+    fn handle_article_shortcut(&mut self, action: ShortcutAction) -> bool {
+        use ShortcutAction::*;
+        match action {
+            // 朗读：练习页念单词，跟打页念当前句。
+            PlayWordPronunciation => {
+                self.speak_current_sentence();
+                true
+            }
+            // 翻译：练习页切单词释义，跟打页切当前句译文。
+            ToggleShowTranslate => {
+                self.toggle_article_translate();
+                true
+            }
+            ToggleTheme => {
+                self.cycle_theme();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 跟打页的 TUI 专有键位：与练习页同名功能用同一个键。
+    ///
+    /// - `Ctrl+C`：保存断点并返回文章列表（练习页是保存并返回主页）；
+    /// - `Ctrl+,`：暂停 / 恢复计时；
+    /// - `?`：帮助（返回时回到跟打页）；
+    /// - `Esc`：页面级返回。跟打页没有「显示单词」这层遮罩，`Esc` 在这里
+    ///   和全站其它页面一样是返回，不占用键位表。
+    fn handle_article_tui_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('?') => {
+                self.help_scroll = 0;
+                self.set_screen(Screen::Help);
+                true
+            }
+            KeyCode::Char('c') if ctrl => {
+                // 与练习页的 `Ctrl+C` 同义：先保存再离开，不是退出程序。
+                self.back();
+                true
+            }
+            KeyCode::Char(',') if ctrl => {
+                self.toggle_article_pause();
+                true
+            }
+            KeyCode::Esc => {
+                self.back();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 切换跟打页的当前句译文（与练习页的「切换翻译」共用键位）。
+    fn toggle_article_translate(&mut self) {
+        if let Some(practice) = self.article_practice.as_mut() {
+            practice.show_translate = !practice.show_translate;
+        }
+    }
+
+    /// 暂停 / 恢复跟打计时（与练习页的「暂停计时」共用键位）。
+    ///
+    /// 跟打没有 `timer` 的分段状态，只有一个累计毫秒数：暂停时
+    /// `on_tick` 不再累加，同时把 tick 基准推到当前时刻，恢复后的第一次
+    /// tick 不会把暂停的整段时长算进 `spend`。
+    fn toggle_article_pause(&mut self) {
+        let Some(practice) = self.article_practice.as_mut() else {
+            return;
+        };
+        practice.paused = !practice.paused;
+        let paused = practice.paused;
+        if paused {
+            self.toast(NoticeLevel::Info, crate::domain::i18n::tr("timer_paused"));
+        } else {
+            self.toast(
+                NoticeLevel::Success,
+                crate::domain::i18n::tr("timer_resume"),
+            );
+        }
+        self.last_timer_tick = timer::now_ms();
     }
 
     /// 处理练习页的快捷键动作；返回 `true` 表示该动作已消费按键。
@@ -3604,15 +3722,26 @@ impl App {
 
         // 文章跟打页也要计时：早期实现的计时分支只在 `Screen::Practice` 下
         // 运行，文章页的 `spend` 从未被写入，用时与统计恒为 0。
-        if self.screen == Screen::ArticlePractice
-            && let Some(practice) = self.article_practice.as_mut()
-            && now - self.last_timer_tick >= 1000
-        {
-            self.last_timer_tick = now;
-            practice.spend += 1000;
-            // 每 30 秒整点兜底保存一次，防止进程被直接杀掉时丢掉整段进度。
-            if practice.spend % 30_000 == 0 {
-                self.schedule_article_save();
+        if self.screen == Screen::ArticlePractice && self.article_practice.is_some() {
+            // 暂停期间不累计时长，但要把 tick 基准推到当前时刻：恢复后的
+            // 第一次 tick 不能把暂停的整段时长一次算进来。
+            let paused = self
+                .article_practice
+                .as_ref()
+                .is_some_and(|practice| practice.paused);
+            if now - self.last_timer_tick >= 1000 {
+                self.last_timer_tick = now;
+                if !paused {
+                    let mut crossed_periodic_mark = false;
+                    if let Some(practice) = self.article_practice.as_mut() {
+                        practice.spend += 1000;
+                        // 每 30 秒整点兜底保存一次，防止进程被直接杀掉时丢掉整段进度。
+                        crossed_periodic_mark = practice.spend % 30_000 == 0;
+                    }
+                    if crossed_periodic_mark {
+                        self.schedule_article_save();
+                    }
+                }
             }
         }
 

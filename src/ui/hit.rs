@@ -26,8 +26,8 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
         return super::overlays::targets(app, area);
     }
 
-    // 练习中的帮助页整屏显示（不画侧栏），命中区也要按整屏算。
-    if app.screen == Screen::Help && app.session.is_some() {
+    // 练习 / 跟打中的帮助页整屏显示（不画侧栏），命中区也要按整屏算。
+    if app.screen == Screen::Help && app.in_typing_session() {
         let content = Rect::new(
             area.x + 2,
             area.y + 1,

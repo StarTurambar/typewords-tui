@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, ArticlePracticeState};
 use crate::domain::article::TypingCell;
+use crate::domain::shortcut::ShortcutAction;
 use crate::domain::timer::format_duration;
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
@@ -171,6 +172,9 @@ pub fn practice_targets(_app: &App, _area: Rect) -> Vec<crate::ui::target::Targe
 /// 跟打页译文区的高度。
 const TRANSLATE_HEIGHT: u16 = 4;
 
+/// 跟打页底部提示的行数（规则一行 + 键位两行）。
+const HINT_HEIGHT: u16 = 3;
+
 /// 折行后的一行：字符、所属句子下标、是否该句的首行。
 struct ArticleLine {
     cells: Vec<TypingCell>,
@@ -267,13 +271,20 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
         frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
         return;
     };
+    // 译文区跟着 `Ctrl+Z`（与练习页「切换翻译」同一个键）走：
+    // 关掉时把它占的行数还给正文，而不是留一块空面板。
+    let translate_height = if practice.show_translate {
+        TRANSLATE_HEIGHT
+    } else {
+        0
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(8),
-            Constraint::Length(TRANSLATE_HEIGHT),
-            Constraint::Length(2),
+            Constraint::Length(translate_height),
+            Constraint::Length(HINT_HEIGHT),
         ])
         .split(area);
 
@@ -309,6 +320,10 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
         format!("   用时 {}", format_duration(practice.spend)),
         Style::default().fg(theme.dim),
     ));
+    // 暂停中的提示与练习页状态行的「已暂停」同义（键位也是同一个 `Ctrl+,`）。
+    if practice.paused {
+        header.push(Span::styled("   已暂停", Style::default().fg(theme.warn)));
+    }
     frame.render_widget(Paragraph::new(Line::from(header)), chunks[0]);
 
     // 正文：整篇文章一页显示，视口跟着光标走
@@ -336,35 +351,41 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
     );
 
     // 当前句译文（整篇文章同页时，译文只跟随当前句）
-    let translate = practice
-        .sentences
-        .get(index)
-        .map(|sentence| sentence.translate.clone())
-        .unwrap_or_default();
-    let translate_width = chunks[2].width.saturating_sub(3) as usize;
-    let mut translate_lines: Vec<Line<'static>> = Vec::new();
-    if translate.trim().is_empty() {
-        translate_lines.push(Line::from(Span::styled(
-            " （这句没有译文）",
-            Style::default().fg(theme.dim),
-        )));
-    } else {
-        for text in widgets::wrap_text(translate.trim(), translate_width)
-            .into_iter()
-            .take(2)
-        {
+    if translate_height > 0 {
+        let translate = practice
+            .sentences
+            .get(index)
+            .map(|sentence| sentence.translate.clone())
+            .unwrap_or_default();
+        let translate_width = chunks[2].width.saturating_sub(3) as usize;
+        let mut translate_lines: Vec<Line<'static>> = Vec::new();
+        if translate.trim().is_empty() {
             translate_lines.push(Line::from(Span::styled(
-                format!(" {text}"),
-                Style::default().fg(theme.fg),
+                " （这句没有译文）",
+                Style::default().fg(theme.dim),
             )));
+        } else {
+            for text in widgets::wrap_text(translate.trim(), translate_width)
+                .into_iter()
+                .take(2)
+            {
+                translate_lines.push(Line::from(Span::styled(
+                    format!(" {text}"),
+                    Style::default().fg(theme.fg),
+                )));
+            }
         }
+        frame.render_widget(
+            Paragraph::new(translate_lines).block(practice_block(" 当前句译文 ", theme)),
+            chunks[2],
+        );
     }
-    frame.render_widget(
-        Paragraph::new(translate_lines).block(practice_block(" 当前句译文 ", theme)),
-        chunks[2],
-    );
 
-    // 底部提示
+    // 底部提示：规则一行 + 键位两行。
+    //
+    // 键位从键位表里取，和练习页底部的提示同源——用户改绑「播放单词发音」
+    // /「切换翻译」/「切换主题」后，两个练习页的提示一起变，不会一边显示
+    // 新键位、另一边还写着旧键位。
     let (hint, color) = if practice.typing.wrong {
         (" 红色 = 打错的字符 · Backspace 改正", theme.warn)
     } else {
@@ -373,10 +394,29 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
             theme.dim,
         )
     };
+    let key = |action: ShortcutAction| match app.shortcuts.key_for(action) {
+        Some(key) => key.to_display(),
+        None => "（未绑定）".to_string(),
+    };
     let hints = vec![
         Line::from(Span::styled(hint, Style::default().fg(color))),
         Line::from(Span::styled(
-            " Ctrl+P 朗读当前句 · Esc 返回文章列表",
+            format!(
+                " {} 朗读 · {} 译文 · {} 主题 · ? 帮助",
+                key(ShortcutAction::PlayWordPronunciation),
+                key(ShortcutAction::ToggleShowTranslate),
+                key(ShortcutAction::ToggleTheme),
+            ),
+            Style::default().fg(theme.dim),
+        )),
+        // 键位行要整个塞进 60 列的最小终端：超出的部分会被裁掉，
+        // 「Esc 返回列表」这类收尾键位正好落在被裁的位置上。
+        Line::from(Span::styled(
+            format!(
+                " {} 暂停 / 恢复 · {} 保存并返回列表 · Esc 返回列表",
+                crate::ui::TUI_PAUSE_KEY,
+                crate::ui::TUI_EXIT_KEY,
+            ),
             Style::default().fg(theme.dim),
         )),
     ];

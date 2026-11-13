@@ -793,21 +793,14 @@ fn practice_hint_lines(app: &App) -> Vec<String> {
             " {} 翻译 · {} 默写 · {} 暂停 · {} 重学 · {} 换组 · {} 简洁 · {} 返回",
             key(ShortcutAction::ToggleShowTranslate),
             key(ShortcutAction::ToggleDictation),
-            TUI_ONLY_PAUSE_KEY,
+            crate::ui::TUI_PAUSE_KEY,
             key(ShortcutAction::RepeatChapter),
             key(ShortcutAction::NextChapter),
             key(ShortcutAction::ToggleConciseMode),
-            TUI_ONLY_EXIT_KEY,
+            crate::ui::TUI_EXIT_KEY,
         ),
     ]
 }
-
-/// TUI 专有键位：上游没有对应动作，因此不进键位表。
-///
-/// 暂停计时的真实键位是 `Ctrl+,`（见 `App::handle_practice_tui_key`），
-/// `Ctrl+C` 是终端保留键。
-const TUI_ONLY_PAUSE_KEY: &str = "Ctrl+,";
-const TUI_ONLY_EXIT_KEY: &str = "Ctrl+C";
 
 fn hint_line(hints: &str, theme: &Theme) -> Line<'static> {
     Line::from(Span::styled(
