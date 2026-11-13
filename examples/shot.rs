@@ -9,8 +9,8 @@
 //!           articlepractice | dict | stats | settings | shortcuts | help | summary |
 //!           summary-article | edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
-//!   theme: 写入 app.boot.settings.theme 的字符串（dark/light/high-contrast，
-//!          重设计后的自定义主题名也可传；未知名字由 app 自行回退）
+//!   theme: 写入 app.boot.settings.theme 的字符串（内置 dark/light/high-contrast/
+//!          midnight/paper/ikb，自定义主题名也可传；未知名字由 app 自行回退）
 //!
 //! 例：
 //!   cargo run --quiet --example shot -- home 120 40 dark > %TEMP%\\home.json
@@ -510,7 +510,7 @@ fn print_usage() {
          \n\
          screens: {}\n\
          width/height: terminal columns/rows (default 120x40)\n\
-         theme: value written to app.boot.settings.theme (dark/light/high-contrast or custom name)\n\
+         theme: value written to app.boot.settings.theme (dark/light/high-contrast/midnight/paper/ikb or custom name)\n\
          --plain: print monospace text instead of JSON\n\
          \n\
          JSON: width, height, screen, theme, rows. Each cell: sym, fg, bg, bold,\n\

@@ -82,7 +82,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/interaction_fixes.rs` | 28 | 已修复交互缺陷的回归：三个弹层的鼠标命中、主页 `+`/`-` 的像素对齐、滚动指示器不被行 target 抢走、命中矩形与渲染一致 |
 | `tests/focus_nav.rs` | 48 | 所有标签页的键盘焦点：启动/回主页默认选中主按钮（首帧高亮与底栏）、无焦点落点、主页内容区换带不反向与带内左右、每个标签页落地选中内容区、`Tab`/`←`/`↑` 换栏与跨栏、词库/设置/统计/帮助页各自的页面光标移动、弹层与搜索框让位、resize 让焦点失效时不触发动作、底栏文案、高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
 | `tests/articles.rs` | 22 | 书本/文章列表、断句与整篇跟打（空格可省略、错字落位、文章结算口径） |
-| `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/三套主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
+| `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/六套内置主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
 | `tests/resume_cache.rs` | 13 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
 | `tests/shell_nav.rs` | 9 | 外壳导航：宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
@@ -136,7 +136,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 19 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
+仓库 `docs/screenshots/` 的 22 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
@@ -146,6 +146,9 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `home-90x30-dark.png` | `home 90 30 dark`（窄屏外壳；启动首帧默认选中主按钮） |
 | `home-120x40-light.png` | `home 120 40 light` |
 | `home-120x40-high-contrast.png` | `home 120 40 high-contrast` |
+| `home-120x40-midnight.png` | `home 120 40 midnight` |
+| `home-120x40-paper.png` | `home 120 40 paper` |
+| `home-120x40-ikb.png` | `home 120 40 ikb` |
 | `practice-120x40-dark.png` | `practice 120 40 dark` |
 | `dict-120x40-dark.png` | `dict 120 40 dark` |
 | `stats-120x40-dark.png` | `stats 120 40 dark` |

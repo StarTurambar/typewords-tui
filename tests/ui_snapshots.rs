@@ -233,7 +233,7 @@ fn home_uses_theme_surfaces() {
     );
     assert!(
         cells.iter().any(|cell| cell.fg == theme.accent_alt),
-        "应有青色数字/强调"
+        "应有 accent_alt 的次强调数字"
     );
 }
 
@@ -249,7 +249,7 @@ fn home_compact_renders_at_min_size() {
 
 #[test]
 fn all_builtin_themes_render_home() {
-    for theme_name in ["dark", "light", "high-contrast"] {
+    for theme_name in ["dark", "light", "high-contrast", "midnight", "paper", "ikb"] {
         let fixture = common::Fixture::new();
         let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
         app.boot.settings.theme = theme_name.to_string();

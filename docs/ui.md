@@ -69,7 +69,7 @@ ui::render(app, frame)
 | `warn` / `good` / `bad` | 警告 / 正确与成功 / 错误与危险 |
 | `selection` | 列表选中行、统计页「今天」行 |
 
-分工：`src/theme/` 的 `ThemeRegistry` 负责 id、`base` 继承、用户主题加载、`auto` 映射与「未知主题回退深色」告警；`ui/theme.rs` 只做类型转换，并有单测断言默认深色主题的 `bg = Rgb(0x17, 0x17, 0x20)`、`accent = Rgb(0xc9, 0x8e, 0xc7)`。
+分工：`src/theme/` 的 `ThemeRegistry` 负责 id、`base` 继承、用户主题加载、`auto` 映射与「未知主题回退深色」告警；`ui/theme.rs` 只做类型转换，并有单测断言默认深色主题的 `bg = Rgb(0x0a, 0x0a, 0x0a)`、`accent = Rgb(0xfa, 0xb2, 0x83)`。
 
 ## 4. 响应式外壳
 
@@ -356,7 +356,7 @@ ui::render(app, frame)
 | `home_screen_renders` / `home_uses_theme_surfaces` / `home_compact_renders_at_min_size` | 主页文本、`bg`/`panel`/`accent_alt` 表面、60×20 紧凑布局 |
 | `practice_screen_renders_big_word` / `masked_mode_renders_placeholder_blocks` / `typed_letters_are_colored` | 大字方块字符、默写占位符、正确输入用 `theme.good` 着色 |
 | `all_screens_render_without_panic` / `cjk_text_wraps_within_width` | 4 个非主页屏幕在 80×24 与 120×40 下渲染、逐行不超出宽度 |
-| `all_builtin_themes_render_home` / `tiny_terminal_shows_hint` / `overlay_screens_render` / `usage_tips_can_be_hidden` | 三套内置主题背景、`< 60 × 20` 提示、弹层文本、关闭「显示使用提示」后底部提示行消失 |
+| `all_builtin_themes_render_home` / `tiny_terminal_shows_hint` / `overlay_screens_render` / `usage_tips_can_be_hidden` | 六套内置主题背景、`< 60 × 20` 提示、弹层文本、关闭「显示使用提示」后底部提示行消失 |
 | `article_summary_renders_article_labels` | 文章结算弹层用文章口径（文章标题 / 完成 N / M 句 / 错句 / 返回列表按钮）而不是单词会话口径 |
 | `mouse_target_rects_match_rendered_text` / `help_scrolls_at_min_size` | 命中矩形与渲染文本一致、帮助页在小终端可滚动 |
 

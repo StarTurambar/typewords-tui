@@ -1,6 +1,6 @@
 # 主题系统
 
-typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，所有前景/背景都从主题的 13 个颜色 token 取值。程序内置深色、浅色、高对比三套主题，也支持用户把 `*.json` 放进数据目录的 `themes/` 自定义主题。本文说明主题模型、内置主题、选择与优先级、自定义主题格式、颜色语法、token 语义、内部实现与常见问题。
+typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，所有前景/背景都从主题的 13 个颜色 token 取值。程序内置 6 套主题（深色、浅色、高对比，以及午夜墨、纸墨、克莱因蓝三套预设），也支持用户把 `*.json` 放进数据目录的 `themes/` 自定义主题。本文说明主题模型、内置主题、选择与优先级、自定义主题格式、颜色语法、token 语义、内部实现与常见问题。
 
 > 适用范围：`src/theme/`（主题配置层）、`src/ui/theme.rs`（渲染映射）、`<home>/themes/*.json`、`--theme` 参数与设置页主题行、`tw doctor` 的主题输出；对应版本：typewords-tui 0.2.0。
 
@@ -10,7 +10,7 @@ typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，
 
 | 组成 | 说明 |
 | --- | --- |
-| `id` | 主题标识：内置主题为 `dark`/`light`/`high-contrast`，自定义主题为文件名转小写 |
+| `id` | 主题标识：内置主题为 `dark`/`light`/`high-contrast`/`midnight`/`paper`/`ikb`，自定义主题为文件名转小写 |
 | `name` | 显示名，如「深色」「高对比」或自定义的 `Ocean`；为空时回退 id |
 | `base` | 基础模式 `BaseMode`：`Dark`/`Light`/`HighContrast`，决定未覆盖 token 的继承来源 |
 | `colors` | 13 个颜色 token（见第 6 节） |
@@ -28,33 +28,44 @@ typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，
 
 | id | 名称 | 风格 | 适用场景 |
 | --- | --- | --- | --- |
-| `dark` | 深色 | 深灰蓝底 + 粉紫/青色强调 | 默认主题；深色终端、夜间使用 |
-| `light` | 浅色 | 白/浅灰底 + 深紫/深青强调 | 浅色终端、明亮环境 |
+| `dark` | 深色 | 曜石：opencode 式中性近黑 + 暖橙强调 | 默认主题；深色终端、夜间使用 |
+| `light` | 浅色 | 靛蓝瓷：归藏瓷白纸 + 单一靛蓝强调 | 默认浅色；浅色终端、明亮环境 |
 | `high-contrast` | 高对比 | 纯黑底 + 纯白文字 + ANSI 亮色强调 | 不支持真彩色（24-bit RGB）的终端、需要最大对比度的场景 |
+| `midnight` | 午夜墨 | 归藏 midnight-ink：暖黑纸 + 古金强调 | 深色可选预设；喜欢暖黑/杂志感 |
+| `paper` | 纸墨 | 归藏 ink-classic：宣纸 + 墨色强调 | 浅色可选预设；编辑部/阅读感（练习页「待输入字母」区分度较弱） |
+| `ikb` | 克莱因蓝 | 归藏瑞士风：纸白 + 克莱因蓝 + 安全橙 | 浅色可选预设；高对比、强个性 |
 
 内置主题的完整色板（`src/theme/builtin.rs` 的 `builtin_specs`）：
 
-| token | dark | light | high-contrast |
-| --- | --- | --- | --- |
-| `bg` | `#171720` | `#f7f7f9` | `black` |
-| `panel` | `#1e1e2b` | `#ffffff` | `black` |
-| `element` | `#262637` | `#ececf2` | `black` |
-| `border` | `#34344a` | `#d9dae3` | `white` |
-| `fg` | `#d7d9e6` | `#21222b` | `white` |
-| `muted` | `#8a8ca3` | `#4f5262` | `gray` |
-| `dim` | `#6d7189` | `#656a7a` | `gray` |
-| `accent` | `#c98ec7` | `#93418a` | `lightmagenta` |
-| `accent_alt` | `#7fd3d8` | `#176f75` | `lightcyan` |
-| `warn` | `#e2b86b` | `#8a6100` | `lightyellow` |
-| `good` | `#9ece6a` | `#2f7d4f` | `lightgreen` |
-| `bad` | `#e06c75` | `#b23a48` | `lightred` |
-| `selection` | `#2a2b40` | `#e9e7f1` | `black` |
+| token | dark | light | high-contrast | midnight | paper | ikb |
+| --- | --- | --- | --- | --- | --- | --- |
+| `bg` | `#0a0a0a` | `#f1f3f5` | `black` | `#0e0d0c` | `#f1efea` | `#fafaf8` |
+| `panel` | `#141414` | `#fbfcfd` | `black` | `#1a1714` | `#fbf9f5` | `#ffffff` |
+| `element` | `#202020` | `#dde3e9` | `black` | `#2a241b` | `#e1dacb` | `#e8e8e2` |
+| `border` | `#444444` | `#b8c0ca` | `white` | `#3b352d` | `#c9c3b5` | `#d4d4d2` |
+| `fg` | `#eeeeee` | `#0a1f3d` | `white` | `#ece2cf` | `#0a0a0b` | `#0a0a0a` |
+| `muted` | `#8a8a8a` | `#5f6d78` | `gray` | `#a89b84` | `#4a463f` | `#525252` |
+| `dim` | `#757575` | `#6f7b88` | `gray` | `#7d7260` | `#6d675d` | `#737373` |
+| `accent` | `#fab283` | `#315d93` | `lightmagenta` | `#d4a04a` | `#111111` | `#002fa7` |
+| `accent_alt` | `#5c9cf5` | `#43546d` | `lightcyan` | `#9fb6c6` | `#315d93` | `#c2410c` |
+| `warn` | `#e5c07b` | `#8a6100` | `lightyellow` | `#e8874f` | `#9b5a2e` | `#a16207` |
+| `good` | `#7fd88f` | `#2e6b4f` | `lightgreen` | `#88c6a6` | `#2e6b4f` | `#0f7a4a` |
+| `bad` | `#e06c75` | `#a63a43` | `lightred` | `#d97a72` | `#a63a43` | `#b91c1c` |
+| `selection` | `#2a2a2a` | `#d2deea` | `black` | `#2d271e` | `#dcd5c5` | `#e2e7f2` |
 
 ![深色主题主页](screenshots/home-120x40-dark.png)
 
 ![浅色主题主页](screenshots/home-120x40-light.png)
 
 ![高对比主题主页](screenshots/home-120x40-high-contrast.png)
+
+![午夜墨预设主页](screenshots/home-120x40-midnight.png)
+
+![纸墨预设主页](screenshots/home-120x40-paper.png)
+
+![克莱因蓝预设主页](screenshots/home-120x40-ikb.png)
+
+深色 `dark` 取自 opencode 默认终端主题：中性近黑表面阶梯（`#0a0a0a → #141414 → #202020`）+ 暖橙主色 `#fab283`，配蓝色次强调；浅色 `light` 取自归藏「靛蓝瓷」：瓷白纸 + 单一靛蓝 `#315d93`。`midnight`/`paper`/`ikb` 分别是归藏杂志风的午夜墨、墨水经典与瑞士风 IKB。所有 RGB 主题都按 WCAG 校验过正文与焦点块对比度；`paper` 的 `accent`（`#111111`）与 `fg` 同为墨色，练习页「下一个待输入字母」区分度较弱，所以默认浅色仍用 `light`。
 
 高对比主题有两个刻意设计：选中行的 `selection` 与 `bg` 同为黑色，选中态靠左侧 `accent` 强调条 + 粗体文字区分；块面（`panel`/`element`）也都用纯黑，避免在 ANSI 调色板里出现低对比度背景。
 
@@ -71,7 +82,7 @@ typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，
 设置页的循环顺序由 `ThemeRegistry::cycle_ids` 决定：
 
 ```text
-auto → dark → light → high-contrast → 自定义主题（按文件名/路径排序）→ 回到 auto
+auto → dark → light → high-contrast → midnight → paper → ikb → 自定义主题（按文件名/路径排序）→ 回到 auto
 ```
 
 两个字符串匹配细节：
@@ -89,6 +100,9 @@ auto → dark → light → high-contrast → 自定义主题（按文件名/路
   - dark             深色
   - light            浅色
   - high-contrast    高对比
+  - midnight         午夜墨
+  - paper            纸墨
+  - ikb              克莱因蓝
   - ocean            Ocean
   ! C:\Users\...\themes\bad.json: JSON 解析失败: ...
 ```
@@ -134,7 +148,7 @@ auto → dark → light → high-contrast → 自定义主题（按文件名/路
 | 长度 1–32 | 按文件名（不含 `.json`）计；空格、点、括号等不在字符集内的字符会被拒绝 |
 | 字符集 | 只允许 ASCII 字母、数字、`_`、`-` |
 | 大小写 | id 会转小写；`name` 保留原始大小写 |
-| 保留名 | `auto`、`dark`、`light`、`high-contrast` 不能作为文件名（比较前已转小写，`Dark.json` 同样被拒绝） |
+| 保留名 | `auto`、`dark`、`light`、`high-contrast`、`midnight`、`paper`、`ikb` 不能作为文件名（比较前已转小写，`Dark.json` 同样被拒绝） |
 
 ### 4.4 校验失败的行为
 
@@ -198,7 +212,7 @@ auto → dark → light → high-contrast → 自定义主题（按文件名/路
 | 写法 | 示例 | 说明 |
 | --- | --- | --- |
 | `#rgb` | `#abc` | 每位重复一次，等价于 `#aabbcc` |
-| `#rrggbb` | `#171720` | 标准 6 位十六进制，大小写均可 |
+| `#rrggbb` | `#0a0a0a` | 标准 6 位十六进制，大小写均可 |
 
 ### 5.2 ANSI 颜色名
 
@@ -279,9 +293,9 @@ builtin_specs()（内置 3 套） / load_user_themes(dir)（用户 *.json） / -
 
 ### 7.1 配置层
 
-- `builtin_specs() -> Vec<ThemeSpec>`：返回 3 个内置主题，`DEFAULT_THEME_ID = "dark"`；颜色用 `const fn rgb(u32)` / `ansi(AnsiColor)` 构造。代码里没有名为 `BuiltinSpec` 的类型，内置主题与自定义主题共用 `ThemeSpec`。
+- `builtin_specs() -> Vec<ThemeSpec>`：返回 6 个内置主题（`dark`、`light`、`high-contrast`、`midnight`、`paper`、`ikb`），`DEFAULT_THEME_ID = "dark"`；颜色用 `const fn rgb(u32)` / `ansi(AnsiColor)` 构造。代码里没有名为 `BuiltinSpec` 的类型，内置主题与自定义主题共用 `ThemeSpec`。
 - `ThemeSpec::label()`：`name.trim()` 非空则用 name，否则用 id。
-- `ThemeRegistry`：`BTreeMap<id, ThemeSpec>` + 有序 `order` + `warnings`。内置主题先按 `dark/light/high-contrast` 入表，自定义主题按文件名（路径）排序追加。
+- `ThemeRegistry`：`BTreeMap<id, ThemeSpec>` + 有序 `order` + `warnings`。内置主题先按 `dark/light/high-contrast/midnight/paper/ikb` 入表，自定义主题按文件名（路径）排序追加。
 
 | 方法 | 行为 |
 | --- | --- |
@@ -320,7 +334,7 @@ builtin_specs()（内置 3 套） / load_user_themes(dir)（用户 *.json） / -
 - `src/theme/load.rs`：`loads_partial_custom_theme_inheriting_dark`、`rejects_invalid_files_and_reserved_ids`（4 个坏文件 = 4 条告警）、`rejects_unknown_base_and_unknown_token`、`uppercase_filename_is_normalized_to_lowercase_id`。
 - `src/ui/theme.rs`：`maps_rgb_values`、`maps_ansi_values`。
 - `tests/app_drive.rs`：`custom_theme_cycles_and_renders`、`cli_theme_override_is_applied`。
-- `tests/ui_snapshots.rs`：`all_builtin_themes_render_home`、`home_uses_theme_surfaces`（三套内置主题的背景/面板/强调色确实出现在缓冲区里）。
+- `tests/ui_snapshots.rs`：`all_builtin_themes_render_home`、`home_uses_theme_surfaces`（六套内置主题的背景/面板/强调色确实出现在缓冲区里）。
 
 ## 8. 常见问题
 

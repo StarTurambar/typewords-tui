@@ -117,7 +117,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
 | 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
 | 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
-| 外观 | 主题 | CSS 变量 + `hooks/theme.ts`（light / dark / auto） | 13 token、3 套内置 + 自定义 JSON | 行为不同 | TUI 独有自定义主题；`auto` 等同深色，不跟随系统 |
+| 外观 | 主题 | CSS 变量 + `hooks/theme.ts`（light / dark / auto） | 13 token、6 套内置 + 自定义 JSON | 行为不同 | TUI 独有自定义主题；`auto` 等同深色，不跟随系统 |
 | 外观 | 响应式布局 | CSS 断点 + 移动端顶部导航 | 终端宽窄外壳（100 / 120 列阈值，60×20 下限） | 行为不同 | 见第 6 节与 [渲染层](ui.md) |
 | 外观 | 动画 / 过渡 | SCSS 动画、Vue Transition、Shepherd Tour | 无 | 缺失 | 终端字符渲染无法对等（见第 9 节） |
 | 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 可配置键位 + 终端鼠标（点击/滚轮） | 已对齐 | 见 4.2 与 4.6 |
@@ -298,7 +298,7 @@ Web 备份 data.json                       TUI 数据目录
 
 | 能力 | 实现位置 | 说明与限制 |
 | --- | --- | --- |
-| 自定义主题 | `src/theme/` | 13 个颜色 token、三套内置主题、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
+| 自定义主题 | `src/theme/` | 13 个颜色 token、六套内置主题、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
 | 鼠标 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs` | 侧栏/按钮/列表点击与滚轮滚动；练习页不响应鼠标（结算弹层除外）；终端鼠标捕获后需 Shift+拖拽复制文本 |
 | 标签页键盘焦点导航 | `src/ui/focus.rs`、`src/app/focus.rs`、`src/ui/target.rs` | 所有套外壳页面（主页 / 文章 / 词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 帮助）共用两栏焦点：宽屏侧栏竖向（`↑`/`↓` 逐项、含「退出」，`→` 回内容区）、窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；`Tab`/`Shift+Tab` 固定换栏。主页内容区按视觉行分带；其它页面的内容区就是页面自己的光标（`FocusId::Page`），`↑`/`↓` 移动光标、`←`/`→` 执行页面横向操作（文章换栏、统计选日期），到边停不回绕；宽屏内容区左边缘 `←`、窄屏最顶部 `↑` 进导航栏。焦点存稳定身份，导航栏与主页内容区在窗口缩放后失效时 `Enter` 只清空并提示；进入任何标签页默认选中内容区（主页是「开始 / 继续学习」主按钮，首帧即高亮），底栏显示「选中 X」。上游只有鼠标 / 触屏，键盘没有对应的「选中页面元素」操作 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；< 60 × 20 只渲染提示 |

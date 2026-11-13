@@ -406,8 +406,9 @@ fn custom_theme_cycles_and_renders() {
     assert!(app.boot.themes.contains("ocean"), "应加载自定义主题");
     press(&mut app, KeyCode::Char('s'));
     goto_setting(&mut app, "theme");
-    for _ in 0..4 {
-        press(&mut app, KeyCode::Enter); // auto -> dark -> light -> high-contrast -> ocean
+    // auto -> dark -> light -> high-contrast -> midnight -> paper -> ikb -> ocean
+    for _ in 0..7 {
+        press(&mut app, KeyCode::Enter);
     }
     assert_eq!(app.boot.settings.theme, "ocean");
     assert_eq!(app.theme().bg, Color::Rgb(0x0b, 0x10, 0x20));
@@ -491,7 +492,7 @@ fn cli_theme_override_is_applied() {
     cli.theme = Some("light".to_string());
     let app = app::build_for_test(fixture.paths(), cli).unwrap();
     assert_eq!(app.boot.settings.theme, "light");
-    assert_eq!(app.theme().bg, Color::Rgb(0xf7, 0xf7, 0xf9));
+    assert_eq!(app.theme().bg, Color::Rgb(0xf1, 0xf3, 0xf5));
 }
 
 #[test]

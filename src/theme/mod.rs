@@ -308,8 +308,8 @@ mod tests {
             ThemeColor::Rgb(Rgb::new(0xaa, 0xbb, 0xcc))
         );
         assert_eq!(
-            ThemeColor::parse("#171720").unwrap(),
-            ThemeColor::Rgb(Rgb::new(0x17, 0x17, 0x20))
+            ThemeColor::parse("#0a0a0a").unwrap(),
+            ThemeColor::Rgb(Rgb::new(0x0a, 0x0a, 0x0a))
         );
         assert_eq!(
             ThemeColor::parse("LightCyan").unwrap(),

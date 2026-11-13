@@ -7,7 +7,15 @@ use serde::Deserialize;
 use super::builtin::builtin_specs;
 use super::{BaseMode, ThemeColor, ThemeColors, ThemeSpec};
 
-const RESERVED_IDS: &[&str] = &["auto", "dark", "light", "high-contrast"];
+const RESERVED_IDS: &[&str] = &[
+    "auto",
+    "dark",
+    "light",
+    "high-contrast",
+    "midnight",
+    "paper",
+    "ikb",
+];
 
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -179,10 +187,10 @@ mod tests {
             spec.colors.bg,
             ThemeColor::Rgb(super::super::Rgb::new(0x0b, 0x10, 0x20))
         );
-        // 未覆盖的 token 继承 dark 的 panel
+        // 未覆盖的 token 继承 dark 的 panel（曜石 #141414）
         assert_eq!(
             spec.colors.panel,
-            ThemeColor::Rgb(super::super::Rgb::new(0x1e, 0x1e, 0x2b))
+            ThemeColor::Rgb(super::super::Rgb::new(0x14, 0x14, 0x14))
         );
     }
 

@@ -75,8 +75,8 @@ mod tests {
     #[test]
     fn maps_rgb_values() {
         let theme = Theme::from_spec(&default_dark());
-        assert_eq!(theme.bg, Color::Rgb(0x17, 0x17, 0x20));
-        assert_eq!(theme.accent, Color::Rgb(0xc9, 0x8e, 0xc7));
+        assert_eq!(theme.bg, Color::Rgb(0x0a, 0x0a, 0x0a));
+        assert_eq!(theme.accent, Color::Rgb(0xfa, 0xb2, 0x83));
     }
 
     #[test]

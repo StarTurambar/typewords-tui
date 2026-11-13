@@ -126,7 +126,7 @@ tw             # 2. 启动界面
 | `--home DIR` | 数据目录（存档、导入词库、主题） | 全局参数；等价 `TYPEWORDS_HOME` |
 | `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`） | 会写入当前学习词库；找不到词库时报错退出 |
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 额外接受 `smart`（= system）与中文别名；退出时随设置保存 |
-| `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
+| `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
 | `--seed N` | 固定随机种子（复现问题用） | 影响洗牌、选择题与随机复习；日常可省略 |
 | `--reset-practice` | 启动前清空练习缓存 | 清 `practice-word.json` 与 `practice-article.json`，不动词典与设置；对 `doctor`/`task` 无效 |
 | `-h` / `--help`、`-V` / `--version` | 帮助与版本 | 由 clap 生成，`--version` 输出 `tw 0.2.0` |
@@ -464,7 +464,7 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 | `Ctrl+E` | 显示 / 隐藏例句与词源 | 总开关；词源还需设置项开启 |
 | `Ctrl+G` | 切换简洁模式 | 同时隐藏底部阶段条与右侧词表 |
 | `Ctrl+O` | 编辑当前词的笔记 | 弹层里输入文字，Enter 保存、Esc 取消；清空即删除 |
-| `Ctrl+Q` | 切换主题 | 在深色 / 浅色 / 高对比 / 自定义主题之间循环 |
+| `Ctrl+Q` | 切换主题 | 在深色 / 浅色 / 高对比 / 午夜墨 / 纸墨 / 克莱因蓝 / 自定义主题之间循环 |
 | `Ctrl+C` | 保存并返回主页 | 不是退出程序 |
 | `Ctrl+→`（别名 `Ctrl+N`） | 下一个词 | 组合键被吞时用别名 |
 | `Ctrl+←` | 上一个词 | 已是第一个时提示 |
@@ -596,13 +596,13 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 
 ## 主题
 
-- **内置主题**：`dark` 深色（默认，`auto` 等同深色）、`light` 浅色、`high-contrast` 高对比（纯 ANSI 颜色，适合低色彩终端）。
+- **内置主题**：`dark` 深色（默认，`auto` 等同深色，opencode 式近黑 + 暖橙）、`light` 浅色（归藏靛蓝瓷）、`high-contrast` 高对比（纯 ANSI 颜色，适合低色彩终端），以及预设 `midnight` 午夜墨、`paper` 纸墨、`ikb` 克莱因蓝。
 
 | 深色 | 浅色 | 高对比 |
 | --- | --- | --- |
 | ![深色](screenshots/home-120x40-dark.png) | ![浅色](screenshots/home-120x40-light.png) | ![高对比](screenshots/home-120x40-high-contrast.png) |
 
-- **切换**：设置页「主题」一行循环 `auto` → 内置主题 → 自定义主题（按文件名排序）；启动参数 `--theme NAME` 可覆盖（退出时随设置保存，未知名字回退深色并 Toast）。
+- **切换**：设置页「主题」一行循环 `auto` → 内置主题（深色、浅色、高对比、午夜墨、纸墨、克莱因蓝）→ 自定义主题（按文件名排序）；启动参数 `--theme NAME` 可覆盖（退出时随设置保存，未知名字回退深色并 Toast）。
 - **自定义主题**：把 `*.json` 放进 `<home>/themes/`，启动时加载，新增或修改后需重启进程；文件校验失败只跳过该文件并告警，`tw doctor` 可查看主题清单与告警。
 - 颜色 token、文件格式、校验规则与排错见 [主题系统](themes.md)。
 

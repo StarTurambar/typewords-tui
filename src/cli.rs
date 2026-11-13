@@ -32,7 +32,7 @@ pub struct Cli {
     /// 启动时覆盖练习模式（system/free/review/shuffle/identify/dictation/listen）
     #[arg(long, value_name = "MODE")]
     pub mode: Option<String>,
-    /// 启动时覆盖主题（dark/light/high-contrast 或 <home>/themes 下的文件名）
+    /// 启动时覆盖主题（内置 dark/light/high-contrast/midnight/paper/ikb 或 <home>/themes 下的文件名）
     #[arg(long, value_name = "NAME")]
     pub theme: Option<String>,
     /// 随机种子（复现问题用）

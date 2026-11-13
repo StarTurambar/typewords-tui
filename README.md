@@ -25,7 +25,7 @@
 - **统计**：结算弹层（含错词 Top10 与本周记录）、主页今日/累计概览、统计页月历、按日明细与按词典视图。
 - **可配置快捷键**：42 个动作可在设置页改绑，存于 `shortcutKeyMap`，与上游同构。
 - **音频**：键音与对错提示音用终端响铃，发音与朗读用系统 TTS（Windows / macOS / Linux），可选切换到有道发音接口。
-- **设置与主题**：设置页覆盖练习模式、每日词数、复习比例、重复次数、FSRS 阈值、音频与快捷键等；内置深色/浅色/高对比三套主题，支持 `<home>/themes/*.json` 自定义主题。
+- **设置与主题**：设置页覆盖练习模式、每日词数、复习比例、重复次数、FSRS 阈值、音频与快捷键等；内置深色/浅色/高对比 + 午夜墨/纸墨/克莱因蓝共 6 套主题，支持 `<home>/themes/*.json` 自定义主题。
 - **终端交互**：响应式外壳（宽屏侧栏 / 窄屏顶栏）、可点击的导航/按钮/列表、滚轮滚动；60 × 20 起可用。
 - **断点续练**：练习游标与统计快照写入本地 JSON，重启恢复到同一词、同一阶段；退出练习页回主页再按 `Enter` 也会接着练。文章跟打同样支持断点续学（句子进度与用时接得上）。
 - **工具命令**：`tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`，便于排障、脚本化预览、导入词库与网页版备份互通。
@@ -86,7 +86,7 @@ tw task     # 只预览今日任务，不进入界面
 | `tw --home DIR` | 指定数据目录（等价于环境变量 `TYPEWORDS_HOME`） |
 | `tw --dict ID` | 启动后直接进入指定词库（id 或 enName，如 `cet4`） |
 | `tw --mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` |
-| `tw --theme NAME` | 覆盖主题：`dark/light/high-contrast/auto` 或自定义主题文件名 |
+| `tw --theme NAME` | 覆盖主题：`dark/light/high-contrast/midnight/paper/ikb/auto` 或自定义主题文件名 |
 | `tw --seed N` | 固定随机种子（复现问题用） |
 | `tw --reset-practice` | 启动前清空练习缓存 |
 
