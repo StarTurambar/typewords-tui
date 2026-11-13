@@ -16,7 +16,7 @@ cargo run --locked -- doctor          # 打印数据目录/资源目录/词库/�
 cargo run --locked -- task            # 只预览今日任务，不进 TUI
 cargo run --locked -- --home target/tmp/home --seed 42   # 隔离数据目录 + 固定随机种子
 
-cargo test --locked                   # 全部测试（40 单测 + 55 集成）
+cargo test --locked                   # 全部测试（95 单测 + 259 集成）
 cargo test --locked --test app_drive practice_progress_persists_and_resumes  # 单个集成测试
 cargo test --locked --lib domain::typing                                     # 单个模块的单测
 

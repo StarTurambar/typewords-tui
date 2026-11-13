@@ -310,6 +310,35 @@ pub enum SummaryKind {
     },
 }
 
+/// 结算弹层的按钮焦点。
+///
+/// 三个按钮固定是「继续 / 重学 / 主页」（文章结算是「返回列表 / 重打本篇 /
+/// 主页」），方向键在它们之间移动，到边停、不回绕。默认选中「继续」，与修复前
+/// 「`Enter` 即继续」的默认行为一致。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SummaryButton {
+    #[default]
+    Continue,
+    Relearn,
+    Home,
+}
+
+impl SummaryButton {
+    /// 按方向移动焦点（`delta < 0` 向左/上，`> 0` 向右/下）；到边停、不回绕。
+    pub(crate) fn shifted(self, delta: i32) -> Self {
+        let index = match self {
+            Self::Continue => 0,
+            Self::Relearn => 1,
+            Self::Home => 2,
+        };
+        match (index + delta).clamp(0, 2) {
+            0 => Self::Continue,
+            1 => Self::Relearn,
+            _ => Self::Home,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SummaryData {
     /// 结算类型：单词会话与文章跟打的指标、按钮文案和去向都不同。
@@ -326,6 +355,10 @@ pub struct SummaryData {
     pub wrong_top: Vec<(String, i64)>,
     /// 本周周一~周日的学习记录（只统计当前词典，与上游口径一致）
     pub week_days: [Option<DayTotals>; 7],
+    /// 结算按钮焦点：`←`/`→` 等方向键移动，`Enter` 执行选中的按钮。
+    ///
+    /// 每次结算都重新构造 `SummaryData`，因此焦点自然回到默认的「继续」。
+    pub focus: SummaryButton,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -346,10 +379,50 @@ pub fn confirm_message(action: ConfirmAction) -> String {
     }
 }
 
+/// 确认弹层的按钮焦点。
+///
+/// 弹层里固定两个按钮「确认 / 取消」，方向键只能在这两者之间移动，到边停。
+/// 默认选中「确认」，与修复前「`Enter` 即确认」的默认行为一致。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConfirmFocus {
+    #[default]
+    Accept,
+    Cancel,
+}
+
+impl ConfirmFocus {
+    /// 按方向移动焦点（`delta < 0` 向左/上，`> 0` 向右/下）；到边停、不回绕。
+    pub(crate) fn shifted(self, delta: i32) -> Self {
+        let index = if self == Self::Accept { 0 } else { 1 };
+        match (index + delta).clamp(0, 1) {
+            0 => Self::Accept,
+            _ => Self::Cancel,
+        }
+    }
+}
+
+/// 确认弹层：消息 + 待执行动作 + 按钮焦点。
 #[derive(Clone, Debug)]
 pub struct ConfirmState {
     pub message: String,
     pub action: ConfirmAction,
+    /// 当前选中的按钮：`←`/`↑`/`Shift+Tab` 到「确认」，`→`/`↓`/`Tab` 到「取消」。
+    pub focus: ConfirmFocus,
+}
+
+impl ConfirmState {
+    pub fn new(message: impl Into<String>, action: ConfirmAction) -> Self {
+        Self {
+            message: message.into(),
+            action,
+            focus: ConfirmFocus::default(),
+        }
+    }
+
+    /// 移动按钮焦点（`-1` → 确认、`+1` → 取消），到边停、不回绕。
+    pub fn move_focus(&mut self, delta: i32) {
+        self.focus = self.focus.shifted(delta);
+    }
 }
 
 pub struct App {
@@ -1133,6 +1206,8 @@ impl App {
             complete,
             wrong_top,
             week_days,
+            // 新结算的按钮焦点回到默认的「继续」。
+            focus: SummaryButton::default(),
         });
         self.save_dict_now();
         // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
@@ -1827,6 +1902,7 @@ impl App {
             complete: true,
             wrong_top: Vec::new(),
             week_days: [None; 7],
+            focus: SummaryButton::default(),
         });
         // 单词测试没有练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。
@@ -2508,6 +2584,7 @@ impl App {
             complete: done >= length,
             wrong_top: Vec::new(),
             week_days,
+            focus: SummaryButton::default(),
         });
         // 文章跟打没有单词练习会话，结算后要回主页——停在 `Screen::Practice`
         // 会渲染成一个没有会话的空白页，且没有任何退路。

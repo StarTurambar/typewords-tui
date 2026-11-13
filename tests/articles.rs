@@ -423,12 +423,13 @@ fn the_article_summary_reports_article_progress_instead_of_dictionary_progress()
     );
     assert!(!text.contains("新词"), "文章结算不该出现新词:\n{text}");
     assert!(!text.contains(" 0 / 2"), "不应再出现占位的 0 / N:\n{text}");
+    assert!(text.contains("返回列表"), "主按钮应回文章列表:\n{text}");
+    assert!(text.contains("重打本篇"), "重学按钮应重打本篇:\n{text}");
+    assert!(text.contains("主页"), "应保留回主页按钮:\n{text}");
     assert!(
-        text.contains("Enter 返回列表"),
-        "主按钮应回文章列表:\n{text}"
+        text.contains("←/→ 选择 · Enter 确认"),
+        "结算按钮应提示方向键选中:\n{text}"
     );
-    assert!(text.contains("r 重打本篇"), "重学按钮应重打本篇:\n{text}");
-    assert!(text.contains("q 主页"), "应保留回主页按钮:\n{text}");
 }
 
 /// 文章结算的「错句」按句统计：一句打错只算一句，正确率按句算。

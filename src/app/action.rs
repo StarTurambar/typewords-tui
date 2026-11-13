@@ -2,7 +2,7 @@
 
 use chrono::Datelike;
 
-use super::{App, ConfirmAction, ConfirmState, FocusDir, Screen};
+use super::{App, ConfirmAction, ConfirmFocus, ConfirmState, FocusDir, Screen, SummaryButton};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -121,10 +121,18 @@ pub enum Action {
     // 练习
     PracticeGotoWord(usize),
     // 结算
+    /// 结算弹层：方向键移动按钮焦点（`-1` 向左/上、`+1` 向右/下，到边停）。
+    SummaryMove(i32),
+    /// 结算弹层：执行当前选中的按钮。
+    SummaryActivate,
     SummaryContinue,
     SummaryRelearn,
     SummaryHome,
     // 确认
+    /// 确认弹层：方向键移动按钮焦点（`-1` 向「确认」、`+1` 向「取消」，到边停）。
+    ConfirmMove(i32),
+    /// 确认弹层：执行当前选中的按钮。
+    ConfirmActivate,
     ConfirmAccept,
     ConfirmCancel,
     // 输入
@@ -144,10 +152,10 @@ impl App {
             Action::Navigate(screen) => self.navigate_to(screen),
             Action::Back => self.back(),
             Action::QuitRequest => {
-                self.confirm = Some(ConfirmState {
-                    message: super::confirm_message(ConfirmAction::Quit),
-                    action: ConfirmAction::Quit,
-                });
+                self.confirm = Some(ConfirmState::new(
+                    super::confirm_message(ConfirmAction::Quit),
+                    ConfirmAction::Quit,
+                ));
             }
             Action::StartPractice => self.start_practice(),
             Action::StartFreePractice => self.start_free_practice(),
@@ -250,9 +258,34 @@ impl App {
             Action::ShortcutReset => self.reset_shortcut_binding(),
             Action::ShortcutResetAll => self.reset_all_shortcut_bindings(),
             Action::PracticeGotoWord(index) => self.goto_practice_word(index),
+            Action::SummaryMove(delta) => {
+                if let Some(summary) = self.summary.as_mut() {
+                    summary.focus = summary.focus.shifted(delta);
+                }
+            }
+            // Enter 执行的是「当前选中的按钮」，与鼠标点同一个按钮等价；
+            // 结算刚弹出时焦点是「继续」，因此旧的 Enter 语义不变。
+            Action::SummaryActivate => match self.summary.as_ref().map(|summary| summary.focus) {
+                Some(SummaryButton::Continue) => self.continue_after_summary(),
+                Some(SummaryButton::Relearn) => self.relearn_after_summary(),
+                Some(SummaryButton::Home) => self.summary_home(),
+                None => {}
+            },
             Action::SummaryContinue => self.continue_after_summary(),
             Action::SummaryRelearn => self.relearn_after_summary(),
             Action::SummaryHome => self.summary_home(),
+            Action::ConfirmMove(delta) => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    confirm.move_focus(delta);
+                }
+            }
+            // 默认焦点在「确认」，所以 Enter 仍是「确认」；焦点移到「取消」后
+            // 再按 Enter 就是取消，不会误执行危险动作。
+            Action::ConfirmActivate => match self.confirm.as_ref().map(|confirm| confirm.focus) {
+                Some(ConfirmFocus::Accept) => self.confirm_accept(),
+                Some(ConfirmFocus::Cancel) => self.confirm = None,
+                None => {}
+            },
             Action::ConfirmAccept => self.confirm_accept(),
             Action::ConfirmCancel => self.confirm = None,
             Action::EditSave => self.edit_save(),
@@ -804,10 +837,7 @@ impl App {
                 });
             }
             super::SettingKind::Action(action) => {
-                self.confirm = Some(ConfirmState {
-                    message: super::confirm_message(action),
-                    action,
-                });
+                self.confirm = Some(ConfirmState::new(super::confirm_message(action), action));
             }
             super::SettingKind::Shortcuts => {
                 self.open_shortcuts();

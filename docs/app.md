@@ -76,8 +76,8 @@
 ### 2.3 提示与弹层数据
 
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
-- `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action`，文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。
-- `SummaryData`：`kind: SummaryKind`（`Word`（默认）/ `Article { article_id, title }`）、`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`。`Word` 是单词会话（`finish_session`）与单词测试（`finish_word_test`）的口径：`last_learn_index` / `length` / `complete` 来自当前学习词典的总进度，`wrong` 是本轮错词数；`Article` 是文章跟打（`finish_article_practice`）的口径：`last_learn_index` 是完成句数、`length` 是总句数、`wrong` 是错句数（出现过错误的句子数）、`review` 固定 0——**文章结算的指标是句数而不是词数**，没有「新词 / 复习」维度；`article_id` / `title` 供结算文案与「重打本篇」使用。
+- `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action` + `focus: ConfirmFocus`（`Accept` / `Cancel`，默认 `Accept`），文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。方向键（含 `j` / `k` 别名）/ `Tab` 在「确认 / 取消」之间移动选中（到边停、不回绕），`Enter` / 空格执行当前选中的按钮。
+- `SummaryData`：`kind: SummaryKind`（`Word`（默认）/ `Article { article_id, title }`）、`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`、`focus: SummaryButton`（`Continue` / `Relearn` / `Home`，默认 `Continue`）。`Word` 是单词会话（`finish_session`）与单词测试（`finish_word_test`）的口径：`last_learn_index` / `length` / `complete` 来自当前学习词典的总进度，`wrong` 是本轮错词数；`Article` 是文章跟打（`finish_article_practice`）的口径：`last_learn_index` 是完成句数、`length` 是总句数、`wrong` 是错句数（出现过错误的句子数）、`review` 固定 0——**文章结算的指标是句数而不是词数**，没有「新词 / 复习」维度；`article_id` / `title` 供结算文案与「重打本篇」使用。`focus` 是结算按钮焦点：方向键（含 `j` / `k` 别名）/ `Tab` 在三个按钮之间移动（到边停、不回绕），`Enter` / 空格执行当前选中的按钮；每次结算都重新构造 `SummaryData`，焦点自然回到默认的「继续」。
 - `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 对应设置页「复习 → 每日词数」行（`daily_words`），保存时夹在 `1..=词表长度` 并写 `dict.json` 的当前学习词典，`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
 
 ### 2.4 设置表与 `SettingKind`
@@ -246,8 +246,10 @@ app.save_all()
 | 弹层 | 键 → `Action` |
 | --- | --- |
 | 输入 `edit` | `Esc`→`EditCancel`；`Enter`→`EditSave`；`Backspace`→`EditBackspace`；ASCII 数字→`EditChar`；其它忽略 |
-| 确认 `confirm` | `y`/`Y`/`Enter`→`ConfirmAccept`；**其它任意键**→`ConfirmCancel` |
-| 结算 `summary` | `Enter`/`Space`→`SummaryContinue`；`r`→`SummaryRelearn`；`q`/`Esc`→`SummaryHome`；其它忽略。同一组键的含义由 `SummaryData.kind` 决定：单词结算是「继续 / 重学 / 主页」，文章结算是「返回文章列表 / 重打本篇 / 主页」（见 7.5） |
+| 确认 `confirm` | `←`/`↑`/`k`/`Shift+Tab`→`ConfirmMove(-1)`、`→`/`↓`/`j`/`Tab`→`ConfirmMove(1)`：在「确认 / 取消」之间移动按钮焦点（到边停、不回绕）；`Enter`/`Space`→`ConfirmActivate`：执行当前选中的按钮；`y`/`Y`→`ConfirmAccept`；`n`/`N`/`Esc`→`ConfirmCancel`；**其它任意键**仍→`ConfirmCancel` |
+| 结算 `summary` | `←`/`↑`/`k`/`Shift+Tab`→`SummaryMove(-1)`、`→`/`↓`/`j`/`Tab`→`SummaryMove(1)`：在三个按钮之间移动按钮焦点（到边停、不回绕）；`Enter`/`Space`→`SummaryActivate`：执行当前选中的按钮；`r`→`SummaryRelearn`；`q`/`Esc`→`SummaryHome`；其它忽略。同一组键的含义由 `SummaryData.kind` 决定：单词结算是「继续 / 重学 / 主页」，文章结算是「返回文章列表 / 重打本篇 / 主页」（见 7.5） |
+
+两个弹层都有按钮焦点：默认选中第一个按钮（「确认」/「继续」），所以弹层刚出现时的外观与旧版一致；`Enter` 执行的是**当前选中的按钮**，字母键（`y` / `r` / `q` 等）仍是固定去向的快捷键（`j` / `k` 例外：它们是 ↑ / ↓ 的全站别名，在弹层里同样移动按钮焦点）。
 
 ### 5.6 键入映射与鼠标
 
@@ -257,7 +259,7 @@ app.save_all()
 
 ### 5.7 `Action` 全表
 
-`Action` 的 89 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
+`Action` 的 98 个变体覆盖除练习页键入外的全部交互，`apply_action` 是唯一消费点：
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
@@ -278,8 +280,12 @@ app.save_all()
 | `SettingsMove(delta)` | 设置光标移动并夹在 `0..SETTING_ROWS.len()-1` |
 | `ActivateSetting(i)` | 设置光标置 `i` 并执行该项（见第 8 节） |
 | `StatsScroll(delta)` | 统计页滚动，上限为「最近 14 天」记录数减一 |
-| `SummaryContinue` / `SummaryRelearn` / `SummaryHome` | 结算弹层三种去向，含义随 `SummaryData.kind` 不同（见 7.5） |
-| `ConfirmAccept` / `ConfirmCancel` | 执行/关闭确认；`ConfirmAccept` 处理 Quit、ResetPractice 与 ClearAllData |
+| `SummaryMove(delta)` | 结算弹层按钮焦点在「继续 / 重学 / 主页」之间移动（`delta < 0` 向左 / 上、`> 0` 向右 / 下；`←`/`↑`/`k` 传 -1，`→`/`↓`/`j` 传 +1），到边停、不回绕 |
+| `SummaryActivate` | 结算弹层 `Enter` / 空格：执行当前选中的按钮，与鼠标点它等价 |
+| `SummaryContinue` / `SummaryRelearn` / `SummaryHome` | 结算弹层三种去向的固定快捷键，含义随 `SummaryData.kind` 不同（见 7.5） |
+| `ConfirmMove(delta)` | 确认弹层按钮焦点在「确认 / 取消」之间移动（`delta < 0` 向确认、`> 0` 向取消；`←`/`↑`/`k` 传 -1，`→`/`↓`/`j` 传 +1），到边停、不回绕 |
+| `ConfirmActivate` | 确认弹层 `Enter` / 空格：执行当前选中的按钮——选中「取消」时只关闭弹层，不会误执行危险动作 |
+| `ConfirmAccept` / `ConfirmCancel` | 执行 / 关闭确认的固定快捷键（`y` / `n` / `Esc`）；`ConfirmAccept` 处理 Quit、ResetPractice 与 ClearAllData |
 | `EditSave` / `EditCancel` | 解析输入并写回 / 关闭输入弹层 |
 | `EditChar(c)` / `EditBackspace` | 追加 ASCII 数字（最多 6 位）/ 删除一位 |
 | `HelpScroll(delta)` | 帮助页滚动，`max(0)` 后上限 80 |
@@ -300,7 +306,7 @@ app.save_all()
 ### 6.2 状态流转
 
 ```text
-                ┌── q / 侧栏退出 ─▶ confirm(Quit) ── Enter/y ──▶ 保存并退出
+                ┌── q / 侧栏退出 ─▶ confirm(Quit) ── Enter/空格 执行选中 ──▶ 保存并退出
                 │
  Home ◀─────────┼── Esc/q/Back ── Stats / Settings / DictPicker
   │  ▲          └── ? ───────────▶ Help ── 任意键 ──▶ 回到来源页
@@ -311,7 +317,7 @@ app.save_all()
                                     │ 一轮任务完成
                                     ▼
                              summary 结算弹层
-                        Enter 继续 · r 重学 · q/Esc 主页
+                  ←/→ 选择 · Enter/空格 确认（继续 / 重学 / 主页）
 ```
 
 ### 6.3 文章页的进入路径
@@ -383,11 +389,13 @@ app.save_all()
 
 `finish_session`（只在 `session.complete` 且尚无 `summary` 时执行）：`session.settle(&mut base, &settings, &mut stat, now)` 写回 FSRS 卡片与词典统计；由 `stat` 计算 `SummaryData`（`spend_ms = stat.spend`，`accuracy = round((total - wrong) / total × 100)`，`total == 0` 记 100，`new_words`/`review` 取会话统计，进度三项取学习词典）；`save_dict_now()` → 删除 `practice-word.json`（`store.remove_practice`，不动文章跟打缓存）→ `refresh_stats()` → `refresh_task_preview()`。
 
+两个分支的结算弹层都有按钮焦点（默认选中第一个按钮，单词是「继续」、文章是「返回列表」）：`←`/`→`（或 `↑`/`↓`、`j`/`k`、`Tab`）移动选中，`Enter` / 空格执行选中项；`r` / `q` 仍是固定快捷键。下面两张表里的去向既能用方向键选中后 `Enter` 触发，也能用表中标注的字母键直接触发。
+
 | 结算去向（单词会话 / 单词测试） | 方法 | 结果 |
 | --- | --- | --- |
-| 继续 | `continue_after_summary` | `create_next_task` 生成下一轮；任务为空则提示并回主页；否则以当前设置模式开启新会话 |
-| 重学 | `relearn_after_summary` | `create_repeat_task` 生成重复任务，以当前设置模式开启新会话 |
-| 主页 | `summary_home` | 清空会话与结算、清两个待保存标记（缓存文件已由结算路径删掉）、回主页并刷新统计/任务 |
+| 继续（默认选中，`Enter` / 空格） | `continue_after_summary` | `create_next_task` 生成下一轮；任务为空则提示并回主页；否则以当前设置模式开启新会话 |
+| 重学（`r`，或选中后 `Enter`） | `relearn_after_summary` | `create_repeat_task` 生成重复任务，以当前设置模式开启新会话 |
+| 主页（`q` / `Esc`，或选中后 `Enter`） | `summary_home` | 清空会话与结算、清两个待保存标记（缓存文件已由结算路径删掉）、回主页并刷新统计/任务 |
 
 `leave_practice`（`Ctrl+C` 或结算继续失败时）在无结算的情况下先保存练习与词典，再清空会话、回主页、刷新缓存。结算弹层出现后练习缓存已被删除，因此「回主页」不再产生缓存文件。
 
@@ -399,9 +407,9 @@ app.save_all()
 
 | 结算去向（文章跟打） | 方法 | 结果 |
 | --- | --- | --- |
-| 返回列表（Enter） | `continue_after_summary` | 清结算后 `return_to_articles()`：回到文章列表并保留书本 / 文章光标；列表为空时补一次 `open_articles()` |
-| 重打本篇（r） | `relearn_after_summary` | `restart_article(article_id)`：按 id 在文章列表里找回同一篇从头开始（先清断点标记）；文章已不在列表时回列表并 Toast 提示 |
-| 主页（q / Esc） | `summary_home` | 与单词结算相同：清空会话与结算、清两个待保存标记、回主页并刷新统计/任务（不删缓存文件——本轮缓存已由 `finish_article_practice` 删除） |
+| 返回列表（默认选中，`Enter` / 空格） | `continue_after_summary` | 清结算后 `return_to_articles()`：回到文章列表并保留书本 / 文章光标；列表为空时补一次 `open_articles()` |
+| 重打本篇（`r`，或选中后 `Enter`） | `relearn_after_summary` | `restart_article(article_id)`：按 id 在文章列表里找回同一篇从头开始（先清断点标记）；文章已不在列表时回列表并 Toast 提示 |
+| 主页（`q` / `Esc`，或选中后 `Enter`） | `summary_home` | 与单词结算相同：清空会话与结算、清两个待保存标记、回主页并刷新统计/任务（不删缓存文件——本轮缓存已由 `finish_article_practice` 删除） |
 
 文章结算没有会话，这两个分支在 `kind == Article` 时提前返回，不再落到「无 session 就 `leave_practice()` 回主页」的兜底路径——早期实现三个按钮都走兜底，用户点「继续」看到的却是主页。
 

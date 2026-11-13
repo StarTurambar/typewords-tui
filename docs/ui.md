@@ -317,14 +317,15 @@ ui::render(app, frame)
 
 | 弹层 | 布局 | 内容与按钮 |
 | --- | --- | --- |
-| 结算 `summary` | 居中 `72 × (12 + extra)`，`extra = 2 + 错词 Top10 占用行数`（本周记录占 2 行；错词 Top10 为空时不占行，否则为 2 + min(10, 错词数)）；内区左右各缩 2、上下各缩 1；按钮行在内区最后一行 | 标题「结算」，内容按 `SummaryData.kind` 分两套：**单词**（`Word`，会话与单词测试）为 `今日任务完成` / `学习报告`、学习时长与正确率、新词/复习/错词、学习进度与「已完成」、细进度条、错词 Top10、本周记录，按钮「Enter 继续」（14 列）/「r 重学」（11 列）/「q 主页」（10 列）；**文章**（`Article`）为 `文章跟打完成` + 文章标题、学习时长与正确率、「完成 N / M 句」「错句 N」、细进度条、本周记录，按钮「Enter 返回列表」（14 列）/「r 重打本篇」（11 列）/「q 主页」（10 列） |
+| 结算 `summary` | 居中 `72 × (12 + extra)`，`extra = 2 + 错词 Top10 占用行数`（本周记录占 2 行；错词 Top10 为空时不占行，否则为 2 + min(10, 错词数)）；内区左右各缩 2、上下各缩 1；按钮行在内区最后一行，三个按钮左对齐、间隔 1 列 | 标题「结算」，内容按 `SummaryData.kind` 分两套：**单词**（`Word`，会话与单词测试）为 `今日任务完成` / `学习报告`、学习时长与正确率、新词/复习/错词、学习进度与「已完成」、细进度条、错词 Top10、本周记录，按钮「继续」（12 列）/「重学」（10 列）/「主页」（8 列）；**文章**（`Article`）为 `文章跟打完成` + 文章标题、学习时长与正确率、「完成 N / M 句」「错句 N」、细进度条、本周记录，按钮「返回列表」（12 列）/「重打本篇」（10 列）/「主页」（8 列）。按钮文案不带键名前缀（`Enter` 执行的是当前选中的按钮），按钮行右侧同一行画 `dim` 提示「←/→ 选择 · Enter 确认」；默认选中「继续」，选中项 `accent` 底 + `bg` 字 + 加粗，其余 `element` 底 + `fg` 字 |
 | 输入 `edit` | 居中 `46 × 5` | 标题「输入」；文案「修改 {设置名}（Enter 保存 · Esc 取消）」+「> {buffer}_」 |
-| 确认 `confirm` | 居中 `56 × 7`；内区左右各缩 2、上下各缩 1 | 标题「确认」；消息（`fit_text`）、空行、「Enter/y 确认 · 其他键取消」；按钮「确认」「取消」（各 10 列） |
+| 确认 `confirm` | 居中 `56 × 7`；内区左右各缩 2、上下各缩 1；按钮行在内区最后一行，两个按钮各 10 列、间隔 1 列 | 标题「确认」；消息（`fit_text`）、空行、提示行「←/→ 选择 · Enter 确认 · Esc 取消」；按钮「确认」「取消」（各 10 列），默认选中「确认」，选中项 `accent` 底 + `bg` 字 + 加粗，另一个 `element` 底 + `fg` 字 |
 
-- `centered_rect` 先把宽高夹到 `area`，所以最小终端 60×20 下弹层不会越界（单测 `summary_layout_fits_min_terminal`、`confirm_buttons_are_inside_modal` 覆盖）。
+- `centered_rect` 先把宽高夹到 `area`，所以最小终端 60×20 下弹层不会越界（四个布局单测 `summary_layout_fits_min_terminal`、`confirm_buttons_are_inside_modal`、`confirm_hint_fits_min_terminal`、`summary_buttons_and_hint_fit_min_terminal` 覆盖：弹层不越界、按钮在弹层内，确认提示行与结算的三个按钮加右侧方向键提示在最小终端 60×20 下放得下）。
 - 结算弹层高度随内容自适应：`height = 12 + extra`，`summary_extra_lines` 在基础 12 行之外累计「本周记录（1 空行 + 1 行）」与「错词 Top10（1 空行 + 标题 + 每词 1 行）」；文章结算没有错词 Top10，`extra` 恒为 2。内区高度 = 高度 − 2，正文后留白、按钮画在内区最后一行；`render_summary` 压入错词 Top10 与本周记录前都检查剩余高度（`lines.len() + 2`），最小终端 60×20 下按钮不会被内容顶掉。
 - 遮罩：`ui::render` 在弹层打开时给全 buffer 加 `Modifier::DIM`；弹层绘制前用 `Clear` + `theme.bg` 清掉弹层外扩 2 列/行的背景，再用 `theme.panel` 画自身，从而在无 alpha 的终端里「压暗背景、恢复前景」。
-- 鼠标：`overlays::targets` 为确认弹层生成「确认/取消」、为结算弹层生成三个按钮，为模式 / 跳组 / 收藏 / 词条编辑弹层生成各自的行 target（输入弹层没有按钮 target）。
+- 按钮焦点：`ConfirmState.focus` / `SummaryData.focus` 决定当前选中的按钮——`←` / `↑` / `k` / `Shift+Tab` 左移、`→` / `↓` / `j` / `Tab` 右移（到边停、不回绕；`j` / `k` 是 ↑ / ↓ 的全站别名），`Enter` / 空格执行选中项。选中项用 `accent` 底 + `bg` 字 + 加粗，其余按钮 `element` 底 + `fg` 字（`draw_modal_button`，与页面焦点高亮同一套配色）；默认选中第一个按钮（确认 / 继续），所以弹层刚出现时的外观与修复前一致。结算的方向键提示画在按钮行右侧的空白里，不占正文行高——最小终端 60 列时按钮右侧的提示区仍有 22 列，放得下。
+- 鼠标：`overlays::targets` 为确认弹层生成「确认/取消」、为结算弹层生成三个按钮，为模式 / 跳组 / 收藏 / 词条编辑弹层生成各自的行 target（输入弹层没有按钮 target）。点按钮直接执行该按钮，与键盘当前选中无关。
   `target_action` **复用 `targets` 的结果**做命中——两处各写一遍时，模式 / 收藏 / 词条编辑三个弹层只有 `targets` 一侧，鼠标点它们毫无反应。
   「点弹层外」的语义各弹层不同：跳组 / 确认 / 输入弹层点外面 = 取消；模式 / 收藏 / 词条编辑弹层点外面 = 无动作；结算弹层只响应三个按钮，点外面不动。
   结算截图见 [结算弹层](screenshots/summary-120x40-dark.png)（单词会话）与 [文章结算](screenshots/summary-article-120x40-dark.png)（文章跟打）。
@@ -343,7 +344,7 @@ ui::render(app, frame)
 - `wheel_action`：有弹层返回 `None`；词库页 → `DictMove(delta)`、设置页 → `SettingsMove(delta)`、统计页 → `StatsScroll(delta)`、帮助页 → `HelpScroll(delta)`、词条页 → `WordsMove(delta)`、快捷键页 → `ShortcutMove(delta)`、流程页 → `FlowMove(delta)`、文章页 → `ArticleBookMove(delta)`，其它页面 `None`；`delta` 由滚轮方向给出（上 `-1`、下 `1`）。
 - 不变量：每个页面只写一份 `layout`/`layout_xxx`，`render` 与 `targets` 都从它取 `Rect`；滚动偏移来自 `App` 的同一字段。这样绘制位置与可点击位置不会漂移。
   **文本驱动的控件更进一步**：主页每日目标的 `[-]` / `[+]` 位置由「绘制用的同一行文本」算出来（`home::goal_line_text` + `goal_buttons`），不能各写一份偏移量——早期实现用固定偏移估算，与实际排版差 2 列，所有终端尺寸下点 `+` 都没反应。
-- 相关测试：`tests/app_drive.rs` 用 `hit::targets` 找按钮再模拟点击；`tests/ui_snapshots.rs` 的 `mouse_target_rects_match_rendered_text` 校验命中行与渲染文本一致；`tests/interaction_fixes.rs` 覆盖三个弹层的鼠标命中、主页 `+/-` 的像素对齐、滚动指示器不被行 target 抢走等回归；弹层布局单测保证按钮在弹层内。
+- 相关测试：`tests/app_drive.rs` 用 `hit::targets` 找按钮再模拟点击；`tests/ui_snapshots.rs` 的 `mouse_target_rects_match_rendered_text` 校验命中行与渲染文本一致；`tests/interaction_fixes.rs` 覆盖三个弹层的鼠标命中、主页 `+/-` 的像素对齐、滚动指示器不被行 target 抢走等回归；弹层布局单测保证按钮与方向键提示在弹层内、最小终端 60×20 下不越界。
 
 ## 12. 渲染测试与新增页面检查清单
 

@@ -6,7 +6,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::app::{Action, ConfirmState, EditState, SummaryData, SummaryKind};
+use crate::app::{
+    Action, ConfirmFocus, ConfirmState, EditState, SummaryButton, SummaryData, SummaryKind,
+};
 use crate::domain::i18n::tr;
 use crate::domain::timer::format_duration;
 use crate::ui::theme::Theme;
@@ -50,9 +52,11 @@ pub fn summary_layout(area: Rect, extra: u16) -> SummaryLayout {
     );
     let button_y = inner.y + inner.height.saturating_sub(1);
     let gap = 1u16;
-    let continue_width = 14.min(inner.width);
-    let relearn_width = 11;
-    let home_width = 10;
+    // 按钮不再把键名写进标签（方向键可以移动选中，`Enter 继续` 会误导），
+    // 列宽按纯文案收紧，右侧留给方向键提示。
+    let continue_width = 12.min(inner.width);
+    let relearn_width = 10;
+    let home_width = 8;
     let continue_btn = Rect::new(inner.x, button_y, continue_width, 1);
     let relearn_btn = Rect::new(inner.x + continue_width + gap, button_y, relearn_width, 1);
     let home_btn = Rect::new(
@@ -597,34 +601,45 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
     );
     // 按钮文案按结算类型区分：文章跟打的「继续」是回文章列表，「重学」
     // 是重打同一篇；动作仍是 SummaryContinue / SummaryRelearn。
+    // 键名不进标签——`Enter` 执行的是当前选中的按钮，不是固定的「继续」。
     let (continue_label, relearn_label) = match &summary.kind {
-        SummaryKind::Word => ("Enter 继续", "r 重学"),
-        SummaryKind::Article { .. } => ("Enter 返回列表", "r 重打本篇"),
+        SummaryKind::Word => ("继续", "重学"),
+        SummaryKind::Article { .. } => ("返回列表", "重打本篇"),
     };
-    widgets::draw_button(
+    draw_modal_button(
         frame,
         layout.continue_btn,
         continue_label,
-        theme.accent,
-        theme.bg,
-        true,
+        summary.focus == SummaryButton::Continue,
+        theme,
     );
-    widgets::draw_button(
+    draw_modal_button(
         frame,
         layout.relearn_btn,
         relearn_label,
-        theme.element,
-        theme.fg,
-        false,
+        summary.focus == SummaryButton::Relearn,
+        theme,
     );
-    widgets::draw_button(
+    draw_modal_button(
         frame,
         layout.home_btn,
-        "q 主页",
-        theme.element,
-        theme.fg,
-        false,
+        "主页",
+        summary.focus == SummaryButton::Home,
+        theme,
     );
+    // 方向键提示放在按钮行右侧的空白里，不占正文行高：最小终端 60 列时
+    // 内区仍有 22 列，恰好放得下。
+    let hint_x = layout.home_btn.right().saturating_add(2);
+    let hint_width = layout.inner.right().saturating_sub(hint_x);
+    if hint_width > 0 {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "←/→ 选择 · Enter 确认",
+                Style::default().fg(theme.dim),
+            ))),
+            Rect::new(hint_x, layout.home_btn.y, hint_width, 1),
+        );
+    }
 }
 
 /// 本周七天的打卡点：有记录用实心点，没有用空心点。
@@ -679,7 +694,7 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, theme: &Theme, confirm: &Co
         Line::from(Span::styled(message, Style::default().fg(theme.fg))),
         Line::from(""),
         Line::from(Span::styled(
-            "Enter/y 确认 · 其他键取消",
+            "←/→ 选择 · Enter 确认 · Esc 取消",
             Style::default().fg(theme.muted),
         )),
     ];
@@ -689,8 +704,33 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, theme: &Theme, confirm: &Co
             .block(widgets::modal_block(" 确认 ", theme)),
         layout.rect,
     );
-    widgets::draw_button(frame, layout.accept, "确认", theme.accent, theme.bg, true);
-    widgets::draw_button(frame, layout.cancel, "取消", theme.element, theme.fg, false);
+    draw_modal_button(
+        frame,
+        layout.accept,
+        "确认",
+        confirm.focus == ConfirmFocus::Accept,
+        theme,
+    );
+    draw_modal_button(
+        frame,
+        layout.cancel,
+        "取消",
+        confirm.focus == ConfirmFocus::Cancel,
+        theme,
+    );
+}
+
+/// 弹层按钮：选中项用焦点高亮（accent 底 + bg 字 + 加粗），
+/// 其余按钮是次级配色（element 底 + fg 字）。
+///
+/// 与 `ui::focus::paint` 的高亮保持同一套颜色，弹层和页面的「选中」
+/// 因此看起来是同一件事。
+fn draw_modal_button(frame: &mut Frame, rect: Rect, label: &str, focused: bool, theme: &Theme) {
+    if focused {
+        widgets::draw_button(frame, rect, label, theme.accent, theme.bg, true);
+    } else {
+        widgets::draw_button(frame, rect, label, theme.element, theme.fg, false);
+    }
 }
 
 fn edit_label(edit: &EditState) -> String {
@@ -863,5 +903,32 @@ mod tests {
         let layout = confirm_layout(Rect::new(0, 0, 80, 24));
         assert!(layout.accept.right() <= layout.inner.right());
         assert!(layout.cancel.right() <= layout.inner.right());
+    }
+
+    #[test]
+    fn confirm_hint_fits_min_terminal() {
+        // 方向键提示必须能整行放下：最小终端 60 列，内区 52 列。
+        let layout = confirm_layout(Rect::new(0, 0, 60, 20));
+        let hint = "←/→ 选择 · Enter 确认 · Esc 取消";
+        assert!(
+            widgets::display_width(hint) <= layout.inner.width as usize,
+            "提示放不下: {hint:?} vs {} 列",
+            layout.inner.width
+        );
+    }
+
+    #[test]
+    fn summary_buttons_and_hint_fit_min_terminal() {
+        // 最小终端 60x20：三个按钮 + 按钮行右侧的方向键提示都不能越界。
+        let layout = summary_layout(Rect::new(0, 0, 60, 20), 2);
+        assert!(layout.home_btn.right() <= layout.inner.right());
+        let hint_x = layout.home_btn.right() + 2;
+        let hint_width = layout.inner.right().saturating_sub(hint_x) as usize;
+        let hint = "←/→ 选择 · Enter 确认";
+        assert!(
+            hint_width >= widgets::display_width(hint),
+            "提示放不下: {hint:?} 需要 {} 列，只剩 {hint_width} 列",
+            widgets::display_width(hint)
+        );
     }
 }

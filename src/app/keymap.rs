@@ -179,16 +179,37 @@ fn has_command_modifier(key: KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT)
 }
 
+/// 确认弹层的键位：方向键 / `Tab` 在「确认 / 取消」之间移动选中，
+/// `Enter` 执行选中的按钮；`y` / `n` 保留为直接确认 / 取消的快捷键。
+///
+/// 修复前这里只有「`y` / `Enter` 确认、其它任意键取消」——方向键会直接把
+/// 弹层取消掉，用户感觉「方向键选中不了按钮」。
 fn confirm_action(key: KeyEvent) -> Option<Action> {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(Action::ConfirmAccept),
+        KeyCode::Left | KeyCode::Up | KeyCode::BackTab => Some(Action::ConfirmMove(-1)),
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab => Some(Action::ConfirmMove(1)),
+        // `j` / `k` 是全站通用的 ↑/↓ 别名：弹层里按它们应该换选中，
+        // 而不是落进「其它任意键 → 取消」。
+        KeyCode::Char('k') => Some(Action::ConfirmMove(-1)),
+        KeyCode::Char('j') => Some(Action::ConfirmMove(1)),
+        KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ConfirmActivate),
+        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::ConfirmAccept),
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(Action::ConfirmCancel),
+        // 其余按键维持「任意键取消」的旧语义：弹层里没有输入语义，
+        // 乱按不该把危险操作执行掉。
         _ => Some(Action::ConfirmCancel),
     }
 }
 
+/// 结算弹层的键位：方向键 / `Tab` 在三个按钮之间移动选中，`Enter` 执行选中的
+/// 按钮；`r` / `q` 保留为「重学 / 重打本篇」「主页」的快捷键。
 fn summary_action(key: KeyEvent) -> Option<Action> {
     match key.code {
-        KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SummaryContinue),
+        KeyCode::Left | KeyCode::Up | KeyCode::BackTab => Some(Action::SummaryMove(-1)),
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab => Some(Action::SummaryMove(1)),
+        KeyCode::Char('k') => Some(Action::SummaryMove(-1)),
+        KeyCode::Char('j') => Some(Action::SummaryMove(1)),
+        KeyCode::Enter | KeyCode::Char(' ') => Some(Action::SummaryActivate),
         KeyCode::Char('r') => Some(Action::SummaryRelearn),
         KeyCode::Char('q') | KeyCode::Esc => Some(Action::SummaryHome),
         _ => None,

@@ -297,10 +297,10 @@ fn overlay_screens_render() {
     assert!(text.contains("修改"));
     app.edit = None;
 
-    app.confirm = Some(app::ConfirmState {
-        message: "退出测试？".to_string(),
-        action: app::ConfirmAction::Quit,
-    });
+    app.confirm = Some(app::ConfirmState::new(
+        "退出测试？",
+        app::ConfirmAction::Quit,
+    ));
     let text = render_text(&app, 100, 30);
     assert!(text.contains("确认"));
 }
@@ -328,11 +328,8 @@ fn article_summary_renders_article_labels() {
     assert!(text.contains("第一篇"), "应显示文章标题: {text}");
     assert!(text.contains("完成 5 / 5 句"), "应显示句子进度: {text}");
     assert!(text.contains("错句 1"), "应显示错句数: {text}");
-    assert!(
-        text.contains("Enter 返回列表"),
-        "主按钮应回文章列表: {text}"
-    );
-    assert!(text.contains("r 重打本篇"), "重学按钮应重打本篇: {text}");
+    assert!(text.contains("返回列表"), "主按钮应回文章列表: {text}");
+    assert!(text.contains("重打本篇"), "重学按钮应重打本篇: {text}");
     assert!(
         !text.contains("今日任务完成"),
         "文章结算不该套用单词会话标题: {text}"
