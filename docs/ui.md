@@ -13,7 +13,8 @@
 | `src/ui/shell.rs` | 外壳：响应式侧栏/顶栏/底栏、`Nav`、`ShellLayout`/`SidebarLayout`、颜色提示文案 |
 | `src/ui/home.rs` | 主页 dashboard、`primary_label` 与 `targets`（鼠标命中 + 键盘焦点的稳定身份） |
 | `src/ui/focus.rs` | 所有套外壳页面的键盘焦点：焦点身份（`FocusId` / `NavId` / `ContentId` / `Page`）、支持页面与启用条件（`supports_focus` / `enabled`）、`Pane` 两栏与 `NavOrientation` 主轴、主页内容区视觉分带（`content_move`）、导航栏步进（`nav_move`）、底栏标签（`focused_label` / `page_label`）、导航栏与主页的整块高亮 `paint` |
-| `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、词表侧栏）与 `PracticeLayout` |
+| `src/ui/practice.rs` | 练习页（大字、音标、卡片、阶段条、动作按钮条、词表侧栏）与 `PracticeLayout` |
+| `src/ui/typing_buttons.rs` | 两个键入练习页共用的底部动作按钮条：`ButtonBar` 布局（两行按钮 + 留白 + 提示行，`HEIGHT = 4`）、绘制（选中 `accent` 底、其余 `element` 底）、按钮文案（键名取自键位表，放不下时退回动作名） |
 | `src/ui/bigtext.rs` | 5×7 点阵字体、1×/2× 放大、遮罩占位、折行 |
 | `src/ui/dict_picker.rs`、`stats.rs`、`settings.rs`、`help.rs`、`shortcuts.rs`、`word_test.rs`、`words.rs`、`articles.rs`、`flows.rs` | 词库页、统计页、设置页、帮助页、快捷键编辑页、单词测试页、词条管理页、文章背诵页、练习流程页 |
 | `src/ui/overlays.rs` | 结算/输入/确认/跳组/收藏目标弹层的布局、绘制、命中 |
@@ -185,10 +186,10 @@ ui::render(app, frame)
 │                          │  ┌ 例句 ────────────────────────────────┐   │
 │                          │  ┌ 词源 ────────────────────────────────┐   │
 │                                                                          │
-└─ 底部阶段条（6 行；Ctrl+B 收起为 1 行 Toast）────────────────────────────┘
+└─ 底部阶段区（8 行：阶段条 1 + 按钮条 4 + Toast 1 + 边框 2；Ctrl+B 收起为 1 行 Toast）┘
 ```
 
-- 垂直约束：`[1, Min(10), 6]`（显示阶段条）或 `[1, Min(10), 1]`（收起，只画 Toast）。
+- 垂直约束：`[1, Min(10), 8]`（显示阶段区）或 `[1, Min(10), 1]`（收起，只画 Toast）。
 - `Ctrl+L` 打开词表后，正文改为水平 `[Min(30), 28]`，右侧 28 列渲染当前节点词表。
 - 正文字宽 `inner_width = body.width - 4`；卡片与大字都按它折行/放大。
 
@@ -214,6 +215,8 @@ ui::render(app, frame)
 
 大字上方的音标取 `word.phonetic(sound_type == "uk")`（英式取 `phonetic0`，美式取 `phonetic1`）；`show_near_word` 打开且未遮罩时，下方追加「← 上一个词   下一个词 →」。
 
+音标下面一行是**状态徽标**：本词本轮错误次数（「错 N 次」，`bad`）与「★ 已收藏」（`accent_alt` + 加粗，读 `PracticeSession::is_collect`），两者用 3 个空格隔开。收藏不推进单词，这行徽标是它唯一常驻的视觉反馈（操作瞬间另有 Toast，见 6.5）。有徽标时不再额外留空行（徽标行直接接在大字上方），词区矩形高度保持不变，最小终端 60×20 下大字不会被多挤掉一行。
+
 ### 6.4 信息卡片
 
 `card_specs` 决定显示哪些卡片与行数上限；卡片是圆角边框（`panel` 背景 + `border` + `dim` 标题），内容按宽度折行，超出容量的最后一行以 `…` 结尾。
@@ -228,12 +231,16 @@ ui::render(app, frame)
 
 ### 6.5 底部阶段条与词表
 
-- 阶段条：每个 `FlowProgressStage` 渲染「阶段名 + 8 格进度条（`bar_spans`）+ 百分比」；进行中用 `accent`、已完成用 `good`、其它用 `dim`。下面两行固定快捷键提示；区域高度 `>= 6` 时再追加 Toast 行；整体包在标题「阶段」的卡片里。
-- `Ctrl+B` 收起后，底部只保留 1 行 `shell::toast_line`（有 Toast 显示 Toast；否则按「显示使用提示」设置决定是否显示「提示：Ctrl+C 退出练习并保存；? 查看快捷键」，关闭时该行为空）。
+- 阶段条：每个 `FlowProgressStage` 渲染「阶段名 + 8 格进度条（`bar_spans`）+ 百分比」；进行中用 `accent`、已完成用 `good`、其它用 `dim`。整体包在标题「阶段」的卡片里。
+- **动作按钮条**：阶段条下面 4 行是 `ui::typing_buttons` 的 `ButtonBar`（两行按钮 + 1 行留白 + 1 行提示），最后一行是 Toast。按钮来自 `app::buttons::PRACTICE_BUTTONS`（10 个：显示 / 跳过 / 掌握 / 收藏 / 翻译 / 默写 / 暂停 / 重学 / 换组 / 返回），列数 `count.div_ceil(2)`、等宽、列间留 1 列空隙、整组在正文宽度内居中（单按钮最大 26 列）；两行按钮之间必须留 1 行空白，否则相邻底色会粘成一个两行高的大按钮。选中项 `accent` 底 + `bg` 字 + 加粗，其余 `element` 底 + `fg` 字，与弹层按钮同一套语言。
+- 按钮文案由 `ui::typing_buttons::label` 拼「键名 动作名」：键名取自 `app.shortcuts.key_for`（改绑后跟着变），TUI 专有键位取 `ui::TUI_PAUSE_KEY` / `TUI_EXIT_KEY` / `TUI_HELP_KEY`；放不下时退回纯动作名（60 列最小终端下 `Escape 显示` 会显示为 `显示`）。
+- 收藏按钮是开关，已收藏时动作名前面加实心星标（`Enter ★ 收藏`）：`ui::typing_buttons::button_name` 读与单词上方徽标同一个 `is_collect`，两处状态永远一致。
+- 提示行固定为「 方向键选中 · Enter 执行 · 鼠标点击 · 空格 继续 · ? 帮助」，58 列内放得下。
+- `Ctrl+B` 收起后，底部只保留 1 行 `shell::toast_line`（有 Toast 显示 Toast；否则按「显示使用提示」设置决定是否显示「提示：Ctrl+C 退出练习并保存；? 查看快捷键」，关闭时该行为空）；按钮条一起收起，方向键也不再选中看不见的按钮（`App::typing_buttons` 在工具栏关闭时返回空切片）。
 - `Ctrl+L` 词表：`▶` 当前词（`accent`）、错词（`bad`）、已排除词（`dim`）、其它（`fg`），每行「序号. 单词」。
 - `Ctrl+E` 只影响 `show_meta`，即例句与词源两块卡片。
-- 练习页本身不产生鼠标 target：页面上点击无反应；`Ctrl+L`/`Ctrl+B`/`Ctrl+E` 是键位状态，不落盘。结算弹层打开后由弹层提供按钮 target。
-- 截图见 [练习页 120×40](screenshots/practice-120x40-dark.png)。
+- 鼠标 target：`practice::targets` 注册三组——底部动作按钮（`Action::TypingButton(index)`，与键盘 `Enter` 同一个入口）、词表每一行（`Action::PracticeGotoWord`）、状态行「第 N 组」（`Action::OpenGroupPicker`）。`Ctrl+L`/`Ctrl+B`/`Ctrl+E` 是键位状态，不落盘。结算弹层打开后由弹层提供按钮 target。
+- 截图见 [练习页 120×40](screenshots/practice-120x40-dark.png)、[按钮条选中态](screenshots/practice-buttons-120x40-dark.png) 与 [收藏反馈](screenshots/practice-collect-120x40-dark.png)。
 
 ## 7. 大字点阵（bigtext.rs）
 
@@ -295,9 +302,10 @@ ui::render(app, frame)
 ### 8.5 文章背诵页与跟打页（articles.rs）
 
 - 列表页（`render_articles`）套外壳（`Nav::Articles`）：左「书本」、右「文章」两栏（38% / 其余，右栏至少 20 列），行首 `▶` 为选中项；文章行显示标题、句数与断点标记「· 上次第 N 句」（`accent_alt`）。`targets` 给两个列表的可见行注册点击目标，滚轮映射为 `ArticleBookMove`。键盘焦点进页在内容区（左栏书本）：`↑`/`↓` 选书本、`→` 切到文章栏、`←` 从文章栏回书本栏（已在左栏再按 `←` 进侧栏），`Enter` 开始选中的文章；`Tab` 是导航栏 ↔ 内容区换栏。当前栏的选中行由 `ui::focus::page_selection_rect` 整块 `accent` 高亮，切栏时高亮跟着移动；另一个栏的 `▶` 只表示它自己的光标位置。
-- 跟打页（`render_article_practice`）全屏、不套外壳，纵向分四段：状态行（标题 `accent` + 第 N/M 句 + 已完成 / 错误 / 用时；错误数把当前句已出现的错误也算进去；`Ctrl+,` 暂停时追加 `warn` 色的「已暂停」）、「跟打」区块、「当前句译文」区块（`article_practice.show_translate` 为假时高度取 0，把那 4 行还给正文）、三行提示。`article_lines` 把整篇文章按段落折行成同一页的行列表（段落之间空一行），`cursor_line` 找出光标所在行，视口据此滚动；`offset` 只在渲染期计算，不写 `App` 状态。
+- 跟打页（`render_article_practice`）全屏、不套外壳，纵向分四段：状态行（标题 `accent` + 第 N/M 句 + 已完成 / 错误 / 用时；错误数把当前句已出现的错误也算进去；`Ctrl+,` 暂停时追加 `warn` 色的「已暂停」）、「跟打」区块、「当前句译文」区块（`article_practice.show_translate` 为假时高度取 0，把那 4 行还给正文）、底部规则行 + 动作按钮条（`practice_layout` 产出 `PracticeLayout`：`header` / `body` / `translate` / `rule` / `button_bar`，绘制与 `practice_targets` 共用同一份矩形）。`article_lines` 把整篇文章按段落折行成同一页的行列表（段落之间空一行），`cursor_line` 找出光标所在行，视口据此滚动；`offset` 只在渲染期计算，不写 `App` 状态。
 - 逐字符着色：非跟打字符（标点、符号与多余空白）在当前句用 `dim`、已完成句用 `muted`、未来句用 `fg`；词间空格是可选目标，光标会停在待输入的空格上，但直接打下一个字母也不算错；当前句里已输入且正确的字符 `good`，打错的字符 `bad` 并显示实际按下的字符——错误只会出现在字母 / 数字位置（省略空格时自动补成正确输入，不再有「空格处错字」与下划线样式，渲染里也不再有 `Modifier::UNDERLINED` 分支）；光标位置（第一个未输入字符）用 `selection` 背景 + BOLD；当前句首行行首是 `▶ `（`accent`）标记，其它行补两个空格对齐。`article_lines` 折行时行尾空格直接丢掉：空格可省略且总按正确输入显示，折掉不会藏起错误标记。
-- 底部三行提示：第一行平时是「 字母、数字照打 · 空格可省略 · 标点不用打 · Backspace 退格」（`dim`；58 列，60 列最小终端下可完整显示），本句出现过错误时换成「 红色 = 打错的字符 · Backspace 改正」（`warn`）；后两行是键位——朗读 / 译文 / 主题 / 帮助一行、暂停 / 保存并返回 / 返回一行，**朗读 / 译文 / 主题的键位从键位表取**（与练习页同源，改绑后提示跟着变），`Ctrl+,` 与 `Ctrl+C` 取 `ui::TUI_PAUSE_KEY` / `ui::TUI_EXIT_KEY`（与练习页共用同一对常量）。两行都压在 60 列以内。该页不注册鼠标目标，只用键盘。截图见 [文章跟打](screenshots/articlepractice-120x40-dark.png)。
+- 底部：规则行平时是「 字母、数字照打 · 空格可省略 · 标点不用打 · Backspace 退格」（`dim`；60 列最小终端下可完整显示），本句出现过错误时换成「 红色 = 打错的字符 · Backspace 改正」（`warn`）；下面是 `ui::typing_buttons` 的动作按钮条（`ARTICLE_BUTTONS`：朗读 / 翻译 / 主题 / 暂停 / 帮助 / 返回），**按钮上的键名从键位表取**（与练习页同源，改绑后跟着变），`Ctrl+,` / `Ctrl+C` 取 `ui::TUI_PAUSE_KEY` / `ui::TUI_EXIT_KEY`。提示行是「 方向键选中 · Enter 执行 · 鼠标点击 · Esc 返回列表」。
+- 鼠标 target：`articles::practice_targets` 只注册按钮条的按钮（`Action::TypingButton(index)`），该页独占整屏、没有导航目标。截图见 [文章跟打](screenshots/articlepractice-120x40-dark.png)。
 
 ## 9. 通用部件（widgets.rs）
 

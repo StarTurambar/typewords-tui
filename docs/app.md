@@ -12,6 +12,7 @@
 | --- | --- |
 | `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SummaryKind`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
+| `src/app/buttons.rs` | 键入练习页底部的动作按钮：`TypingButton`、两页的按钮表（`PRACTICE_BUTTONS` / `ARTICLE_BUTTONS`）、列数 `columns`、键盘选中 `handle_typing_button_key` 与执行入口 `activate_typing_button` |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
 | `src/app/focus.rs` | 所有套外壳页面的键盘焦点：`FocusDir`、`set_screen`（切屏唯一入口）、`focus_default`（进入页面默认选中内容区）、`move_focus`/`switch_focus_pane`/`activate_focus`/`clear_focus`/`focus_home_default`；保存焦点身份（`FocusId`）与主页内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
@@ -51,6 +52,7 @@
 | 随机源 | `rng: Rng`、`seed: u64` | `StdRng`；`--seed` 固定后整条事件序列可复现 |
 | 提示与弹层 | `toasts: Vec<Toast>`、`quit: bool`、`edit`、`confirm`、`summary` | 最多保留 4 条 Toast；`quit` 由退出确认置位；三类弹层正常交互中互斥 |
 | 显示开关 | `show_toolbar`、`show_panel`、`show_meta` | 练习页 Ctrl+B / Ctrl+L / Ctrl+E 的状态（仅本次进程） |
+| 动作按钮 | `typing_button: Option<usize>` | 键入练习页底部动作按钮的选中下标（行优先，见 `app::buttons`）。`None` = 没有选中，方向键与 `Enter` 仍属于键入 / 键位表；`set_screen` 每次切屏清空它，工具栏关闭时 `typing_buttons()` 返回空切片，按键路径随即把选中清掉 |
 | 统计缓存 | `task_preview: Option<(usize, usize, usize)>`、`today_spend`、`today_new`、`today_review`、`today_wrong` | 主页「今日任务」「统计」区块的预计算值 |
 | 生命周期 | `fatal: Option<String>`、`last_activity`、`last_timer_tick`、`pending_practice_save` | 后三个私有：空闲判定、1 秒计时节拍、防抖保存截止时间 |
 
@@ -178,6 +180,8 @@ app.save_all()
 2. 若 `edit`/`confirm`/`summary` 任一存在：调 `keymap::overlay_action`，有返回值就 `apply_action`，然后**直接返回**——弹层是模态的，未识别的键被吞掉；优先级 `edit` → `confirm` → `summary`。
 3. `screen == Practice` 时进入 `on_practice_key`（练习页键盘不经过 `Action`）。
 4. `screen == ArticlePractice` 时进入 `on_article_practice_key`——跟打页与练习页同一套分流：先查键位表（只认两页共用的 `PlayWordPronunciation` / `ToggleShowTranslate` / `ToggleTheme`），再走 TUI 专有键位（`Ctrl+C` / `Ctrl+,` / `?` / `Esc`），剩下的字符才进 `article_typing_key`。跟打键入同样不经过 `Action`。
+
+两个键入页的 `on_*_key` 第一步都是 `App::handle_typing_button_key`（见 5.4）：`←`/`→`/`↑`/`↓` 选中 / 移动底部动作按钮、`Enter` 执行选中的按钮，返回 `true` 时按键到此为止；返回 `false` 时按键继续原来的分流，并且按钮选中已被清掉（继续打字或按快捷键之后 `Enter` 回到「收藏」等旧语义）。
 5. 其它屏幕调 `keymap::screen_action`，返回 `Action` 后交给 `apply_action`。
 
 `screen_action` 先处理练习中打开的整屏帮助页（保持「滚动之外任意键返回」），再判断数字切页：`session.is_none()`、当前页属于 `Home` / `Articles` / `DictPicker` / `Stats` / `Settings` / `Help`、无修饰键、按 `1`~`6` 时直接产生 `Navigate`：`1` 单词、`2` 文章、`3` 词库、`4` 统计、`5` 帮助、`6` 设置。之后先过统一的焦点键（`focus_action`：`↑`/`↓`/`←`/`→` 与 `j`/`k` → `FocusMove`、`Tab`/`Shift+Tab` → `SwitchFocusPane`、`Enter` → `ActivateFocus`，只在 `ui::focus::enabled` 为真时生效），各页面分支只保留自己的特有键位。
@@ -205,6 +209,8 @@ app.save_all()
 
 `Ctrl+J` 是 `Shift+→` 的 ASCII 别名；部分终端会吞掉 `Ctrl+方向键` 或 `Alt+数字`，帮助页也提示了这一点。
 
+收藏走 `toggle_current_word_collect`：切换 `boot.base` 的收藏词典后返回一条 Toast（「已收藏「word」」/「已取消收藏「word」」），由 `handle_practice_shortcut` 弹出。收藏表存在 `dict.json`，练习页只在离开 / 结算 / 退出时落盘（与其它练习内标记一致），但界面当场就能确认——单词上方的「★ 已收藏」徽标与收藏按钮的星标由渲染层读同一个 `PracticeSession::is_collect`。`Shift+Enter` 的「收藏到指定词典」同样按「加入 / 移出」给出不同提示（`select_collect_dict`）。
+
 `Ctrl+P`（朗读）、`Ctrl+Z`（翻译）、`Ctrl+Q`（主题）、`Ctrl+,`（暂停计时）、`Ctrl+C`（保存并离开）、`?`（帮助）与[文章跟打页](#53-文章跟打页键位on_article_practice_key)**同一个键**做同一件事：前三个从键位表取（改绑后两页一起变），后三个是 TUI 专有键位。两页唯一的键位差异是 `Esc`——练习页的它被上游绑成「显示单词」，跟打页没有遮罩，`Esc` 保持全站通用的「返回上一层」。
 
 ### 5.3 文章跟打页键位（`on_article_practice_key`）
@@ -226,6 +232,23 @@ app.save_all()
 | `?` | 整屏帮助页（`help_scroll = 0`）；返回时回到跟打页，跟打进度不变 |
 | `Esc` | `back()` 保存文章断点并返回文章列表；跟打页没有遮罩，`Esc` 保持全站通用的「返回」语义 |
 | 其它（含未映射的 `Ctrl` / `Alt` 组合） | 忽略 |
+
+### 5.4 底部动作按钮（`app::buttons`）
+
+两个键入页各有一张按钮表，按钮与键位表里的动作一一对应，执行时走与键盘**同一条**处理路径：
+
+| 页面 | 按钮（行优先，两行） | 列数 |
+| --- | --- | --- |
+| 练习页 `PRACTICE_BUTTONS` | 显示 / 跳过 / 掌握 / 收藏 / 翻译、默写 / 暂停 / 重学 / 换组 / 返回 | `10.div_ceil(2) = 5` |
+| 跟打页 `ARTICLE_BUTTONS` | 朗读 / 翻译 / 主题、暂停 / 帮助 / 返回 | `6.div_ceil(2) = 3` |
+
+- `TypingButton::shortcut()` 给出对应的 `ShortcutAction`（显示→`ShowWord`、跳过→`Ignore`、掌握→`ToggleSimple`、收藏→`ToggleCollect`、翻译→`ToggleShowTranslate`、默写→`ToggleDictation`、重学→`RepeatChapter`、换组→`NextChapter`、朗读→`PlayWordPronunciation`、主题→`ToggleTheme`）；`Pause` / `Help` / `Return` 没有键位表条目，`fixed_key()` 返回 `ui::TUI_PAUSE_KEY` / `TUI_HELP_KEY` / `TUI_EXIT_KEY`。
+- `handle_typing_button_key` 只处理两件事：有选中时的 `Enter` 执行按钮（消费按键），以及「其它按键先清空选中再继续分发」。`Enter` 没有选中时不被消费——练习页的 `Enter` 仍是「收藏」。
+- **方向键在按键流水线末尾处理**：`on_practice_key` / `on_article_practice_key` 在「键位表 → TUI 键位 → 键入引擎」都没消费该键之后，才用 `buttons::plain_arrow_direction` 判断它是不是裸方向键，是就交给 `move_typing_button`。因此用户把动作绑到 `←`/`→`/`↑`/`↓` 时**键位表优先**，按钮条不会抢走显式绑定；没有绑定时方向键才是按钮条的选中键。
+- `move_typing_button`：无选中时任一方向键落在第 0 个按钮；有选中时 `←`/`→` 在本行内移动、`↑`/`↓` 跨行并保持列，到边停、不回绕（列数由 `buttons::columns` 统一给出，绘制与移动不会各算一套）。
+- `activate_typing_button(index)`：键盘 `Enter` 与鼠标点击 `Action::TypingButton(index)` 共用。先把选中落到该下标，再按当前页分派——练习页走 `handle_practice_shortcut` / `toggle_practice_pause` / `open_typing_help` / `save_and_leave_practice`，跟打页走 `handle_article_shortcut` / `toggle_article_pause` / `open_typing_help` / `back()`；换页的分支由 `set_screen` 顺手清空选中。
+- `open_typing_help`、`toggle_practice_pause`、`save_and_leave_practice` 都是从原来的 `?` / `Ctrl+,` / `Ctrl+C` 分支里抽出来的同一个函数：按钮与快捷键不会各写一份实现。
+- 键盘与鼠标共用同一个入口，因此「点哪个按钮就执行哪个」「点完方向键从它继续」不需要额外状态；按钮条不参与 `ui::focus` 的两栏焦点模型（练习页 / 跟打页本来就不在 `supports_focus` 里）。
 
 输入长度达到当前句 `typing_target`（字母、数字与词间空格按顺序排成的字符序列，见 `Sentence::typing_cells`；词间空格可省略，省略时 `SentenceTyping::input` 自动补成正确输入，不会因此记错）的字符数就调用 `finish_article_sentence`：本句出现过错误时 `wrong_sentences += 1`，然后推进句子下标、排一次防抖保存并朗读下一句；`advance_over_empty_article_sentences` 会跳过没有跟打内容的纯标点 / 空白句（按已完成计），跳过之后到篇尾则直接结算。结算走 `finish_article_practice`，按文章口径生成 `SummaryKind::Article`（完成句数 / 总句数 / 错句数 / 文章标题），去向是文章列表 / 重打本篇 / 主页，见 7.5。
 

@@ -801,7 +801,10 @@ fn a_wrong_letter_after_a_wrapped_space_stays_visible_on_the_next_line() {
     );
 }
 
-/// 最小终端 60×20 下，跟打页底部提示必须完整显示（末尾不能被裁掉）。
+/// 最小终端 60×20 下，跟打页底部的规则行与按钮条必须完整显示（末尾不能被裁掉）。
+///
+/// 底部现在是「规则一行 + 两行动作按钮 + 一行操作提示」：按钮上带键名，
+/// 退出键（Ctrl+C）与页面级返回（Esc）分别落在按钮与提示行里。
 #[test]
 fn the_article_hint_fits_the_minimum_terminal_width() {
     let fixture = common::Fixture::new();
@@ -810,25 +813,33 @@ fn the_article_hint_fits_the_minimum_terminal_width() {
     let text = render_text(&app, 60, 20);
     assert!(
         text.contains("空格可省略"),
-        "提示应完整显示「空格可省略」:\n{text}"
+        "规则行应完整显示「空格可省略」:\n{text}"
     );
     assert!(
         text.contains("Backspace 退格"),
-        "提示末尾不该被裁掉:\n{text}"
+        "规则行末尾不该被裁掉:\n{text}"
     );
-    // 键位提示与练习页同一套：退出键（Ctrl+C / Esc）落在最后一行的末尾，
-    // 一旦整行超宽就会先把它裁掉，所以要看完整的键位文案。
+    // 按钮上的键名与练习页同一套：朗读 / 译文 / 主题 / 帮助 / 暂停 / 返回。
+    for label in [
+        "? 帮助",
+        "Ctrl+P 朗读",
+        "Ctrl+Z 翻译",
+        "Ctrl+Q 主题",
+        "Ctrl+, 暂停",
+    ] {
+        assert!(text.contains(label), "按钮「{label}」应完整显示:\n{text}");
+    }
     assert!(
-        text.contains("? 帮助"),
-        "朗读 / 译文 / 主题 / 帮助的键位提示应完整显示:\n{text}"
-    );
-    assert!(
-        text.contains("Ctrl+C 保存并返回列表"),
+        text.contains("Ctrl+C 返回"),
         "退出键位提示不该被裁掉:\n{text}"
     );
     assert!(
         text.contains("Esc 返回列表"),
         "返回键位提示不该被裁掉:\n{text}"
+    );
+    assert!(
+        text.contains("方向键选中 · Enter 执行 · 鼠标点击"),
+        "按钮条的操作提示应完整显示:\n{text}"
     );
 }
 

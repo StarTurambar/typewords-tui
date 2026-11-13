@@ -32,6 +32,8 @@ impl App {
             return;
         }
         self.screen = screen;
+        // 底部动作按钮属于「当前页」：换页后旧下标指向的是另一页的按钮。
+        self.typing_button = None;
         self.clear_focus();
         self.focus_default();
     }

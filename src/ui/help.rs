@@ -56,6 +56,7 @@ const PRACTICE: &[HelpEntry] = &[
     HelpEntry::Key("Ctrl+G", "切换简洁模式"),
     HelpEntry::Key("Ctrl+Q", "切换主题"),
     HelpEntry::Key("Ctrl+C", "保存并返回主页"),
+    HelpEntry::Key("方向键 + Enter", "选中 / 执行底部动作按钮（鼠标可点）"),
 ];
 
 /// 文章跟打页的键位。
@@ -69,6 +70,7 @@ const ARTICLE: &[HelpEntry] = &[
     HelpEntry::Key("Ctrl+P", "朗读当前句"),
     HelpEntry::Key("Ctrl+Z", "切换当前句译文"),
     HelpEntry::Key("Ctrl+,", "暂停 / 恢复计时"),
+    HelpEntry::Key("方向键 + Enter", "选中 / 执行底部动作按钮（鼠标可点）"),
 ];
 
 const NAVIGATION: &[HelpEntry] = &[

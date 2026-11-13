@@ -119,6 +119,11 @@ pub enum Action {
     ShortcutResetAll,
     // 练习
     PracticeGotoWord(usize),
+    /// 键入练习页底部的动作按钮（下标按当前页的按钮表，行优先）。
+    ///
+    /// 鼠标点击与键盘 `Enter` 共用同一个入口：点哪个按钮就执行哪个，
+    /// 并且把选中落到它上面（之后方向键从这里继续移动）。
+    TypingButton(usize),
     // 结算
     /// 结算弹层：方向键移动按钮焦点（`-1` 向左/上、`+1` 向右/下，到边停）。
     SummaryMove(i32),
@@ -254,6 +259,7 @@ impl App {
             Action::ShortcutReset => self.reset_shortcut_binding(),
             Action::ShortcutResetAll => self.reset_all_shortcut_bindings(),
             Action::PracticeGotoWord(index) => self.goto_practice_word(index),
+            Action::TypingButton(index) => self.activate_typing_button(index),
             Action::SummaryMove(delta) => {
                 if let Some(summary) = self.summary.as_mut() {
                     summary.focus = summary.focus.shifted(delta);

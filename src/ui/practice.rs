@@ -21,10 +21,14 @@ use crate::ui::bigtext::{self, BigLetter, GLYPH_WIDTH};
 use crate::ui::shell::toast_line;
 use crate::ui::target::Target;
 use crate::ui::theme::Theme;
+use crate::ui::typing_buttons::{self, ButtonBar};
 use crate::ui::widgets::{bar_spans, display_width, wrap_text};
 
 /// 信息卡片内容：(标题, 行内容, 最大行数)
 pub(crate) type CardSpec = (String, Vec<(String, Color)>, usize);
+
+/// 底部「阶段」区的总高度（含边框）：阶段条 1 + 按钮条 4 + toast 1 + 边框 2。
+const FOOTER_HEIGHT: u16 = 8;
 
 /// 练习页布局：绘制与鼠标命中共用同一份矩形。
 pub struct PracticeLayout {
@@ -42,6 +46,8 @@ pub struct PracticeLayout {
     pub cards_area: Rect,
     /// 底部阶段条
     pub footer: Rect,
+    /// 底部动作按钮条（工具栏关闭时为 `None`，此时整块底部只剩一行 toast）
+    pub button_bar: Option<ButtonBar>,
     /// 词表侧栏（`show_panel` 关闭时为 `None`）
     pub word_list: Option<Rect>,
     /// 词表可见行：(词序号, 矩形)
@@ -68,7 +74,7 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
             vec![
                 Constraint::Length(1),
                 Constraint::Min(10),
-                Constraint::Length(6),
+                Constraint::Length(FOOTER_HEIGHT),
             ]
         } else {
             vec![
@@ -153,6 +159,27 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
     let group_target = group_span
         .map(|(start, width)| Rect::new(outer[0].x + start as u16, outer[0].y, width as u16, 1));
 
+    // 阶段条占边框内第一行，按钮条（两行按钮 + 留白 + 一行提示）占接下来的
+    // 四行，最后一行留给 toast。按钮条与鼠标命中读同一份矩形。
+    let footer = outer[2];
+    let footer_inner = Rect::new(
+        footer.x + 1,
+        footer.y + 1,
+        footer.width.saturating_sub(2),
+        footer.height.saturating_sub(2),
+    );
+    let button_bar = app.show_toolbar.then(|| {
+        typing_buttons::layout(
+            Rect::new(
+                footer_inner.x,
+                footer_inner.y + 1,
+                footer_inner.width,
+                typing_buttons::HEIGHT,
+            ),
+            app.typing_buttons().len(),
+        )
+    });
+
     PracticeLayout {
         header: outer[0],
         header_line,
@@ -160,7 +187,8 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
         body,
         word_area: content[0],
         cards_area: content[1],
-        footer: outer[2],
+        footer,
+        button_bar,
         word_list,
         word_rows,
         inner_width,
@@ -169,18 +197,29 @@ pub fn layout(app: &App, session: &PracticeSession, area: Rect, theme: &Theme) -
     }
 }
 
-/// 练习页的鼠标目标：点击词表侧栏的某一行跳到该词。
+/// 练习页的鼠标目标：底部动作按钮、词表侧栏的每一行、状态行里的「第 N 组」。
 pub fn targets(app: &App, area: Rect) -> Vec<Target> {
     let Some(session) = app.session.as_ref() else {
         return Vec::new();
     };
     let theme = app.theme();
     let layout = layout(app, session, area, &theme);
-    let mut targets: Vec<Target> = layout
-        .word_rows
-        .iter()
-        .map(|(index, rect)| Target::new(*rect, Action::PracticeGotoWord(*index)))
-        .collect();
+    let mut targets: Vec<Target> = Vec::new();
+    // 底部动作按钮与键盘的 Enter 共用同一个 Action（点哪个就执行哪个）。
+    if let Some(bar) = &layout.button_bar {
+        targets.extend(
+            bar.buttons
+                .iter()
+                .enumerate()
+                .map(|(index, rect)| Target::new(*rect, Action::TypingButton(index))),
+        );
+    }
+    targets.extend(
+        layout
+            .word_rows
+            .iter()
+            .map(|(index, rect)| Target::new(*rect, Action::PracticeGotoWord(*index))),
+    );
     if let Some(rect) = layout.group_target {
         targets.push(Target::new(rect, Action::OpenGroupPicker));
     }
@@ -215,7 +254,14 @@ pub(super) fn render_practice(app: &App, frame: &mut Frame, area: Rect, theme: &
     );
 
     if app.show_toolbar {
-        render_stage_progress(app, session, frame, layout.footer, theme, &display.stages);
+        render_stage_progress(
+            app,
+            frame,
+            layout.footer,
+            theme,
+            &display.stages,
+            layout.button_bar.as_ref(),
+        );
     } else if layout.footer.height > 0 {
         frame.render_widget(Paragraph::new(toast_line(app, theme)), layout.footer);
     }
@@ -439,7 +485,13 @@ fn word_area(
             Style::default().fg(theme.dim),
         )));
     }
-    // 本词的错误次数
+    // 状态徽标：本词的错误次数 + 是否已收藏。
+    //
+    // 收藏是「按了 Enter 画面上什么都没变」的典型：收藏表存在存档里，练习页
+    // 既不推进到下一个词、也不改任何可见状态。把状态钉在单词上方（对齐上游
+    // 单词下方的星标图标：未收藏空心、已收藏实心），配合操作时的 Toast，
+    // 收藏与取消收藏都能当场看见。
+    let mut badges: Vec<Span<'static>> = Vec::new();
     let wrong_times = session
         .data
         .wrong_times_map
@@ -447,12 +499,33 @@ fn word_area(
         .copied()
         .unwrap_or(0);
     if wrong_times > 0 {
-        lines.push(Line::from(Span::styled(
+        badges.push(Span::styled(
             format!("错 {wrong_times} 次"),
             Style::default().fg(theme.bad),
-        )));
+        ));
     }
-    if !phonetic.is_empty() || wrong_times > 0 {
+    if session.is_collect(&app.boot.base) {
+        badges.push(Span::styled(
+            "★ 已收藏",
+            Style::default()
+                .fg(theme.accent_alt)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    let has_badges = !badges.is_empty();
+    if has_badges {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (index, badge) in badges.into_iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::styled("   ", Style::default().fg(theme.dim)));
+            }
+            spans.push(badge);
+        }
+        lines.push(Line::from(spans));
+    }
+    // 有徽标时不再留空行：徽标行顶替的正是原来「错 N 次」那一行，词区高度
+    // 预算与改动前完全一致（最小终端 60×20 下大字不会被多挤掉一行）。
+    if !phonetic.is_empty() && !has_badges {
         lines.push(Line::from(""));
     }
     lines.extend(big.iter().cloned());
@@ -768,60 +841,11 @@ fn practice_block(title: &str, theme: &Theme) -> Block<'static> {
         ))
 }
 
-/// 练习页底部的按键提示。
-///
-/// 快捷键部分按当前键位表生成，用户改绑后提示自动跟着变。
-///
-/// 早期实现把「跳过」「掌握」「继续」三个键位写死成字符串，改绑后提示仍
-/// 指向旧键位——用户按提示找不到对应的键。
-fn practice_hint_lines(app: &App) -> Vec<String> {
-    use crate::domain::shortcut::ShortcutAction;
-    // 已解除绑定的动作不显示键位（否则提示会指向一个按了没反应的键）。
-    let key = |action: ShortcutAction| match app.shortcuts.key_for(action) {
-        Some(key) => key.to_display(),
-        None => "（未绑定）".to_string(),
-    };
-    vec![
-        format!(
-            " 空格 继续 · {} 显示 · {} 跳过 · {} 掌握 · {} 收藏 · ? 帮助",
-            key(ShortcutAction::ShowWord),
-            key(ShortcutAction::Ignore),
-            key(ShortcutAction::ToggleSimple),
-            key(ShortcutAction::ToggleCollect),
-        ),
-        format!(
-            " {} 翻译 · {} 默写 · {} 暂停 · {} 重学 · {} 换组 · {} 简洁 · {} 返回",
-            key(ShortcutAction::ToggleShowTranslate),
-            key(ShortcutAction::ToggleDictation),
-            crate::ui::TUI_PAUSE_KEY,
-            key(ShortcutAction::RepeatChapter),
-            key(ShortcutAction::NextChapter),
-            key(ShortcutAction::ToggleConciseMode),
-            crate::ui::TUI_EXIT_KEY,
-        ),
-    ]
-}
-
-fn hint_line(hints: &str, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled(
-        hints.to_string(),
-        Style::default().fg(theme.dim),
-    ))
-}
-
-fn render_stage_progress(
-    app: &App,
-    session: &PracticeSession,
-    frame: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    stages: &[FlowProgressStage],
-) {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    let mut stage_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+/// 阶段条：每个节点一个名字 + 8 格进度条。
+fn stage_line(stages: &[FlowProgressStage], theme: &Theme) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
     if stages.is_empty() {
-        stage_spans.push(Span::styled("练习", Style::default().fg(theme.dim)));
+        spans.push(Span::styled("练习", Style::default().fg(theme.dim)));
     }
     for stage in stages {
         let color = if stage.active {
@@ -836,26 +860,63 @@ fn render_stage_progress(
         } else {
             stage.name.clone()
         };
-        stage_spans.push(Span::styled(format!("{name} "), Style::default().fg(color)));
-        stage_spans.extend(bar_spans(stage.percentage, 8, color, theme.dim));
-        stage_spans.push(Span::styled(
+        spans.push(Span::styled(format!("{name} "), Style::default().fg(color)));
+        spans.extend(bar_spans(stage.percentage, 8, color, theme.dim));
+        spans.push(Span::styled(
             format!(" {}%   ", stage.percentage),
             Style::default().fg(theme.dim),
         ));
     }
-    lines.push(Line::from(stage_spans));
+    Line::from(spans)
+}
 
-    for hint in practice_hint_lines(app) {
-        lines.push(hint_line(&hint, theme));
-    }
-    if area.height >= 6 {
-        lines.push(toast_line(app, theme));
-    }
-    let _ = session;
-    frame.render_widget(
-        Paragraph::new(lines).block(practice_block(" 阶段 ", theme)),
-        area,
+/// 底部阶段区：阶段条 + 动作按钮 + 操作提示 + toast。
+///
+/// 动作按钮要画成独立控件（不是一个折行字符串），所以这里先铺边框，再逐行
+/// 画内容。按钮矩形来自 [`layout`]，与鼠标命中、键盘选中完全同源。
+///
+/// 按钮上的键名从键位表取，用户改绑后跟着变；按钮没覆盖到的键位（空格继续、
+/// `? 帮助`）写在提示行里，与两个练习页共用的常量同源。
+fn render_stage_progress(
+    app: &App,
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    stages: &[FlowProgressStage],
+    bar: Option<&ButtonBar>,
+) {
+    frame.render_widget(practice_block(" 阶段 ", theme), area);
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
     );
+    frame.render_widget(
+        Paragraph::new(stage_line(stages, theme)),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+    if let Some(bar) = bar {
+        // 按钮没覆盖到的键位（继续 / 帮助）写在提示行；键名同样从键位表取。
+        let tail = format!("空格 继续 · {} 帮助", crate::ui::TUI_HELP_KEY);
+        typing_buttons::render(
+            frame,
+            app,
+            theme,
+            bar,
+            app.typing_buttons(),
+            app.typing_button,
+            &tail,
+        );
+    }
+    // toast 固定在最后一行：上面是阶段条与按钮条，不会和它抢位置。
+    let toast_y = inner.bottom().saturating_sub(1);
+    if toast_y > inner.y {
+        frame.render_widget(
+            Paragraph::new(toast_line(app, theme)),
+            Rect::new(inner.x, toast_y, inner.width, 1),
+        );
+    }
 }
 
 fn render_word_list(

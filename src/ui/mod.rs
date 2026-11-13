@@ -20,6 +20,7 @@ pub mod shortcuts;
 pub mod stats;
 pub mod target;
 pub mod theme;
+pub mod typing_buttons;
 pub mod widgets;
 pub mod word_test;
 pub mod words;
@@ -47,6 +48,9 @@ pub const TUI_EXIT_KEY: &str = "Ctrl+C";
 
 /// TUI 专有键位的展示写法：暂停 / 恢复计时（两个练习页共用）。
 pub const TUI_PAUSE_KEY: &str = "Ctrl+,";
+
+/// TUI 专有键位的展示写法：整屏帮助（所有页面共用）。
+pub const TUI_HELP_KEY: &str = "?";
 
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();

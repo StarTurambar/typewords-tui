@@ -119,7 +119,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | 复现随机问题 | `--seed <N>` 固定随机源；报告问题时附上 seed 与操作步骤 |
 | 清空练习状态 | `--reset-practice`，或删除 `<home>/practice-word.json` |
 | 练习页可视化 | `cargo run --example dump -- <mode> [typed] [width] [height] [big 或 plain]` 把练习页渲染成等宽文本 |
-| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/home-nav-focus/practice/wordtest/words/articles/flows/articlepractice/dict/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
+| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/home-nav-focus/practice/practice-buttons/practice-collect/wordtest/words/articles/flows/articlepractice/dict/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
 | panic 定位 | `RUST_BACKTRACE=1`；程序安装了 panic hook，会先恢复终端与鼠标捕获再打印回溯 |
 | 日志 | 程序当前**没有**日志设施（不写日志文件）；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤 |
 | 手工检查存档 | 存档是可读 JSON：`dict.json`、`setting.json`、`practice-word.json`，字段说明见 [persistence.md](persistence.md) |
@@ -137,7 +137,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 22 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
+仓库 `docs/screenshots/` 的 24 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
@@ -151,6 +151,8 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `home-120x40-paper.png` | `home 120 40 paper` |
 | `home-120x40-ikb.png` | `home 120 40 ikb` |
 | `practice-120x40-dark.png` | `practice 120 40 dark` |
+| `practice-buttons-120x40-dark.png` | `practice-buttons 120 40 dark`（底部按钮条：按两次 `→` 选中「跳过」，展示选中态） |
+| `practice-collect-120x40-dark.png` | `practice-collect 120 40 dark`（收藏反馈：`Enter` 收藏当前词，展示「★ 已收藏」徽标、收藏按钮星标与底部 Toast；这张图保留 Toast，其它快照会清空） |
 | `dict-120x40-dark.png` | `dict 120 40 dark` |
 | `stats-120x40-dark.png` | `stats 120 40 dark` |
 | `settings-120x40-dark.png` | `settings 120 40 dark` |

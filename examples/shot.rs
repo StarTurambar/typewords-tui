@@ -5,9 +5,9 @@
 //! 用法：
 //!   cargo run --quiet --example shot -- <screen> [width] [height] [theme] [--plain]
 //!
-//!   screen: home | home-focus | home-nav-focus | practice | wordtest | words | articles | flows |
-//!           articlepractice | dict | stats | settings | shortcuts | help | summary |
-//!           summary-article | edit | confirm
+//!   screen: home | home-focus | home-nav-focus | practice | practice-buttons | practice-collect |
+//!           wordtest | words | articles | flows | articlepractice | dict | stats | settings |
+//!           shortcuts | help | summary | summary-article | edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
 //!   theme: 写入 app.boot.settings.theme 的字符串（内置 dark/light/high-contrast/
 //!          midnight/paper/ikb，自定义主题名也可传；未知名字由 app 自行回退）
@@ -47,6 +47,8 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "home-focus",
     "home-nav-focus",
     "practice",
+    "practice-buttons",
+    "practice-collect",
     "wordtest",
     "words",
     "articles",
@@ -124,7 +126,10 @@ fn run() -> Result<()> {
     // 主题在导航之后再写一次：某些页面（如 settings）的按键操作可能临时改动它。
     app.boot.settings.theme = theme.clone();
     // 截图里不要出现启动/操作过程中的临时 toast，保持画面可复现。
-    app.toasts.clear();
+    // 「收藏反馈」那张图要的正是收藏后的 Toast，例外保留。
+    if screen != "practice-collect" {
+        app.toasts.clear();
+    }
 
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).context("create terminal")?;
@@ -200,6 +205,27 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             }
         }
         "practice" => start_practice(app)?,
+        // 底部按钮条的选中态：→ 选中第一个按钮（显示），再 → 到「跳过」。
+        "practice-buttons" => {
+            start_practice(app)?;
+            press(app, KeyCode::Right);
+            press(app, KeyCode::Right);
+            if app.typing_button != Some(1) {
+                bail!(
+                    "practice-buttons: arrow keys did not select the second button (got {:?})",
+                    app.typing_button
+                );
+            }
+        }
+        // 收藏反馈：Enter 收藏当前词，画面上会同时出现单词上方的「★ 已收藏」
+        // 徽标、收藏按钮上的星标与底部 Toast。
+        "practice-collect" => {
+            start_practice(app)?;
+            press(app, KeyCode::Enter);
+            if app.boot.base.collect_count() == 0 {
+                bail!("practice-collect: Enter did not collect the current word");
+            }
+        }
         "wordtest" => start_word_test(app)?,
         "words" => start_words(app)?,
         "articles" => start_articles(app)?,

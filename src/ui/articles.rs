@@ -7,12 +7,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
+use crate::app::buttons::ARTICLE_BUTTONS;
 use crate::app::{App, ArticlePracticeState};
 use crate::domain::article::TypingCell;
-use crate::domain::shortcut::ShortcutAction;
 use crate::domain::timer::format_duration;
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
+use crate::ui::typing_buttons::{self, ButtonBar};
 use crate::ui::widgets;
 
 /// 书本 / 文章列表页的布局。
@@ -162,18 +163,72 @@ fn saved_line(app: &App, article_id: i64, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// 跟打页的鼠标目标。
-///
-/// 该页独占整屏，不画侧栏，因此没有导航目标——练习本身只能用键盘。
-pub fn practice_targets(_app: &App, _area: Rect) -> Vec<crate::ui::target::Target> {
-    Vec::new()
-}
-
 /// 跟打页译文区的高度。
 const TRANSLATE_HEIGHT: u16 = 4;
 
-/// 跟打页底部提示的行数（规则一行 + 键位两行）。
-const HINT_HEIGHT: u16 = 3;
+/// 跟打页底部的高度：规则一行 + 按钮条四行（两行按钮 + 留白 + 提示）。
+const HINT_HEIGHT: u16 = 5;
+
+/// 跟打页布局：标题行 / 正文 / 译文 / 底部规则 + 动作按钮。
+///
+/// 绘制与鼠标命中共用这一份矩形，按钮条不会和画出来的位置漂移。
+pub struct PracticeLayout {
+    pub header: Rect,
+    pub body: Rect,
+    /// 当前句译文区（关掉译文时为 `None`，这块高度还给正文）
+    pub translate: Option<Rect>,
+    /// 底部规则行（当前输入规则 / 打错提示）
+    pub rule: Rect,
+    /// 底部动作按钮条
+    pub button_bar: ButtonBar,
+}
+
+pub fn practice_layout(practice: &ArticlePracticeState, area: Rect) -> PracticeLayout {
+    let translate_height = if practice.show_translate {
+        TRANSLATE_HEIGHT
+    } else {
+        0
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(8),
+            Constraint::Length(translate_height),
+            Constraint::Length(HINT_HEIGHT),
+        ])
+        .split(area);
+    let footer = chunks[3];
+    PracticeLayout {
+        header: chunks[0],
+        body: chunks[1],
+        translate: (translate_height > 0).then(|| chunks[2]),
+        rule: Rect::new(footer.x, footer.y, footer.width, 1),
+        button_bar: typing_buttons::layout(
+            Rect::new(footer.x, footer.y + 1, footer.width, typing_buttons::HEIGHT),
+            ARTICLE_BUTTONS.len(),
+        ),
+    }
+}
+
+/// 跟打页的鼠标目标：底部动作按钮。
+///
+/// 该页独占整屏、不画侧栏，因此没有导航目标；点击按钮与键盘 `Enter` 走同一个
+/// `Action::TypingButton`，点哪个按钮就执行哪个。
+pub fn practice_targets(app: &App, area: Rect) -> Vec<crate::ui::target::Target> {
+    use crate::ui::target::Target;
+    let Some(practice) = app.article_practice.as_ref() else {
+        return Vec::new();
+    };
+    let layout = practice_layout(practice, area);
+    layout
+        .button_bar
+        .buttons
+        .iter()
+        .enumerate()
+        .map(|(index, rect)| Target::new(*rect, crate::app::Action::TypingButton(index)))
+        .collect()
+}
 
 /// 折行后的一行：字符、所属句子下标、是否该句的首行。
 struct ArticleLine {
@@ -273,20 +328,7 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
     };
     // 译文区跟着 `Ctrl+Z`（与练习页「切换翻译」同一个键）走：
     // 关掉时把它占的行数还给正文，而不是留一块空面板。
-    let translate_height = if practice.show_translate {
-        TRANSLATE_HEIGHT
-    } else {
-        0
-    };
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(8),
-            Constraint::Length(translate_height),
-            Constraint::Length(HINT_HEIGHT),
-        ])
-        .split(area);
+    let layout = practice_layout(practice, area);
 
     let total = practice.sentences.len();
     let index = practice.index.min(total.saturating_sub(1));
@@ -324,11 +366,11 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
     if practice.paused {
         header.push(Span::styled("   已暂停", Style::default().fg(theme.warn)));
     }
-    frame.render_widget(Paragraph::new(Line::from(header)), chunks[0]);
+    frame.render_widget(Paragraph::new(Line::from(header)), layout.header);
 
     // 正文：整篇文章一页显示，视口跟着光标走
-    let inner_width = chunks[1].width.saturating_sub(2) as usize;
-    let viewport = chunks[1].height.saturating_sub(2) as usize;
+    let inner_width = layout.body.width.saturating_sub(2) as usize;
+    let viewport = layout.body.height.saturating_sub(2) as usize;
     let ignore_case = app.boot.settings.ignore_case;
     let lines = article_lines(practice, inner_width.saturating_sub(2));
     let offset = cursor_line(&lines, practice)
@@ -347,17 +389,17 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
         .collect();
     frame.render_widget(
         Paragraph::new(rendered).block(practice_block(" 跟打 ", theme)),
-        chunks[1],
+        layout.body,
     );
 
     // 当前句译文（整篇文章同页时，译文只跟随当前句）
-    if translate_height > 0 {
+    if let Some(area) = layout.translate {
         let translate = practice
             .sentences
             .get(index)
             .map(|sentence| sentence.translate.clone())
             .unwrap_or_default();
-        let translate_width = chunks[2].width.saturating_sub(3) as usize;
+        let translate_width = area.width.saturating_sub(3) as usize;
         let mut translate_lines: Vec<Line<'static>> = Vec::new();
         if translate.trim().is_empty() {
             translate_lines.push(Line::from(Span::styled(
@@ -377,15 +419,14 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
         }
         frame.render_widget(
             Paragraph::new(translate_lines).block(practice_block(" 当前句译文 ", theme)),
-            chunks[2],
+            area,
         );
     }
 
-    // 底部提示：规则一行 + 键位两行。
+    // 底部：一行输入规则 + 动作按钮条（两行按钮 + 一行提示）。
     //
-    // 键位从键位表里取，和练习页底部的提示同源——用户改绑「播放单词发音」
-    // /「切换翻译」/「切换主题」后，两个练习页的提示一起变，不会一边显示
-    // 新键位、另一边还写着旧键位。
+    // 键名不再写死：按钮上的键名从键位表取，改绑「朗读 / 翻译 / 主题」后
+    // 跟打页的按钮跟着变，和练习页保持同源。
     let (hint, color) = if practice.typing.wrong {
         (" 红色 = 打错的字符 · Backspace 改正", theme.warn)
     } else {
@@ -394,33 +435,19 @@ pub fn render_article_practice(app: &App, frame: &mut Frame, area: Rect, theme: 
             theme.dim,
         )
     };
-    let key = |action: ShortcutAction| match app.shortcuts.key_for(action) {
-        Some(key) => key.to_display(),
-        None => "（未绑定）".to_string(),
-    };
-    let hints = vec![
-        Line::from(Span::styled(hint, Style::default().fg(color))),
-        Line::from(Span::styled(
-            format!(
-                " {} 朗读 · {} 译文 · {} 主题 · ? 帮助",
-                key(ShortcutAction::PlayWordPronunciation),
-                key(ShortcutAction::ToggleShowTranslate),
-                key(ShortcutAction::ToggleTheme),
-            ),
-            Style::default().fg(theme.dim),
-        )),
-        // 键位行要整个塞进 60 列的最小终端：超出的部分会被裁掉，
-        // 「Esc 返回列表」这类收尾键位正好落在被裁的位置上。
-        Line::from(Span::styled(
-            format!(
-                " {} 暂停 / 恢复 · {} 保存并返回列表 · Esc 返回列表",
-                crate::ui::TUI_PAUSE_KEY,
-                crate::ui::TUI_EXIT_KEY,
-            ),
-            Style::default().fg(theme.dim),
-        )),
-    ];
-    frame.render_widget(Paragraph::new(hints), chunks[3]);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(color)))),
+        layout.rule,
+    );
+    typing_buttons::render(
+        frame,
+        app,
+        theme,
+        &layout.button_bar,
+        app.typing_buttons(),
+        app.typing_button,
+        "Esc 返回列表",
+    );
 }
 
 /// 渲染正文的一行：行首 gutter + 按跟打进度逐字符着色。

@@ -32,6 +32,7 @@ use crate::paths::Paths;
 use crate::store::{FileStore, LoadStatus};
 
 pub mod action;
+pub mod buttons;
 pub mod focus;
 pub mod keymap;
 pub mod mouse;
@@ -469,6 +470,12 @@ pub struct App {
     /// 统计页日历选中的日期
     pub stats_day: chrono::NaiveDate,
     pub help_scroll: u16,
+    /// 键入练习页底部动作按钮的选中下标（行优先，见 [`buttons`]）。
+    ///
+    /// `None` 表示没有选中：方向键与 `Enter` 仍属于键入 / 键位表，这也是
+    /// 刚进练习页的状态。存下标而不是身份，是因为两个练习页的按钮表固定，
+    /// 换页时 `set_screen` 会清空它。
+    pub typing_button: Option<usize>,
     pub show_toolbar: bool,
     pub show_panel: bool,
     pub show_meta: bool,
@@ -651,6 +658,7 @@ impl App {
             },
             stats_day: chrono::Local::now().date_naive(),
             help_scroll: 0,
+            typing_button: None,
             show_toolbar: true,
             show_panel: false,
             show_meta: true,
@@ -1731,8 +1739,35 @@ impl App {
         let Some(session) = self.session.as_mut() else {
             return;
         };
+        let word = session.current_word().word.to_lowercase();
+        // 同一个按钮是开关：已经在目标词典里时这次是「取消收藏」，提示也要跟着变，
+        // 否则取消收藏之后界面还说「已收藏到」。
+        let was_there = self
+            .boot
+            .base
+            .word
+            .book_list
+            .get(index)
+            .map(|dict| {
+                dict.words
+                    .iter()
+                    .any(|item| item.word.to_lowercase() == word)
+            })
+            .unwrap_or(false);
         session.toggle_collect_to(&mut self.boot.base, index);
-        self.toast(NoticeLevel::Success, format!("已收藏到「{name}」"));
+        let message = if was_there {
+            format!("已从「{name}」取消收藏")
+        } else {
+            format!("已收藏到「{name}」")
+        };
+        self.toast(
+            if was_there {
+                NoticeLevel::Info
+            } else {
+                NoticeLevel::Success
+            },
+            message,
+        );
         self.schedule_practice_save();
     }
 
@@ -3290,6 +3325,11 @@ impl App {
     /// 快捷键表与上游 `shortcutKeyMap` 同构，动作 → 键位；
     /// TUI 专有键位（暂停计时、退出等）放在 `handle_practice_tui_key`。
     fn on_practice_key(&mut self, key: KeyEvent) {
+        // 底部动作按钮：已选中时的 Enter 执行按钮，其它按键取消选中，
+        // 之后的按键语义与没有按钮条时完全一样。
+        if self.handle_typing_button_key(key) {
+            return;
+        }
         if let Some(shortcut) = keymap::to_shortcut_key(key) {
             let actions = self.shortcuts.actions_for(&shortcut);
             for action in actions {
@@ -3304,6 +3344,12 @@ impl App {
         if let Some(input) = key_to_input(&key) {
             crate::audio::play_key(&self.boot.settings);
             self.handle_typing_key(input);
+            return;
+        }
+        // 走到这里说明键位表 / TUI 键位 / 键入都没人要这个键：裸方向键就是
+        // 按钮条的选中键（键位表占用了方向键时已在上面被消费掉）。
+        if let Some(direction) = buttons::plain_arrow_direction(&key) {
+            self.move_typing_button(direction);
         }
     }
 
@@ -3315,6 +3361,10 @@ impl App {
     /// 剩下的字符才进跟打引擎——按键表里没被这里消费的动作绝不会抢走字母、
     /// 数字与空格，跟打内容不会因为键位表里绑了 `1`~空格 而被吞掉。
     fn on_article_practice_key(&mut self, key: KeyEvent) {
+        // 与练习页同一套按钮条：方向键选中、Enter 执行，其余按键让位给键入。
+        if self.handle_typing_button_key(key) {
+            return;
+        }
         if let Some(shortcut) = keymap::to_shortcut_key(key) {
             for action in self.shortcuts.actions_for(&shortcut) {
                 if self.handle_article_shortcut(action) {
@@ -3326,6 +3376,10 @@ impl App {
             return;
         }
         self.article_typing_key(key);
+        // 跟打引擎只吃字符与退格：没人要的裸方向键属于按钮条。
+        if let Some(direction) = buttons::plain_arrow_direction(&key) {
+            self.move_typing_button(direction);
+        }
     }
 
     /// 处理跟打页共用的键位表动作；返回 `true` 表示该动作已消费按键。
@@ -3365,8 +3419,7 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('?') => {
-                self.help_scroll = 0;
-                self.set_screen(Screen::Help);
+                self.open_typing_help();
                 true
             }
             KeyCode::Char('c') if ctrl => {
@@ -3415,6 +3468,27 @@ impl App {
         self.last_timer_tick = timer::now_ms();
     }
 
+    /// 收藏 / 取消收藏当前词，返回给用户看的反馈文案。
+    ///
+    /// 收藏是「按了键画面上什么都没变」的典型：收藏表存在 `dict.json` 里，
+    /// 练习页既不会推进到下一个词、也不改任何可见状态。这里返回一条 Toast，
+    /// 由调用方弹出来，让「收藏 / 取消收藏」当场可确认；单词上方的「★ 已收藏」
+    /// 徽标由渲染层读取同一个 `is_collect` 状态，两者不会各说一套。
+    fn toggle_current_word_collect(&mut self) -> Option<(NoticeLevel, String)> {
+        let session = self.session.as_mut()?;
+        let word = session.current_word().word;
+        if word.is_empty() {
+            return None;
+        }
+        session.toggle_collect(&mut self.boot.base);
+        let collected = session.is_collect(&self.boot.base);
+        Some(if collected {
+            (NoticeLevel::Success, format!("已收藏「{word}」"))
+        } else {
+            (NoticeLevel::Info, format!("已取消收藏「{word}」"))
+        })
+    }
+
     /// 处理练习页的快捷键动作；返回 `true` 表示该动作已消费按键。
     fn handle_practice_shortcut(&mut self, action: ShortcutAction) -> bool {
         use ShortcutAction::*;
@@ -3430,8 +3504,8 @@ impl App {
                 true
             }
             ToggleCollect => {
-                if let Some(session) = self.session.as_mut() {
-                    session.toggle_collect(&mut self.boot.base);
+                if let Some((level, message)) = self.toggle_current_word_collect() {
+                    self.toast(level, message);
                 }
                 true
             }
@@ -3567,22 +3641,12 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('?') => {
-                self.help_scroll = 0;
-                self.set_screen(Screen::Help);
+                self.open_typing_help();
                 true
             }
             // 暂停计时：上游没有手动暂停，这是 TUI 专有键位
             KeyCode::Char(',') if ctrl => {
-                if self.stat.timer_paused {
-                    timer::resume(&mut self.stat, timer::now_ms());
-                    self.toast(
-                        NoticeLevel::Success,
-                        crate::domain::i18n::tr("timer_resume"),
-                    );
-                } else {
-                    timer::pause(&mut self.stat, "manual", timer::now_ms());
-                    self.toast(NoticeLevel::Info, crate::domain::i18n::tr("timer_paused"));
-                }
+                self.toggle_practice_pause();
                 true
             }
             // 例句 / 词源开关：上游该键位是「编辑文章」
@@ -3605,13 +3669,38 @@ impl App {
                 true
             }
             KeyCode::Char('c') if ctrl => {
-                self.save_practice_now();
-                self.save_dict_now();
-                self.leave_practice();
+                self.save_and_leave_practice();
                 true
             }
             _ => false,
         }
+    }
+
+    /// 打开键入练习中的整屏帮助；返回时由 `help_back` 回到对应练习页。
+    fn open_typing_help(&mut self) {
+        self.help_scroll = 0;
+        self.set_screen(Screen::Help);
+    }
+
+    /// 暂停 / 恢复练习计时（练习页 `Ctrl+,` 与底部「暂停」按钮共用）。
+    fn toggle_practice_pause(&mut self) {
+        if self.stat.timer_paused {
+            timer::resume(&mut self.stat, timer::now_ms());
+            self.toast(
+                NoticeLevel::Success,
+                crate::domain::i18n::tr("timer_resume"),
+            );
+        } else {
+            timer::pause(&mut self.stat, "manual", timer::now_ms());
+            self.toast(NoticeLevel::Info, crate::domain::i18n::tr("timer_paused"));
+        }
+    }
+
+    /// 保存本轮进度与词典，然后回主页（练习页 `Ctrl+C` 与底部「返回」按钮共用）。
+    fn save_and_leave_practice(&mut self) {
+        self.save_practice_now();
+        self.save_dict_now();
+        self.leave_practice();
     }
 
     fn toggle_setting_bool(&mut self, key: &str) {
