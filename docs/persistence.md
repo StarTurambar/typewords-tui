@@ -535,6 +535,12 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 4. 启动 TUI，用 `tw doctor` 核对路径、词库数量与存档文件大小，再进设置页确认主题等字段。
 5. Web 备份里当前学习词典若在 TUI 资源中不存在（例如 Web 端自建、TUI 没有对应词库目录项），启动会回退到词库资源（`ensure_study_dict` 的兜底顺序：原 id → `cet4` → 第一本词库）；`studyIndex` 指向某本系统词典（`system: true`）时按内置词典原样保留，不回退。
 
+`tw import-web` 的落盘规则：
+
+- **版本**：顶层备份版本高于 5 → 整体拒绝；`dict`(4) / `setting`(23) / `PracticeSaveArticle`(1) 信封版本高于支持值时**跳过该项**；`PracticeSaveWord` 必须等于 2（低版本 TUI 也读不懂），否则跳过并保留本地断点。
+- **结构**：`dict` / `setting` / `PracticeSaveWord` 落盘前先按目标类型做一次宽容反序列化（`SaveEnvelope<BaseState>` / `SaveEnvelope<SettingState>` / `SaveEnvelope<Option<PracticeCacheCompact>>`）。缺字段由 `serde(default)` 补默认、未知字段忽略；缺 `val` / 缺 `version` / 字段类型对不上则**拒绝该项**、原文件不动并打印原因。校验的是即将写入的原文，写入时仍原样落盘，因此未建模字段不会丢——不会出现「导入成功、下次启动却被判损坏」。
+- **备份与回滚**：覆盖已有文件前先复制为 `<文件名>.bak-<YYYYMMDD-HHMMSS>.json`（同一秒重名自动加 `-2`、`-3`）；多个文件写入途中失败时，已写入的文件用 `.bak` 回滚，错误信息给出备份路径。`.bak` 不会自动清理。
+
 迁移风险：
 
 | 风险 | 说明 |
@@ -555,6 +561,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 - **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json` 与 `practice-article.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json` + `practice-article.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
 - **彻底重置**：关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢）；下次启动会重建目录并按默认值运行。
 - **删除/隔离坏档**：启动 Toast 会给出隔离后的文件名（`*.corrupt-<时间戳>.json`）；确认不需要后可删除隔离文件与坏档本身。版本过高时**不要**为了启动而降级程序或手改 `version`，优先备份后升级程序。
+- **导入覆盖的备份**：`tw import-web` 覆盖前留下的 `<文件名>.bak-<时间戳>.json` 不会被自动清理；确认导入结果无误后可删除。需要退回时关闭程序，用备份文件覆盖同名存档（`dict.json` / `setting.json` / `practice-word.json` / `practice-article.json`）即可。
 - **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` / `practice-article.json` 版本不符 → 忽略并在下次保存时覆盖。四类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
 
 `tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**存档文件大小**（不存在则标注）、自定义主题目录与全部主题、主题加载告警。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：

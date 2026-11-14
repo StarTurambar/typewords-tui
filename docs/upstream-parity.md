@@ -275,7 +275,7 @@ Web 备份 data.json                       TUI 数据目录
 
 手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入四个文件（保留各自信封；文章项仅限 TUI 导出的备份）→ `tw doctor` 核对 → 启动检查设置与断点。
 
-现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本；`dict` / `setting` / `PracticeSaveWord` 原样落盘，文章断点按来源分流），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
+现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本与结构，覆盖前留 `.bak` 备份；`dict` / `setting` / `PracticeSaveWord` 原样落盘，文章断点按来源分流），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
 
 ### 5.3 字段语义差异与风险
 
@@ -291,8 +291,8 @@ Web 备份 data.json                       TUI 数据目录
 
 ### 5.4 未来互通建议
 
-- **Web 导出适配器（已完成）**：`tw import-web <data.json>` 解析 `BackupData` v5、按版本校验后拆成四个文件，文章断点按来源分流；`tw export-web` 生成可被 Web 导入的 JSON。仍不支持的丢弃项是 app version 与 mp3。
-- **版本先行**：导入前检查 `dict.version` / `setting.version` / `PracticeSaveWord.version`，高于 TUI 支持的版本时拒绝写入并提示升级，避免只读/覆盖问题。
+- **Web 导出适配器（已完成）**：`tw import-web <data.json>` 解析 `BackupData` v5、按版本与结构校验后拆成四个文件（覆盖前留 `.bak` 备份，解析不了的载荷拒绝写入并保持原文件），文章断点按来源分流；`tw export-web` 生成可被 Web 导入的 JSON。仍不支持的丢弃项是 app version 与 mp3。
+- **版本与结构先行**：导入前检查 `dict.version` / `setting.version` / `PracticeSaveWord.version`，高于 TUI 支持的版本时跳过该项并提示升级；同时按目标存档类型做一次反序列化校验，读不懂的载荷不落盘。
 - **卡片归一化**：对学习卡重新计算 `stability` / `difficulty` 或在导入时标记「需要重新学习」，避免跨端调度异常。
 - **明确「不映射」清单**：网页版自己产生的文章游标（没有文章 id）、mp3、Supabase 快照、快捷键/字体/主题等平台相关字段不应伪装成可互通。
 

@@ -188,7 +188,11 @@ impl FileStore {
     }
 
     /// 原样写入一份存档（用于网页版备份导入，保留未建模的字段）。
-    pub fn write_envelope_raw(&self, name: &str, text: &str) -> Result<()> {
+    ///
+    /// 调用方必须先用目标存档类型做一次反序列化校验（见
+    /// `backup::import_web_value`）；这里只做字节级原子替换、不解析内容，
+    /// 以免把可读但不兼容的备份写进数据目录。目前只有导入路径使用。
+    pub(crate) fn write_envelope_raw(&self, name: &str, text: &str) -> Result<()> {
         write_atomic(&self.file_path(name), text)
     }
 

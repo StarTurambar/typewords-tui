@@ -92,7 +92,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/store_roundtrip.rs` | 7 | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除、练习缓存版本不支持（不移动文件） |
 | `tests/end_to_end.rs` | 5 | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；只剩 1 个错词、小组只有 1 个词时巩固阶段不会卡住 |
 | `tests/audio.rs` | 4 | 朗读触发：换词自动朗读、单词测试切题朗读与 `Ctrl+P` 重播（用 `audio::record_speech` 断言） |
-| `tests/backup_roundtrip.rs` | 4 | 网页版备份 `BackupData` v5 的导入导出互通与版本校验 |
+| `tests/backup_roundtrip.rs` | 17 | 网页版备份 `BackupData` v5 的导入导出互通：版本与结构校验、拒绝损坏载荷、覆盖前 `.bak` 备份与失败回滚、文章断点分流 |
 | `tests/flow_parity.rs` | 4 | 7 个内置流程均可推进到结算；错词清空；相位与练习类型一致 |
 | `tests/home_resume.rs` | 3 | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
 | `tests/import_dict.rs` | 3 | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |

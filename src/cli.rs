@@ -177,10 +177,19 @@ pub fn import_web(paths: &Paths, file: &Path) -> Result<()> {
         println!("已导入: {key}");
     }
     for key in &report.skipped {
-        println!("已跳过: {key}（版本高于本程序支持）");
+        println!("已跳过: {key}");
+    }
+    for key in &report.rejected {
+        println!("已拒绝: {key}");
     }
     for key in &report.discarded {
         println!("已丢弃: {key}");
+    }
+    for name in &report.backups {
+        println!("已备份原存档: {name}");
+    }
+    if !report.rejected.is_empty() {
+        println!("被拒绝的存档没有写入，原文件保持不变。");
     }
     if !report.written.is_empty() {
         println!(

@@ -6,6 +6,7 @@ use std::path::Path;
 
 use typewords_tui::backup;
 use typewords_tui::domain::article::{ArticleCache, ArticleCacheEnvelope};
+use typewords_tui::domain::types::{BaseState, PracticeCacheCompact, PracticeState, SettingState};
 use typewords_tui::store::FileStore;
 
 fn open_store(home: &Path) -> FileStore {
@@ -349,4 +350,262 @@ fn import_web_skips_entries_with_a_newer_version() {
         report.skipped.iter().any(|item| item.contains("setting")),
         "高版本的 setting 应被跳过"
     );
+}
+
+/// 导入前必须按目标存档类型校验 `val`：结构不对的条目不写盘，原文件保持原样。
+#[test]
+fn import_rejects_unparsable_envelopes() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let mut dict = BaseState::default();
+    dict.note_data
+        .insert("word00".to_string(), "本地笔记".to_string());
+    store.save_dict(&dict).expect("写 dict");
+    let before = std::fs::read(fixture.home().join("dict.json")).expect("读 dict");
+
+    let path = fixture.home().join("broken-dict.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"dict":{"version":4,"val":"not-an-object"}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入应继续并报告拒绝");
+    assert!(
+        report.written.is_empty(),
+        "损坏的存档不应被写入: {:?}",
+        report.written
+    );
+    assert!(
+        report.rejected.iter().any(|item| item.contains("dict")),
+        "应报告拒绝 dict: {:?}",
+        report.rejected
+    );
+    assert!(
+        report.backups.is_empty(),
+        "没有写入就不该产生备份: {:?}",
+        report.backups
+    );
+    assert_eq!(
+        std::fs::read(fixture.home().join("dict.json")).expect("读 dict"),
+        before,
+        "原 dict.json 字节必须保持不变"
+    );
+    let loaded = store.load_dict();
+    assert!(loaded.is_ok(), "原存档仍应可读: {:?}", loaded.status);
+    assert_eq!(
+        loaded.value.note_data.get("word00").map(String::as_str),
+        Some("本地笔记")
+    );
+    assert!(
+        !std::fs::read_dir(fixture.home())
+            .expect("读目录")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dict.json.bak-")),
+        "被拒绝的条目不产生备份文件"
+    );
+}
+
+/// 一项结构损坏只拒绝该项，其余合法存档照常导入。
+#[test]
+fn import_rejects_only_the_unparsable_save() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let mut local = BaseState::default();
+    local
+        .note_data
+        .insert("word00".to_string(), "本地".to_string());
+    store.save_dict(&local).expect("写 dict");
+    store
+        .save_settings(&SettingState::default())
+        .expect("写 setting");
+    let setting_before = std::fs::read(fixture.home().join("setting.json")).expect("读 setting");
+
+    let path = fixture.home().join("mixed-broken.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{
+            "dict":{"version":4,"val":{"word":{"bookList":[],"studyIndex":-1},"article":{"bookList":[],"studyIndex":-1},"noteData":{"word01":"导入"}}},
+            "setting":{"version":23,"val":"not-an-object"}
+        }}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert_eq!(report.written, vec!["dict".to_string()]);
+    assert!(
+        report.rejected.iter().any(|item| item.contains("setting")),
+        "应只拒绝 setting: {:?}",
+        report.rejected
+    );
+    assert_eq!(
+        store
+            .load_dict()
+            .value
+            .note_data
+            .get("word01")
+            .map(String::as_str),
+        Some("导入"),
+        "合法的 dict 应照常导入"
+    );
+    assert_eq!(
+        std::fs::read(fixture.home().join("setting.json")).expect("读 setting"),
+        setting_before,
+        "被拒绝的 setting.json 不应被改动"
+    );
+}
+
+/// 覆盖前必须留下字节级备份，且原样落盘不能丢未建模字段。
+#[test]
+fn import_backs_up_replaced_saves_and_keeps_unmodelled_fields() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let mut local = BaseState::default();
+    local
+        .note_data
+        .insert("word00".to_string(), "本地".to_string());
+    store.save_dict(&local).expect("写 dict");
+    let before = std::fs::read(fixture.home().join("dict.json")).expect("读 dict");
+
+    let path = fixture.home().join("future-field.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"dict":{"version":4,"val":{
+            "word":{"bookList":[],"studyIndex":-1},
+            "article":{"bookList":[],"studyIndex":-1},
+            "futureField":{"x":1}
+        }}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert_eq!(report.written, vec!["dict".to_string()]);
+    let backup_name = report
+        .backups
+        .iter()
+        .find(|name| name.starts_with("dict.json.bak-"))
+        .unwrap_or_else(|| panic!("应留下 dict 备份: {:?}", report.backups))
+        .clone();
+    assert_eq!(
+        std::fs::read(fixture.home().join(&backup_name)).expect("读备份"),
+        before,
+        "备份必须是覆盖前的原始字节"
+    );
+
+    let imported: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.home().join("dict.json")).expect("读导入结果"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        imported["val"]["futureField"]["x"], 1,
+        "未建模字段必须原样保留: {imported}"
+    );
+}
+
+/// 多文件写入中途失败时，已写入的文件要回滚到导入前。
+#[test]
+fn import_rolls_back_when_a_later_save_cannot_be_written() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let mut local = BaseState::default();
+    local
+        .note_data
+        .insert("word00".to_string(), "本地".to_string());
+    store.save_dict(&local).expect("写 dict");
+    let before = std::fs::read(fixture.home().join("dict.json")).expect("读 dict");
+
+    // setting.json 是目录：写入前就会拒绝，用来稳定触发回滚。
+    std::fs::create_dir(fixture.home().join("setting.json")).expect("建目录");
+
+    let path = fixture.home().join("rollback.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{
+            "dict":{"version":4,"val":{"word":{"bookList":[],"studyIndex":-1},"article":{"bookList":[],"studyIndex":-1},"noteData":{"word01":"导入"}}},
+            "setting":{"version":23,"val":{}}
+        }}"#,
+    )
+    .expect("写备份");
+
+    let error = backup::import_web(&store, &path).expect_err("写入失败应中止导入");
+    let detail = format!("{error:#}");
+    assert!(
+        detail.contains("setting.json"),
+        "错误应指出失败的文件: {detail}"
+    );
+    assert!(detail.contains("已回滚"), "错误应说明回滚结果: {detail}");
+    assert_eq!(
+        std::fs::read(fixture.home().join("dict.json")).expect("读 dict"),
+        before,
+        "失败后 dict.json 应回滚到导入前"
+    );
+}
+
+/// 练习缓存只接受版本 2；低版本信封写进去只会覆盖本地断点。
+#[test]
+fn import_skips_an_unsupported_practice_cache_version() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let cache = PracticeCacheCompact {
+        stat_store_data: Some(PracticeState {
+            spend: 1234,
+            ..PracticeState::default()
+        }),
+        ..PracticeCacheCompact::default()
+    };
+    store.save_practice(Some(&cache)).expect("写练习缓存");
+
+    let path = fixture.home().join("old-practice.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"PracticeSaveWord":{"version":1,"val":{}}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert!(report.written.is_empty(), "不应写入: {:?}", report.written);
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("PracticeSaveWord")),
+        "旧版本练习缓存应跳过: {:?}",
+        report.skipped
+    );
+    let loaded = store.load_practice();
+    assert_eq!(
+        loaded
+            .value
+            .and_then(|cache| cache.stat_store_data)
+            .map(|stat| stat.spend),
+        Some(1234),
+        "本地断点不应被覆盖"
+    );
+}
+
+/// 校验类型必须和加载器一致：`val: null` 的练习缓存是合法表示。
+#[test]
+fn import_accepts_a_null_practice_cache() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let path = fixture.home().join("null-practice.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"PracticeSaveWord":{"version":2,"val":null}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert_eq!(report.written, vec!["PracticeSaveWord".to_string()]);
+    assert!(
+        report.rejected.is_empty(),
+        "val=null 是加载器接受的练习缓存表示: {:?}",
+        report.rejected
+    );
+    let loaded = store.load_practice();
+    assert!(loaded.is_ok(), "应视为已加载: {:?}", loaded.status);
+    assert!(loaded.value.is_none());
 }

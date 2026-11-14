@@ -138,7 +138,7 @@ tw             # 2. 启动界面
 | `tw doctor` | 打印解析到的路径与词库状态，不进入界面、不写存档 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 词数与词条文件路径；`dict.json`/`setting.json`/`practice-word.json` 的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
 | `tw task` | 只预览今日任务，不进入界面 | 当前词库、每日词数、学习进度、今日任务（新词 / 复习，到期数、随机补足数）与前 5 个新词、复习词；随机种子默认 42，可用 `--seed` |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 成功后打印词库名、词数与提示 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
-| `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已丢弃的内容；导入后需重启程序 |
+| `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份的内容；导入后需重启程序 |
 | `tw export-web [--out FILE]` | 把当前数据目录导出成网页版能导入的备份 JSON | 缺省写到标准输出；`--out` 指定文件时打印路径 |
 
 `import-dict` 的要求：文件必须以 `.json` 结尾、内容为词条数组（每项至少含 `word` 字段）、至少有一个可用单词；id 取文件名去掉 `.json`。重复导入同一文件名会覆盖同 id 的登记项（词条文件也覆盖），不会产生重复条目；细节见 [存档与数据格式](persistence.md)。
@@ -146,8 +146,10 @@ tw             # 2. 启动界面
 `import-web` / `export-web` 走的是网页版「设置 → 数据管理 → 导出」的同一套格式：
 
 - 备份版本高于 5 时**拒绝导入**并提示升级。
-- 逐项检查存档版本：`dict`(4) / `setting`(23) / `PracticeSaveWord`(2) / `PracticeSaveArticle`(1) 中任何一项版本过高就**跳过该项**，其余照常导入。
-- `dict` / `setting` / `PracticeSaveWord` 是**原样落盘**，上游存档里本程序没建模的字段不会丢。
+- 逐项检查存档版本：`dict`(4) / `setting`(23) / `PracticeSaveArticle`(1) 中任何一项版本过高就**跳过该项**；`PracticeSaveWord` 的版本必须等于 2（低版本 TUI 也读不懂），否则跳过该项，其余照常导入。
+- 落盘前按目标存档类型做一次**宽容反序列化**（`dict` → `SaveEnvelope<BaseState>`、`setting` → `SaveEnvelope<SettingState>`、`PracticeSaveWord` → `SaveEnvelope<Option<PracticeCacheCompact>>`）：缺 `val` / 缺 `version` / 字段类型对不上时**拒绝该项**并打印原因，原文件保持不变，不会等到下次启动才被隔离。
+- `dict` / `setting` / `PracticeSaveWord` 校验通过后仍是**原样落盘**（校验只读不改写），上游存档里本程序没建模的字段不会丢。
+- 覆盖已有文件前先复制为 `<文件名>.bak-<YYYYMMDD-HHMMSS>.json`（同一秒重名自动加序号）；多文件写入中途失败时已写入的文件会用备份回滚，错误信息给出备份路径。`.bak` 文件不会自动清理。
 - `PracticeSaveArticle`（文章练习缓存）按来源分流：TUI 自己 `export-web` 的备份带 `tuiPracticeData` 扩展，会还原成 `practice-article.json`，句子进度与用时接得上；网页版自己产生的缓存只有「段落 / 句 / 词」三级游标、没有文章 id，TUI 无法对应到具体文章，导入时会列为「已丢弃」并说明原因。若在网页版里进入文章跟打并推进了句子，网页版会重写缓存并丢掉 `tuiPracticeData`，此时再导入 TUI 会按「网页版游标」丢弃。
 - 备份里的 `PracticeSaveArticle` 是空信封（网页版没有文章断点，或来自修复前的 TUI 导出）时**不覆盖**本地 `practice-article.json`，避免误清现有进度。修复前导出的旧备份没有文章断点可还原，升级后请重新导出一次。
 
