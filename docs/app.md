@@ -2,7 +2,7 @@
 
 应用层把领域层的状态机与终端输入输出接在一起：它持有唯一的 `App` 实例，把键盘、鼠标与定时器事件翻译成领域操作，决定何时读档与存档，并在每一帧把只读状态交给渲染层。流程推进、FSRS 调度、键入判定等算法在 `domain` 中实现，布局与像素在 `ui` 中实现；应用层负责「什么时候调用谁」。
 
-> 适用范围：`src/app/` 的四个文件，以及启动装配相关的 `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs`；对应版本：typewords-tui 0.2.0。
+> 适用范围：`src/app/` 的四个文件，以及启动装配相关的 `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs`；对应版本：typewords-tui 0.3.0。
 
 ## 1. 职责与边界
 

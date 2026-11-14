@@ -4,7 +4,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 本文对照上游 TypeWords 的 Web / Tauri 桌面端，给出两端定位、逐项功能矩阵、行为差异、数据互通方式、分优先级路线图，以及维护者随上游升级更新对照结论的方法。项目本身的定位与功能概览见 [根 README](../README.md)。结论只以源码（TUI 的 `src/**`、`tests/**` 与上游的 `app/**`）为事实来源；文中「上游路径」均指上游仓库内的路径，不用本地解包目录的路径。
 
-> 适用范围：评估两端定位差异、功能覆盖、数据互通与补齐顺序；用户操作见使用手册，模块细节见对应的模块文档。对应版本：typewords-tui 0.2.0。
+> 适用范围：评估两端定位差异、功能覆盖、数据互通与补齐顺序；用户操作见使用手册，模块细节见对应的模块文档。对应版本：typewords-tui 0.3.0。
 
 ## 1. 基线与对照方法
 
@@ -41,7 +41,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 
 ## 2. 总体定位对比
 
-| 维度 | 上游 TypeWords（Web / Tauri 桌面） | typewords-tui 0.2.0 |
+| 维度 | 上游 TypeWords（Web / Tauri 桌面） | typewords-tui 0.3.0 |
 | --- | --- | --- |
 | 技术栈 | Nuxt 4.2、Vue 3.5、Pinia 3、UnoCSS 66、vue-i18n 11、ts-fsrs 5.2、idb-keyval、Tauri v2 | Rust 2024（rust-version 1.90）、ratatui 0.30.2、crossterm、serde / chrono / clap（FSRS-6 自实现） |
 | 产物 | `nuxt generate` 静态站（`.output/public`）；桌面端为 Tauri 安装包，WebView2 加载同一份前端 | 单个 `tw.exe` + 只读 `assets/` 目录；无运行时、无 Node、无 WebView2 |

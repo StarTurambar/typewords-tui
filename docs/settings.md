@@ -4,7 +4,7 @@
 
 设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。本文所有数值都以这两处与 `src/domain/constants.rs` 为准。
 
-> 适用范围：设置页全部 32 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.2.0。
+> 适用范围：设置页全部 32 行、`setting.json` 可读写字段、FSRS 参数与手工修改；对应版本：typewords-tui 0.3.0。
 
 ## 设置文件与保存时机
 

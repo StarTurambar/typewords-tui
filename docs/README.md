@@ -2,7 +2,7 @@
 
 本目录是 [typewords-tui](../README.md) 的完整文档：项目根目录的 README 负责「这是什么、怎么开始」，这里按主题展开——使用方法、架构与各模块、数据格式、主题系统、开发流程，以及与上游 TypeWords 的功能对照。
 
-> 对应版本：typewords-tui 0.2.0（见 `Cargo.toml`）。文档以源码为唯一事实来源；代码行为变更时，请同步更新对应文档（见文末「文档维护」）。
+> 对应版本：typewords-tui 0.3.0（见 `Cargo.toml`）。文档以源码为唯一事实来源；代码行为变更时，请同步更新对应文档（见文末「文档维护」）。
 
 ## 我想……
 
@@ -92,7 +92,7 @@
 
 ## 文档维护
 
-- 本套文档按 0.2.0 的代码整理，覆盖 [architecture.md](architecture.md) 中列出的全部模块；新增模块或行为时，按「代码区域 → 权威文档」对照表更新对应文档并在本索引登记。
+- 本套文档按 0.3.0 的代码整理，覆盖 [architecture.md](architecture.md) 中列出的全部模块；新增模块或行为时，按「代码区域 → 权威文档」对照表更新对应文档并在本索引登记。
 - 修改用户可见行为（按键、CLI、设置项、存档字段、主题格式）时，至少同步更新 [usage.md](usage.md)、[settings.md](settings.md)、[persistence.md](persistence.md)、[themes.md](themes.md) 中受影响的一篇。
 - 修改内部结构（分层、流程、调度、渲染）时，同步更新 [architecture.md](architecture.md) 与对应模块文档。
 - 修改上游对照结论或路线图时，在 [upstream-parity.md](upstream-parity.md) 的「基线」一节记录新的上游参考版本/日期。
