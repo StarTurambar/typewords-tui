@@ -2,7 +2,7 @@
 
 typewords-tui 的配色全部来自主题：渲染层不出现硬编码颜色，所有前景/背景都从主题的 13 个颜色 token 取值。程序内置 6 套主题（深色、浅色、高对比，以及午夜墨、纸墨、克莱因蓝三套预设），也支持用户把 `*.json` 放进数据目录的 `themes/` 自定义主题。本文说明主题模型、内置主题、选择与优先级、自定义主题格式、颜色语法、token 语义、内部实现与常见问题。
 
-> 适用范围：`src/theme/`（主题配置层）、`src/ui/theme.rs`（渲染映射）、`<home>/themes/*.json`、`--theme` 参数与设置页主题行、`tw doctor` 的主题输出；对应版本：typewords-tui 0.3.0。
+> 适用范围：`src/theme/`（主题配置层）、`src/ui/theme.rs`（渲染映射）、`<home>/themes/*.json`、`--theme` 参数与设置页主题行、`tw doctor` 的主题输出；对应版本：typewords-tui 0.3.1。
 
 ## 1. 主题模型与分层
 

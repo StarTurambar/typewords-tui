@@ -1,6 +1,6 @@
 # 开发指南
 
-> 适用范围：构建、测试、调试、资源维护、CI 与发布流程；对应版本：typewords-tui 0.3.0。
+> 适用范围：构建、测试、调试、资源维护、CI 与发布流程；对应版本：typewords-tui 0.3.1。
 
 本文面向要改代码或维护仓库的人。先读 [architecture.md](architecture.md) 了解分层与主循环，再按任务查阅 [domain.md](domain.md)、[app.md](app.md)、[ui.md](ui.md)、[persistence.md](persistence.md)。
 
