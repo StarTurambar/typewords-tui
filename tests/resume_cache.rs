@@ -13,8 +13,10 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
+use typewords_tui::backup;
 use typewords_tui::domain::timer;
 use typewords_tui::paths::Paths;
+use typewords_tui::store::FileStore;
 use unicode_width::UnicodeWidthStr;
 
 fn press(app: &mut app::App, code: KeyCode) {
@@ -154,6 +156,64 @@ fn article_practice_progress_persists_and_resumes() {
     assert_eq!(practice.index, 1, "应从第二句接着练");
     assert_eq!(practice.finished, 1, "已完成句数要接上");
     assert_eq!(practice.article_id, 11, "应恢复同一篇文章");
+}
+
+/// 文章断点要能经网页版备份往返：导出、清空、导入后仍标出「上次第 N 句」并续打。
+#[test]
+fn article_cache_survives_web_roundtrip() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    {
+        let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+        app.open_articles();
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, app::Screen::ArticlePractice);
+        type_sentence(&mut app, "Hello there.");
+        app.article_practice.as_mut().expect("文章练习状态").spend = 45_000;
+        app.save_article_practice_now();
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.screen, app::Screen::Articles);
+    }
+
+    let store = FileStore::new(paths.home.clone()).expect("数据目录");
+    let text = backup::export_web(&store).expect("导出");
+    let backup_path = paths.home.join("web-backup.json");
+    std::fs::write(&backup_path, text).expect("写备份");
+    store.remove_practice_article().expect("清空断点");
+    assert!(!paths.home.join("practice-article.json").is_file());
+
+    let report = backup::import_web(&store, &backup_path).expect("导入");
+    assert!(
+        report.discarded.is_empty(),
+        "TUI 导出的文章断点不该被丢弃: {:?}",
+        report.discarded
+    );
+    assert!(
+        report
+            .written
+            .iter()
+            .any(|key| key == "PracticeSaveArticle"),
+        "应导入 PracticeSaveArticle: {:?}",
+        report.written
+    );
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    let resume = app.article_resume.as_ref().expect("文章断点应恢复");
+    assert_eq!(resume.article_id, 11, "应恢复到同一篇文章");
+    assert_eq!(resume.sentence_index, 1, "应恢复到第二句");
+    assert_eq!(resume.spend, 45_000, "用时也应恢复");
+
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.screen, app::Screen::Articles);
+    let text = render_text(&app, 100, 30);
+    assert!(text.contains("上次第 2 句"), "列表应标出断点句: {text}");
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::ArticlePractice);
+    let practice = app.article_practice.as_ref().expect("跟打状态");
+    assert_eq!(practice.index, 1, "应续到第二句");
+    assert_eq!(practice.finished, 1, "已完成句数要接上");
+    assert_eq!(practice.spend, 45_000, "用时也要接上");
 }
 
 /// 文章跟打：整篇练完后断点缓存要删掉，再次进入从头开始。

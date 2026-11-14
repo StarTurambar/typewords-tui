@@ -413,6 +413,7 @@ function systemPractice() {
 
 - **与单词练习缓存分文件存**：两者的进度互不相干，混在一个文件里会让「清空练习进度」误删文章的跟打进度。
 - `practiceData` 的字段名与上游不同：上游记「段落 / 句 / 词」三级游标（`sectionIndex` / `sentenceIndex` / `wordIndex`），TUI 的文章在 `gen_sections` 后把段落展开成扁平句子列表，跟打也按扁平下标推进，因此只存一个 `sentenceIndex`。`statStoreData` 保留字段名以对齐上游信封，但 TUI 不用它（用时记在 `practiceData.spend`）。
+- **与 Web 备份的映射**：本地格式不变；`tw export-web` 会把它包装成网页版能安全读取的 `PracticeSaveArticle`（三级游标归零、`statStoreData` 非空、真实断点放在 `tuiPracticeData`），`tw import-web` 优先读这个扩展字段还原。网页版自己产生的缓存没有文章 id，仍不映射；细节见第 8 节。
 - **保存时机**：每完成一句排一次 500ms 延迟保存（防抖），另有 30 秒整点兜底，防止进程被直接杀掉时丢掉整段进度；退出文章页（`Esc` / `Ctrl+C`）与退出程序时立即保存。`Ctrl+,` 暂停计时只停止累加 `spend`，不改变保存时机。
 - **恢复时机**：启动时只读取（`refresh_article_resume`）用于列表标记，**不**进入跟打页；进入文章页后，缓存对应的文章行标出「上次第 N 句」，选中它按 `Enter` 才从记录的句子续打并带上用时。选别的文章从头开始；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接忽略，不硬套。
 - **整篇练完**时缓存被删除——否则下次进文章页会「恢复」一篇已经练完的文章。
@@ -517,19 +518,20 @@ function systemPractice() {
 
 ## 8. 与 Web 端数据互通
 
-TUI **不读写浏览器 IndexedDB**，也不实现 Web 的备份导入导出；互通方式是手工搬运 JSON。好在两边使用同名字段与同构信封：
+TUI **不读写浏览器 IndexedDB**；互通方式是用 `tw import-web` / `tw export-web`（或手工）搬运 JSON，没有图形界面的导入导出入口。好在两边使用同名字段与同构信封：
 
 | TUI 文件 | Web 端存储 | key | 版本 |
 | --- | --- | --- | --- |
 | `dict.json` | IndexedDB 中的 JSON 字符串 | `typing-word-dict` | 4 |
 | `setting.json` | IndexedDB 中的 JSON 字符串 | `typing-word-setting` | 23 |
 | `practice-word.json` | IndexedDB（早期为 localStorage，自动迁移） | `PracticeSaveWord` | 2 |
+| `practice-article.json` | IndexedDB（缓存） | `PracticeSaveArticle` | 1 |
 
 Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": {...}, "setting": {...}, "PracticeSaveWord": {...}, "PracticeSaveArticle": {...} }}`，其中每个子对象本身就是 `{version, val, updated_at?}` 信封——与 TUI 的单文件信封同构。手工迁移步骤：
 
 1. 在 Web 端导出备份 ZIP，解压取出 `data.json`；或从浏览器开发者工具读取 IndexedDB 的 `typing-word-dict` / `typing-word-setting`（值是 JSON 字符串）。
 2. 关闭 TUI，备份 `<home>`。
-3. 写入文件：`dict.json` = `data.val.dict`；`setting.json` = `data.val.setting`；如需恢复断点，`practice-word.json` = `data.val.PracticeSaveWord`（`updated_at` 可缺省）。
+3. 写入文件：`dict.json` = `data.val.dict`；`setting.json` = `data.val.setting`；如需恢复断点，`practice-word.json` = `data.val.PracticeSaveWord`（`updated_at` 可缺省）；若备份来自 `tw export-web`，`practice-article.json` = `data.val.PracticeSaveArticle`。网页版自己产生的 `PracticeSaveArticle` 只有三级游标、没有文章 id，不要手工写入。
 4. 启动 TUI，用 `tw doctor` 核对路径、词库数量与存档文件大小，再进设置页确认主题等字段。
 5. Web 备份里当前学习词典若在 TUI 资源中不存在（例如 Web 端自建、TUI 没有对应词库目录项），启动会回退到词库资源（`ensure_study_dict` 的兜底顺序：原 id → `cet4` → 第一本词库）；`studyIndex` 指向某本系统词典（`system: true`）时按内置词典原样保留，不回退。
 
@@ -543,17 +545,17 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 | Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页的列表是「三本内置词典 + 词库目录条目」，不在词库目录里的自定义词库不会出现，切走后无法再切回（把词条 JSON 放进 `<home>/dicts/en/word/` 并登记 `<home>/list/word.json` 后才会出现） |
 | FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容；TUI 自实现的 FSRS-6 已逐条对齐上游 ts-fsrs（黄金样本见 `tests/fsrs_parity.rs`），同一张卡在两端得到相同的下次复习时间 |
 | 练习缓存 | TUI 恢复还要求 `sessionSnapshot`；Web 旧缓存若缺这个字段则只迁移词表与统计、无法恢复断点 |
-| 文章与音频 | `PracticeSaveArticle`（文章背诵的跟打断点缓存，尚未接入）、备份 ZIP 里的 `mp3/` 在 TUI 中没有对应实现，迁移时直接丢弃即可 |
+| 文章与音频 | `PracticeSaveArticle` 分两种：TUI `export-web` 的备份带 `tuiPracticeData`，句子进度与用时可以往返（前提是网页版没有在文章页推进句子——推进会重写缓存并丢掉扩展）；网页版自己产生的只有「段落 / 句 / 词」游标、没有文章 id，TUI 无法对应到具体文章，导入时丢弃。备份 ZIP 里的 `mp3/` 在 TUI 中没有对应实现 |
 
 ## 9. 备份、恢复与重置
 
-- **完整备份**：关闭程序后复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`themes/`、导入的 `dicts/` 与 `list/word.json`）。只拷 `dict.json` 会丢设置、断点与导入词库。
+- **完整备份**：关闭程序后复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`、`themes/`、导入的 `dicts/` 与 `list/word.json`）。只拷 `dict.json` 会丢设置、断点与导入词库。
 - **恢复**：关闭程序 → 用备份覆盖 `<home>` → 启动；建议先跑 `tw doctor` 确认路径与词库数量，再打开设置页检查主题是否加载。
-- **只重置练习**：`tw --reset-practice`（启动时删除缓存）或设置页「清空当前练习进度」（确认弹层后删除）。两者都只删 `practice-word.json`，不影响 `dict.json` 里的统计、FSRS 卡片和收藏/错词/已掌握。
-- **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
+- **只重置练习**：`tw --reset-practice`（启动时删除缓存）或设置页「清空当前练习进度」（确认弹层后删除）。两者都只删 `practice-word.json` 与 `practice-article.json` 两个断点缓存，不影响 `dict.json` 里的统计、FSRS 卡片和收藏/错词/已掌握。
+- **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json` 与 `practice-article.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json` + `practice-article.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
 - **彻底重置**：关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢）；下次启动会重建目录并按默认值运行。
 - **删除/隔离坏档**：启动 Toast 会给出隔离后的文件名（`*.corrupt-<时间戳>.json`）；确认不需要后可删除隔离文件与坏档本身。版本过高时**不要**为了启动而降级程序或手改 `version`，优先备份后升级程序。
-- **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` 版本不符 → 忽略并在下次练习时覆盖。三类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
+- **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` / `practice-article.json` 版本不符 → 忽略并在下次保存时覆盖。四类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
 
 `tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**存档文件大小**（不存在则标注）、自定义主题目录与全部主题、主题加载告警。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
 

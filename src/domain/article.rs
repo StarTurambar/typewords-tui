@@ -845,11 +845,12 @@ pub struct ArticleCache {
     pub spend: i64,
 }
 
-/// 文章练习缓存的落盘格式（对齐上游 `PracticeSaveArticle` 的信封内容）。
+/// 文章练习缓存的落盘格式（对齐上游 `PracticeSaveArticle` 的外层信封）。
 ///
 /// 上游是 `{ practiceData: { sectionIndex, sentenceIndex, wordIndex },
-/// statStoreData: PracticeState }`；TUI 的字段更少，但外层信封
-/// （`{ val, version, updated_at }`）与 key 名保持一致，便于将来互通。
+/// statStoreData: PracticeState }`；TUI 的 `practiceData` 是扁平句子断点，
+/// `statStoreData` 保留字段名但不再使用。备份里怎么与网页版互换见
+/// `crate::backup`。
 ///
 /// 不派生 `PartialEq`：`PracticeState` 没实现它（`PracticeCacheCompact`
 /// 同理），`Option<PracticeState>` 也就没法比较。

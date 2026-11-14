@@ -146,9 +146,10 @@ tw             # 2. 启动界面
 `import-web` / `export-web` 走的是网页版「设置 → 数据管理 → 导出」的同一套格式：
 
 - 备份版本高于 5 时**拒绝导入**并提示升级。
-- 逐项检查存档版本：`dict`(4) / `setting`(23) / `PracticeSaveWord`(2) 中任何一项版本过高就**跳过该项**，其余照常导入。
-- 导入是**原样落盘**，上游存档里本程序没建模的字段不会丢。
-- `PracticeSaveArticle`（文章练习缓存）会导入成 `practice-article.json`——文章跟打的句子进度与用时接得上。
+- 逐项检查存档版本：`dict`(4) / `setting`(23) / `PracticeSaveWord`(2) / `PracticeSaveArticle`(1) 中任何一项版本过高就**跳过该项**，其余照常导入。
+- `dict` / `setting` / `PracticeSaveWord` 是**原样落盘**，上游存档里本程序没建模的字段不会丢。
+- `PracticeSaveArticle`（文章练习缓存）按来源分流：TUI 自己 `export-web` 的备份带 `tuiPracticeData` 扩展，会还原成 `practice-article.json`，句子进度与用时接得上；网页版自己产生的缓存只有「段落 / 句 / 词」三级游标、没有文章 id，TUI 无法对应到具体文章，导入时会列为「已丢弃」并说明原因。若在网页版里进入文章跟打并推进了句子，网页版会重写缓存并丢掉 `tuiPracticeData`，此时再导入 TUI 会按「网页版游标」丢弃。
+- 备份里的 `PracticeSaveArticle` 是空信封（网页版没有文章断点，或来自修复前的 TUI 导出）时**不覆盖**本地 `practice-article.json`，避免误清现有进度。修复前导出的旧备份没有文章断点可还原，升级后请重新导出一次。
 
 ### 环境变量与目录查找顺序
 

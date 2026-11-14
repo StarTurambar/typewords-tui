@@ -126,7 +126,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 断点 | 本地练习缓存 | `PracticeSaveWord` v2 | `practice-word.json` v2 | 已对齐 | 同构 compact 结构（含 `sessionSnapshot`） |
 | 断点 | 同一次运行内续练 | `words.vue` 的 `systemPractice()` 传 `practiceData` | `try_resume_saved_practice` | 已对齐 | 非自由模式按 Enter 接着上次的断点；自由练习与换模式时重开一轮 |
 | 断点 | 主页的断点提示 | `isSaveData ? '上次任务' : '今日任务'` | `home.rs` 的标题与按钮文案 | 已对齐 | 有缓存时标题变「上次任务」、按钮变「继续学习」 |
-| 断点 | 文章跟打缓存 | `PracticeSaveArticle` v1 | `practice-article.json` v1 | 部分 | 句子进度与用时接得上；上游记段落/句/词三级游标，TUI 记扁平句子下标 |
+| 断点 | 文章跟打缓存 | `PracticeSaveArticle` v1 | `practice-article.json` v1 | 部分 | TUI 本地断点完整；TUI 导出的备份用 `tuiPracticeData` 扩展往返保留句子进度与用时；网页版自己产生的游标没有文章 id，导入时丢弃 |
 | 断点 | v1 缓存升级 | `checkAndUpgradePracticeWordCache` | 仅接受 v2 | 部分 | v1 缓存直接忽略，文件在下一次保存时覆盖 |
 | 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失 | 无网络与远端比较 |
 | 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 整篇单页逐句跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
@@ -256,7 +256,7 @@ TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::sha
 | `dict.json` | `typing-word-dict` | 4 | 字段同名；系统词典与当前词库进度可搬运 |
 | `setting.json` | `typing-word-setting` | 23 | TUI 建模 28 个字段，其余透传 |
 | `practice-word.json` | `PracticeSaveWord` | 2 | compact v2；TUI 额外要求 `sessionSnapshot` |
-| `practice-article.json` | `PracticeSaveArticle` | 1 | 已接入：句子进度与用时接得上；`practiceData` 记扁平句子下标（上游记段落/句/词三级游标），音频无对应实现 |
+| `practice-article.json` | `PracticeSaveArticle` | 1 | 部分：TUI 导出的备份可往返（真实断点在 `tuiPracticeData`）；网页版自己产生的游标只有段落/句/词三级下标、没有文章 id，不映射；音频无对应实现 |
 
 ### 5.2 Web 备份结构与迁移方向
 
@@ -268,14 +268,14 @@ Web 备份 data.json                       TUI 数据目录
   dict:            <信封 version 4>  ->    dict.json
   setting:         <信封 version 23> ->    setting.json
   PracticeSaveWord:<信封 version 2>  ->    practice-word.json
-  PracticeSaveArticle: <信封 v1>         → practice-article.json
+  PracticeSaveArticle: <信封 v1>         → practice-article.json（仅 TUI 来源；Web 游标不映射）
   type-words-app-version: 4              (丢弃)
 } }                                      themes/*.json（仅 TUI）
 ```
 
-手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入三个文件（保留各自信封）→ `tw doctor` 核对 → 启动检查设置与断点。
+手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入四个文件（保留各自信封；文章项仅限 TUI 导出的备份）→ `tw doctor` 核对 → 启动检查设置与断点。
 
-现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本、原样落盘），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
+现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本；`dict` / `setting` / `PracticeSaveWord` 原样落盘，文章断点按来源分流），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
 
 ### 5.3 字段语义差异与风险
 
@@ -291,10 +291,10 @@ Web 备份 data.json                       TUI 数据目录
 
 ### 5.4 未来互通建议
 
-- **Web 导出适配器**：在 TUI 侧加一个 `tw import-web <data.json>`，解析 `BackupData` v5、按版本校验后拆成三个文件，并输出丢弃项（文章缓存、app version）与风险提示；对应地加 `tw export-web` 生成可被 Web 导入的 JSON。
+- **Web 导出适配器（已完成）**：`tw import-web <data.json>` 解析 `BackupData` v5、按版本校验后拆成四个文件，文章断点按来源分流；`tw export-web` 生成可被 Web 导入的 JSON。仍不支持的丢弃项是 app version 与 mp3。
 - **版本先行**：导入前检查 `dict.version` / `setting.version` / `PracticeSaveWord.version`，高于 TUI 支持的版本时拒绝写入并提示升级，避免只读/覆盖问题。
 - **卡片归一化**：对学习卡重新计算 `stability` / `difficulty` 或在导入时标记「需要重新学习」，避免跨端调度异常。
-- **明确「不映射」清单**：文章缓存、mp3、Supabase 快照、快捷键/字体/主题等平台相关字段不应伪装成可互通。
+- **明确「不映射」清单**：网页版自己产生的文章游标（没有文章 id）、mp3、Supabase 快照、快捷键/字体/主题等平台相关字段不应伪装成可互通。
 
 ## 6. TUI 独有
 
