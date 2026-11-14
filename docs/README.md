@@ -69,7 +69,7 @@
 | 术语 | 含义 |
 | --- | --- |
 | 词库（dict / word book） | 一本可学习的单词集合，资源由 `assets/list/word.json` 注册、词条数据在 `assets/dicts/en/word/*.json`；用户导入的词库放在数据目录同名结构下。 |
-| 系统词典 | 三本由程序维护的虚拟词典：收藏（`wordCollect`）、错词（`wordWrong`）、已掌握（`wordKnown`），不是可切换的学习词库。 |
+| 内置词典（系统词典） | 三本由程序维护的词典：收藏（`wordCollect`）、错词（`wordWrong`）、已掌握（`wordKnown`），标记为 `system: true`，词条存在 `dict.json` 里。它们排在词库页最前面，可设为当前学习词典（写 `studyIndex`，重启保持）并打开词条管理页；「已掌握」的词同时在忽略集合里，因此以它为当前词典时今日任务为空（见 [使用手册 · 词库页](usage.md#词库页)）。 |
 | 练习模式 | 一次练习的整体形态：学习（system）、自由练习（free）、复习（review）、随机复习（shuffle）、自测（identify）、默写（dictation）、听写（listen）。 |
 | 流程（flow） | 由若干「节点（node）→ 步骤（step）」组成的练习编排，决定每轮练什么、怎么练、何时结算；TUI 固定 7 个内置流程。 |
 | 阶段（stage） | 当前练习轮次中的语义阶段，如「跟写新词」「自测旧词」「错词巩固」「随机复习」，用于界面展示与结算统计。 |

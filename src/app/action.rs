@@ -177,7 +177,7 @@ impl App {
             Action::SelectActivate => self.activate_selection(),
             Action::DictMove(delta) => self.move_dict_cursor(delta),
             Action::SelectDict(index) => {
-                if index < self.boot.catalog.resources().len() {
+                if index < self.dict_entry_count() {
                     self.dict_cursor = index;
                 }
             }
@@ -339,7 +339,9 @@ impl App {
             }
             Screen::DictPicker => {
                 self.set_screen(Screen::DictPicker);
-                self.dict_cursor = 0;
+                // 光标停在当前学习词典上：列表开头是三本内置词典，停在 0 时
+                // 一次 Enter 就会把学习词典换成「收藏」。
+                self.dict_cursor = self.dict_entry_of_study().unwrap_or(0);
             }
             Screen::Stats => {
                 self.set_screen(Screen::Stats);
@@ -715,7 +717,7 @@ impl App {
     }
 
     fn move_dict_cursor(&mut self, delta: i32) {
-        let count = self.boot.catalog.resources().len();
+        let count = self.dict_entry_count();
         if count == 0 {
             self.dict_cursor = 0;
             return;
@@ -796,21 +798,35 @@ impl App {
         self.stats_day = first.with_day(day_number.min(last_day)).unwrap_or(first);
     }
 
-    pub fn activate_dict(&mut self, index: usize) {
-        let Some(resource) = self.boot.catalog.resources().get(index).cloned() else {
+    /// 把词库页第 `position` 行设为当前学习词典。
+    ///
+    /// 内置词典（收藏 / 错词 / 已掌握）与资源词库走两条不同的装载路径：
+    /// 前者词条在存档里，改 `studyIndex` 即可；后者要按 id 从词条文件读词表。
+    pub fn activate_dict(&mut self, position: usize) {
+        let Some(entry) = self.dict_entry_at(position) else {
             return;
         };
-        let id = resource.id_string();
-        let name = resource.name.clone();
-        match self.boot.select_dict(&id) {
+        let name = entry.name.clone();
+        let switched = match entry.kind {
+            crate::app::DictEntryKind::System => {
+                self.boot.base.set_study_index(entry.index);
+                Ok(())
+            }
+            crate::app::DictEntryKind::Resource => self.boot.select_dict(&entry.id),
+        };
+        match switched {
             Ok(()) => {
-                self.dict_cursor = index;
+                self.dict_cursor = position;
                 self.save_dict_now();
                 self.refresh_task_preview();
                 self.set_screen(Screen::Home);
+                let message = match entry.kind {
+                    crate::app::DictEntryKind::System => format!("已切换到内置词典 {name}"),
+                    crate::app::DictEntryKind::Resource => format!("已切换到词库 {name}"),
+                };
                 self.toast(
                     crate::domain::flow::navigator::NoticeLevel::Success,
-                    format!("已切换到词库 {name}"),
+                    message,
                 );
             }
             Err(err) => self.toast(

@@ -55,6 +55,7 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "flows",
     "articlepractice",
     "dict",
+    "dict-builtin",
     "stats",
     "settings",
     "shortcuts",
@@ -238,6 +239,28 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             press(app, KeyCode::Char('3'));
             if app.screen != Screen::DictPicker {
                 bail!("could not open dict picker (screen={:?})", app.screen);
+            }
+        }
+        // 词库页选中内置词典「收藏」：右侧详情面板显示内置词典的用途说明与
+        // 「w 查看词条」提示——用来展示三本内置词典同样能查看、能设为当前。
+        "dict-builtin" => {
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('3'));
+            if app.screen != Screen::DictPicker {
+                bail!("could not open dict picker (screen={:?})", app.screen);
+            }
+            // 内置词典排在列表最前，光标默认在当前学习词典上；一直 ↑ 到第一行。
+            for _ in 0..32 {
+                if app.dict_cursor == 0 {
+                    break;
+                }
+                press(app, KeyCode::Up);
+            }
+            if app.dict_cursor != 0 {
+                bail!(
+                    "dict-builtin: cursor did not reach the first built-in dictionary (got {})",
+                    app.dict_cursor
+                );
             }
         }
         "stats" => {

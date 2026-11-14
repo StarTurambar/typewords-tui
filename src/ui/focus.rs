@@ -337,12 +337,8 @@ pub fn page_label(app: &App) -> Option<String> {
                     .map(|article| article.title.clone())
             }
         }
-        Screen::DictPicker => app
-            .boot
-            .catalog
-            .resources()
-            .get(app.dict_cursor)
-            .map(|resource| resource.name.clone()),
+        // 词库页光标是「条目」下标（内置词典在前），不能直接索引 Catalog。
+        Screen::DictPicker => app.dict_entry_at(app.dict_cursor).map(|entry| entry.name),
         Screen::Settings => crate::app::SETTING_ROWS
             .get(app.settings_cursor)
             .map(|(key, _)| crate::domain::i18n::tr(key)),

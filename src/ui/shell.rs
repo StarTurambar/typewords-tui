@@ -509,13 +509,19 @@ fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
     };
     let esc = if home { "取消" } else { "返回" };
     // tab 放在末尾：底栏太窄时从尾部丢弃，先保住「选中 / 移动 / enter / esc」。
-    Some(vec![
+    let mut hints = vec![
         ("选中", label),
         ("↑↓←→", "移动".to_string()),
         ("enter", enter.to_string()),
         ("esc", esc.to_string()),
-        ("tab", "换栏".to_string()),
-    ])
+    ];
+    // 词库页的 w（查看词条）没有别处提示：详情面板只在宽屏出现，窄屏
+    // 用户只能靠底栏知道这个键。
+    if app.screen == Screen::DictPicker {
+        hints.push(("w", "词条".to_string()));
+    }
+    hints.push(("tab", "换栏".to_string()));
+    Some(hints)
 }
 
 /// 60 列左右时优先保留开始 / 自由 / 词库 / 帮助 / 退出。
@@ -541,7 +547,12 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             // 放在末尾：宽度不够时优先丢弃它，别把「退出」这类老提示挤掉。
             ("↑↓←→", "选择"),
         ],
-        Screen::DictPicker => &[("enter", "选择"), ("+/-", "每日词数"), ("esc", "返回")],
+        Screen::DictPicker => &[
+            ("enter", "选择"),
+            ("w", "词条"),
+            ("+/-", "每日词数"),
+            ("esc", "返回"),
+        ],
         Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
         Screen::WordTest => &[

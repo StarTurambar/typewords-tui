@@ -60,7 +60,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | --- | --- | --- |
 | `index.vue` | 营销落地页（打字 demo、下载入口） | 无（不适用） |
 | `(words)/words.vue` | 单词学习主页：当前词库、今日任务、统计、词典、推荐 | 主页 `src/ui/home.rs` |
-| `(words)/dict-list.vue` | 词库目录：搜索、分类标签、在线资源 | 词库页 `src/ui/dict_picker.rs`（本地目录，无搜索/分组） |
+| `(words)/dict-list.vue` | 词库目录：搜索、分类标签、在线资源 | 词库页 `src/ui/dict_picker.rs`（三本内置词典 + 本地目录，无搜索/分组） |
 | `(words)/dict.vue` | 单词管理：增删改、批量、导入导出、复制词库 | 无 |
 | `(words)/practice-words/[id].vue` | 单词练习页 | 练习页 `src/ui/practice.rs` |
 | `(words)/words-test/[id].vue` | 单词测试（4 选 1） | 无 |
@@ -86,7 +86,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 外观 | 侧栏一级导航 | `app/layouts/default.vue`（单词 / 文章 / 反馈 / 文档 / 帮助 / 设置） | `src/ui/shell.rs` | 部分 | 单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6 连续；无反馈、文档、资源分享（与学习无关，且上游页面本身无对应实现） |
 | 主页 | 营销落地页 | `index.vue` | 无 | 不适用 | 终端客户端不需要网站首页 |
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
-| 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 本地目录 + 详情 + 设为当前；无搜索、分类分组、封面、在线目录 |
+| 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 列表 = 三本内置词典（收藏 / 错词 / 已掌握）+ 本地目录，可设为当前词典并打开词条页；无搜索、分类分组、封面、在线目录 |
 | 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页「复习 → 每日词数」+ 主页/词库页 `+`/`-` | 部分 | 主页/词库页步进 5 词，设置页可输入 1 ~ 词库词数的精确值（显示值按词库词数夹取）；仍无滑块、预计完成天数，复习比例在单独一行而非同一弹窗 |
 | 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线 |
 | 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 词条管理页（搜索 / 编辑 / 增删 / 排序 / 批量标记） | 已对齐 | 见 [使用手册 · 词条管理](usage.md#词条管理) |
@@ -301,6 +301,7 @@ Web 备份 data.json                       TUI 数据目录
 | 能力 | 实现位置 | 说明与限制 |
 | --- | --- | --- |
 | 自定义主题 | `src/theme/` | 13 个颜色 token、六套内置主题、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
+| 内置词典可设为当前词典 | `src/app/dicts.rs`、`src/ui/dict_picker.rs` | 收藏 / 错词 / 已掌握与词库资源并列在词库页，`Enter` 设为当前学习词典（写 `studyIndex`，重启保持）、`w` 打开词条管理页；上游 `dict-list.vue` 只列资源目录，系统词典仅作「我的词典」卡片展示 |
 | 鼠标 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs` | 侧栏/按钮/列表点击与滚轮滚动；练习页与文章跟打页可点底部动作按钮（另有练习页词表行与「第 N 组」），结算弹层单独提供按钮；终端鼠标捕获后需 Shift+拖拽复制文本 |
 | 标签页键盘焦点导航 | `src/ui/focus.rs`、`src/app/focus.rs`、`src/ui/target.rs` | 所有套外壳页面（主页 / 文章 / 词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 帮助）共用两栏焦点：宽屏侧栏竖向（`↑`/`↓` 逐项、含「退出」，`→` 回内容区）、窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；`Tab`/`Shift+Tab` 固定换栏。主页内容区按视觉行分带；其它页面的内容区就是页面自己的光标（`FocusId::Page`），`↑`/`↓` 移动光标、`←`/`→` 执行页面横向操作（文章换栏、统计选日期），到边停不回绕；宽屏内容区左边缘 `←`、窄屏最顶部 `↑` 进导航栏。焦点存稳定身份，导航栏与主页内容区在窗口缩放后失效时 `Enter` 只清空并提示；进入任何标签页默认选中内容区（主页是「开始 / 继续学习」主按钮，首帧即高亮），底栏显示「选中 X」。上游只有鼠标 / 触屏，键盘没有对应的「选中页面元素」操作 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；< 60 × 20 只渲染提示 |

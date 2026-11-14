@@ -146,7 +146,9 @@
 | 已掌握 | `wordKnown` | 已掌握 | `description` 为“已掌握后的单词不会出现在练习中”；反引号或自测“已掌握”写入 |
 | 文章收藏 | `articleCollect` | 收藏 | 仅保留元数据；`BaseState::shake_common_dict` 在保存时清空非系统文章词表 |
 
-三本单词典都是普通 `Dict` 对象，与学习词典同构（`system: true`、`per_day_study_number: 20`、初始 `words` 为空）；领域层允许把它们设为当前学习词典，但界面词库页只列出 `Catalog` 中的词库资源，系统词典不在可选列表中。默认 `study_index: -1`，即启动时不指向任何词典，由 `bootstrap::ensure_study_dict` 选中词库资源并加载词表。
+三本单词典都是普通 `Dict` 对象，与学习词典同构（`system: true`、`per_day_study_number: 20`、初始 `words` 为空）。词库页把它们与词库资源并列在**同一条列表**里（默认存档里内置词典在 `word.book_list` 的前三位，即下标 0 / 1 / 2；代码按 `system` 标记识别，不假设下标），`Enter` 即可把选中条目设为当前学习词典——内置词典改的就是 `word.study_index`，与资源词库同一套持久化。默认 `study_index: -1`，即启动时不指向任何词典，由 `bootstrap::ensure_study_dict` 选中词库资源并加载词表；一旦存档指向某本词典（含内置词典），启动就保持该选择——内置词典的词条本来就在存档里，为空也是合法状态，不再回退到 `cet4` 或第一本词库。
+
+内置词典作为当前词典时的练习语义：收藏 / 错词的词条就是今日任务的新词来源，可以正常练习；「已掌握」的词同时在忽略集合 `ignore_words_set` 里（见第 5 节），所以今日任务恒为空、按「开始学习」只会提示「没有可学习的单词！」——这是设计语义（该词典用于查看与维护词条）。要过一遍这些词请用「随机单词测试」，它直接从整本词典抽题、不看忽略集合。
 
 TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiBigWord`）：上游设置结构没有该字段，TUI 用它控制练习页是否按空间放大点阵大字。其余 `BaseState.load`、`dict_list_version`、`note_data`、`PracticeState.stage`、`PracticeData.is_typing_wrong_word` 等字段只保持与 Web 存档同名并原样读写，TUI 不改变其语义或从不写入（`stage` 永远保持默认值）。
 

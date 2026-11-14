@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **354 个测试**：95 个单元测试 + 259 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **382 个测试**：97 个单元测试 + 285 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -86,6 +86,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/六套内置主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
 | `tests/resume_cache.rs` | 13 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
+| `tests/system_dicts.rs` | 10 | 内置词典（收藏 / 错词 / 已掌握）：在词库页排在最前且可渲染、`w` 打开词条页、删词只改 `dict.json`（资源文件不变）、`Enter` 设为当前并落盘 `studyIndex`、重启后保持（空词典也不回退）、`--dict` 接受内置词典 id、收藏有词可练习、已掌握不建会话、切回资源词库保留进度、鼠标点行先选中再激活 |
 | `tests/shell_nav.rs` | 9 | 外壳导航：宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
 | `tests/flows.rs` | 8 | 自定义练习流程：新建副本、编辑步骤、启用与持久化 |
 | `tests/store_roundtrip.rs` | 7 | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除、练习缓存版本不支持（不移动文件） |
@@ -119,7 +120,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | 复现随机问题 | `--seed <N>` 固定随机源；报告问题时附上 seed 与操作步骤 |
 | 清空练习状态 | `--reset-practice`，或删除 `<home>/practice-word.json` |
 | 练习页可视化 | `cargo run --example dump -- <mode> [typed] [width] [height] [big 或 plain]` 把练习页渲染成等宽文本 |
-| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/home-nav-focus/practice/practice-buttons/practice-collect/wordtest/words/articles/flows/articlepractice/dict/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
+| 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/home-nav-focus/practice/practice-buttons/practice-collect/wordtest/words/articles/flows/articlepractice/dict/dict-builtin/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
 | panic 定位 | `RUST_BACKTRACE=1`；程序安装了 panic hook，会先恢复终端与鼠标捕获再打印回溯 |
 | 日志 | 程序当前**没有**日志设施（不写日志文件）；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤 |
 | 手工检查存档 | 存档是可读 JSON：`dict.json`、`setting.json`、`practice-word.json`，字段说明见 [persistence.md](persistence.md) |
@@ -137,7 +138,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain
 ```
 
-仓库 `docs/screenshots/` 的 24 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
+仓库 `docs/screenshots/` 的 25 张图由以下组合生成（Windows、Cascadia Mono + 微软雅黑，`--scale 2`）。`shot` 对 `dict` / `dict-builtin` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s` 键、设置行 `Enter`、`?`），因此底栏会带「选中 X」焦点提示，和用户实际操作看到的一致；直接改 `app.screen` 会留下上一个页面的焦点身份，截图不要那样写。
 
 | 文件 | 命令参数（screen, w, h, theme） |
 | --- | --- |
@@ -153,7 +154,8 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
 | `practice-120x40-dark.png` | `practice 120 40 dark` |
 | `practice-buttons-120x40-dark.png` | `practice-buttons 120 40 dark`（底部按钮条：按两次 `→` 选中「跳过」，展示选中态） |
 | `practice-collect-120x40-dark.png` | `practice-collect 120 40 dark`（收藏反馈：`Enter` 收藏当前词，展示「★ 已收藏」徽标、收藏按钮星标与底部 Toast；这张图保留 Toast，其它快照会清空） |
-| `dict-120x40-dark.png` | `dict 120 40 dark` |
+| `dict-120x40-dark.png` | `dict 120 40 dark`（词库页：三本内置词典在前，光标停在当前词库） |
+| `dict-builtin-120x40-dark.png` | `dict-builtin 120 40 dark`（词库页选中内置词典「收藏」，右侧详情展示用途说明与「w 查看词条」） |
 | `stats-120x40-dark.png` | `stats 120 40 dark` |
 | `settings-120x40-dark.png` | `settings 120 40 dark` |
 | `shortcuts-120x40-dark.png` | `shortcuts 120 40 dark` |

@@ -805,6 +805,16 @@ fn wide_left_from_page_content_enters_sidebar() {
 fn narrow_up_from_page_content_enters_topbar() {
     let (_fixture, mut app) = test_app(NARROW);
     press(&mut app, KeyCode::Char('3'));
+    // 光标落在当前学习词典（列表最后一行），先把内容区光标移到首行。
+    while app.dict_cursor > 0 {
+        press(&mut app, KeyCode::Up);
+    }
+    assert_eq!(app.dict_cursor, 0);
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "内容区还有行可移时不跨栏"
+    );
     press(&mut app, KeyCode::Up);
     assert_eq!(focus::pane(&app), Some(Pane::Nav));
     assert_eq!(label(&app).as_deref(), Some("词库"));
@@ -813,18 +823,23 @@ fn narrow_up_from_page_content_enters_topbar() {
     assert_eq!(app.focus, Some(FocusId::Page));
 }
 
-/// 词库页：进入后底栏显示当前词库名；↑/↓ 仍走词库光标（只读安全）。
+/// 词库页：进入后光标停在当前学习词典、底栏显示它的名字；
+/// 当前词典是最后一行，↓ 到边停住（只读安全）。
 #[test]
 fn dict_picker_shows_the_current_dict_label() {
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('3'));
     assert_eq!(app.focus, Some(FocusId::Page));
+    // 列表前三行是三本内置词典，夹具启动后的当前学习词典是最后一行。
+    let study = app.dict_entry_of_study().expect("应有当前学习词典");
+    assert_eq!(app.dict_cursor, study);
+    assert_eq!(app.dict_entry_count(), study + 1, "当前词典是最后一行");
     let name = app.boot.catalog.resources()[0].name.clone();
     assert_eq!(label(&app).as_deref(), Some(name.as_str()));
     assert!(last_line(&app, WIDE).contains(name.as_str()));
     press(&mut app, KeyCode::Down);
-    // 夹具只有一本词库：到边停住，不越界，也不跨栏。
-    assert_eq!(app.dict_cursor, 0);
+    // 夹具只有一本资源词库：到边停住，不越界，也不跨栏。
+    assert_eq!(app.dict_cursor, study);
     assert_eq!(focus::pane(&app), Some(Pane::Content));
 }
 

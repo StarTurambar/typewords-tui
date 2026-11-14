@@ -155,7 +155,7 @@ article.bookList 中 system == false 的词典                        → articl
 }
 ```
 
-`studyIndex` 是 `word.bookList` 的下标，示例中 3 表示第 4 本（3 本系统词典之后的第一本学习词库）；没有任何学习词库时为 `-1`。
+`studyIndex` 是 `word.bookList` 的下标，示例中 3 表示第 4 本（3 本系统词典之后的第一本学习词库）。默认存档里三本系统词典在 0 / 1 / 2，因此 `0`~`2` 表示当前学习词典就是收藏 / 错词 / 已掌握；Web 存档的 `bookList` 顺序不保证相同，代码按 `system` 标记遍历、不假设下标。没有选中任何词典时为 `-1`（新装与「清除所有数据」后的默认值）。词库页 `Enter` 与 `tw --dict`（内置词典传 `wordCollect` / `wordWrong` / `wordKnown`，或资源词库的 id）都写这个字段，重启后沿用；选中内置词典后即使词表为空，启动也不会自动改指别的词典。
 
 ### 3.2 顶层字段
 
@@ -182,7 +182,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
 | `articles` | 文章数组；TUI 原样透传、不读取 |
 | `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，以及可选的 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole`（`single/start/middle/end`，跨天练习用） |
-| `custom` / `system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏（`wordCollect`）、错词（`wordWrong`）、已掌握（`wordKnown`）与文章收藏（`articleCollect`） |
+| `custom` / `system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏（`wordCollect`）、错词（`wordWrong`）、已掌握（`wordKnown`）与文章收藏（`articleCollect`）。三本系统词典的词条就存在这里（`words`），`shake_common_dict` 不会清空它们 |
 | `sourceId` | 官方资源副本的原始 id；TUI 默认为空字符串 |
 | `cover` | 可选封面色，无实际渲染 |
 | 其它未知字段 | 通过 `Dict` 的 `#[serde(flatten)] extra` 原样保留 |
@@ -213,7 +213,7 @@ article.bookList 中 system == false 的词典                        → articl
 | 结算 `finish_session` | `PracticeSession::settle` 写入 `statistics` 与 `fsrsData` 后立即保存 |
 | 离开练习 | `Ctrl+C`（无结算时）、结算后「回主页」不写（已保存过） |
 | `Ctrl+Enter`（重学本组） | 重建会话后立即保存练习缓存（新会话） |
-| 切换词库、主页/词库页 `+`/`-`、设置页「复习 → 每日词数」（`daily_words`，`PerDay`） | 修改当前词典元数据后立即保存（写 `dict.json`，不是 `setting.json`） |
+| 词库页 `Enter` 切换词库（含内置词典）、词库页 `w` 打开词条页、主页/词库页 `+`/`-`、设置页「复习 → 每日词数」（`daily_words`，`PerDay`） | 修改当前词典元数据 / `studyIndex` 后立即保存（写 `dict.json`，不是 `setting.json`） |
 | 确认退出 / 事件循环结束 | `save_all` 保存；首次运行即使没进练习，也会在退出时生成 `dict.json` |
 
 练习过程中的收藏/错词/已掌握改动只改内存，靠上述时机落盘；中途崩溃最多丢掉这次会话的未保存改动（练习缓存另算）。FSRS 卡片与统计**只在结算时产生**，练习到一半退出不会写入评级。
@@ -531,7 +531,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 2. 关闭 TUI，备份 `<home>`。
 3. 写入文件：`dict.json` = `data.val.dict`；`setting.json` = `data.val.setting`；如需恢复断点，`practice-word.json` = `data.val.PracticeSaveWord`（`updated_at` 可缺省）。
 4. 启动 TUI，用 `tw doctor` 核对路径、词库数量与存档文件大小，再进设置页确认主题等字段。
-5. Web 备份里当前学习词典若在 TUI 资源中不存在，启动会回退到内置 CET-4（`ensure_study_dict` 的兜底顺序：原 id → `cet4` → 第一本词库）。
+5. Web 备份里当前学习词典若在 TUI 资源中不存在（例如 Web 端自建、TUI 没有对应词库目录项），启动会回退到词库资源（`ensure_study_dict` 的兜底顺序：原 id → `cet4` → 第一本词库）；`studyIndex` 指向某本系统词典（`system: true`）时按内置词典原样保留，不回退。
 
 迁移风险：
 
@@ -540,7 +540,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 | Web 版本更新 | setting v>23 与 dict v>4 都会触发只读保护（本次不写回）；练习缓存 v!=2 会被忽略（见 2.5）。迁移前确认 TUI 支持的版本 |
 | TUI 独有字段 | `tuiBigWord` 只存在于 TUI 的 `SettingState`；Web 端加载设置时只保留它自己认识的字段（`checkAndUpgradeSaveSetting` 的 `checkRiskKey`），因此经 Web 往返后该字段会丢失、回到默认值 |
 | 未建模的词条字段 | 写回系统词典（收藏/错词/已掌握）时，`Word` 未建模的字段（如 `inflections`）会被丢弃；词典/设置层级的未知字段则通过 `extra` 保留 |
-| Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页只列出资源目录，切走后就无法再切回 |
+| Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页的列表是「三本内置词典 + 词库目录条目」，不在词库目录里的自定义词库不会出现，切走后无法再切回（把词条 JSON 放进 `<home>/dicts/en/word/` 并登记 `<home>/list/word.json` 后才会出现） |
 | FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容；TUI 自实现的 FSRS-6 已逐条对齐上游 ts-fsrs（黄金样本见 `tests/fsrs_parity.rs`），同一张卡在两端得到相同的下次复习时间 |
 | 练习缓存 | TUI 恢复还要求 `sessionSnapshot`；Web 旧缓存若缺这个字段则只迁移词表与统计、无法恢复断点 |
 | 文章与音频 | `PracticeSaveArticle`（文章背诵的跟打断点缓存，尚未接入）、备份 ZIP 里的 `mp3/` 在 TUI 中没有对应实现，迁移时直接丢弃即可 |

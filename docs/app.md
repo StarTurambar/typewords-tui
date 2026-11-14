@@ -13,6 +13,7 @@
 | `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SummaryKind`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/buttons.rs` | 键入练习页底部的动作按钮：`TypingButton`、两页的按钮表（`PRACTICE_BUTTONS` / `ARTICLE_BUTTONS`）、列数 `columns`、键盘选中 `handle_typing_button_key` 与执行入口 `activate_typing_button` |
+| `src/app/dicts.rs` | 词库页条目：`DictEntry` / `DictEntryKind` 与 `dict_entries` / `dict_entry_at` / `dict_entry_count` / `dict_entry_of_study`。内置词典（`system: true`）与词库资源合成同一条列表，内置在前；光标、详情面板、「设为当前 / 打开词条页」都按条目下标寻址 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
 | `src/app/focus.rs` | 所有套外壳页面的键盘焦点：`FocusDir`、`set_screen`（切屏唯一入口）、`focus_default`（进入页面默认选中内容区）、`move_focus`/`switch_focus_pane`/`activate_focus`/`clear_focus`/`focus_home_default`；保存焦点身份（`FocusId`）与主页内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
@@ -46,7 +47,7 @@
 | 分组 | 字段 | 说明 |
 | --- | --- | --- |
 | 启动装载 | `boot: Bootstrapped`、`store: FileStore` | 存档状态、词库目录、主题注册表、`readonly_dict` |
-| 页面 | `screen`、`dict_cursor`、`settings_cursor`、`stats_scroll`、`help_scroll` | 当前页与三个列表/滚动光标 |
+| 页面 | `screen`、`dict_cursor`、`settings_cursor`、`stats_scroll`、`help_scroll` | 当前页与三个列表/滚动光标；`dict_cursor` 是词库页的**条目下标**（三本内置词典在前，其后是词库资源），不是 `Catalog` 下标 |
 | 键盘焦点 | `focus: Option<ui::focus::FocusId>`、`last_content_focus: Option<ui::target::ContentId>`、`viewport: Rect` | 焦点存稳定身份（导航栏 `NavId` / 主页内容区 `ContentId` / 其它页面 `Page`）。导航栏与主页内容区每次按键与 `Enter` 前按当前布局重新解析，失效即清空；`Page` 由页面自己的光标表示，不依赖几何。`last_content_focus` 供主页跨栏回内容区时恢复；`viewport` 是最近一次绘制区域，按键时按它算布局（见 5.4 与 6.1） |
 | 会话 | `session: Option<PracticeSession>`、`typing: TypingEngine`、`stat: PracticeState`、`identify_select` | 练习中才有 `session`；开始新一轮时 `typing`/`stat` 重建或重置 |
 | 随机源 | `rng: Rng`、`seed: u64` | `StdRng`；`--seed` 固定后整条事件序列可复现 |
@@ -109,12 +110,12 @@
 
 ### 3.2 `App::bootstrap` 的顺序
 
-1. `bootstrap::load(&paths, cli.dict.as_deref())`：创建 `FileStore`（确保数据目录存在），读取 `dict.json`/`setting.json`，加载 `Catalog` 与 `ThemeRegistry`；损坏、版本过高、主题加载失败等通知收进 `notices`。传 `--dict` 时调用 `select_dict`，否则 `ensure_study_dict`。
+1. `bootstrap::load(&paths, cli.dict.as_deref())`：创建 `FileStore`（确保数据目录存在），读取 `dict.json`/`setting.json`，加载 `Catalog` 与 `ThemeRegistry`；损坏、版本过高、主题加载失败等通知收进 `notices`。传 `--dict` 时先按内置词典 id（`wordCollect` / `wordWrong` / `wordKnown`）匹配，命中就改 `studyIndex`，否则调用 `select_dict` 按 id 加载资源词库；不传时 `ensure_study_dict`。
 2. 应用 CLI 覆盖：`--mode` 经 `cli::parse_mode` 写 `settings.word_practice_mode`（未知模式返回错误）；`--theme` 直接覆盖 `settings.theme` 字符串。
 3. 随机种子取 `cli.seed`，缺省 `rng::random_seed()`；构造 `rng::seeded(seed)`；组装 `App`（`screen = Home`、无会话、空 Toast、工具栏显示、词表面板与例句开关的默认值）。
 4. `notices` 逐条转 `Warning` Toast；再次 `ThemeRegistry::resolve`，发生回退时追加 Warning「主题 X 不存在，已回退到深色」。
 5. `--reset-practice` 删除两份断点缓存并提示「已清空练习进度」；否则只调用 `refresh_article_resume()` 把文章断点读进内存（损坏/版本不支持时提示），**不切换页面**（见 3.3）。
-6. `ensure_study_dict()`：当前词典缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库；失败写 `fatal = "加载词库失败: ..."`。
+6. `ensure_study_dict()`：当前词典是内置词典（收藏 / 错词 / 已掌握）时直接返回——它们的词条在存档里，为空也是合法状态，不回退到资源词库；否则缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库。失败写 `fatal = "加载词库失败: ..."`。
 7. `refresh_stats()` 与 `refresh_task_preview()` 计算主页缓存，返回 `App`。
 
 ### 3.3 恢复练习缓存与 fatal
@@ -259,7 +260,7 @@ app.save_all()
 | 屏幕 | 特有键 → `Action`（焦点键除外） |
 | --- | --- |
 | 主页 | `Esc`→`ClearFocus`；`f`→`StartFreePractice`；`d`/`s`/`t`→`Navigate`；`a`→`OpenArticles`；`Ctrl+F`→`OpenFlows`；`m`→`OpenModePicker`；`?`→Help；`q`→`QuitRequest`；`+`/`=`→`AdjustDaily(5)`，`-`→`AdjustDaily(-5)` |
-| 词库页 | `Esc`/`q`→`Back`；`+`/`-`→`AdjustDaily(±5)`；`w`→`OpenSelectedWords`；`a`→`OpenArticles`；`n`→`WordsNewDict` |
+| 词库页 | `Esc`/`q`→`Back`；`+`/`-`→`AdjustDaily(±5)`；`w`→`OpenSelectedWords`（先把选中条目设为当前词典，再进词条页）；`a`→`OpenArticles`；`n`→`WordsNewDict` |
 | 统计页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`→`StatsScroll(∓5)`；`,`/`.`→`StatsMonthMove(∓1)`；`v`→`StatsToggleView` |
 | 设置页 | `Esc`/`q`→`Back`；`Space`→`SelectActivate` |
 | 流程页 | `Esc`→`Back`（编辑中→`FlowEdit`）；`]`→`FlowNextNode`；`n`→`FlowDuplicate`；`e`→`FlowEdit`；`Delete`→`FlowDelete`；编辑中 `a`/`d`/`s`/`g`→加步骤 / 删步骤 / 乱序 / 组内巩固 |
@@ -293,7 +294,7 @@ app.save_all()
 
 | `Action` | `apply_action` 语义 |
 | --- | --- |
-| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker/Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作。`Articles` 转交 `open_articles`——文章资源是懒加载的，光切 `screen` 会得到一个右边空空的文章页。离开 `WordTest` 时清掉 `word_test` 状态——否则切回来会显示上一轮的题目与分数 |
+| `Navigate(Screen)` | `navigate_to`：有会话时直接忽略；Home 刷新统计/任务预览，DictPicker 把光标停在当前学习词典（`dict_entry_of_study`）、Settings 重置光标，Stats/Help 重置滚动；`Practice` 无动作。`Articles` 转交 `open_articles`——文章资源是懒加载的，光切 `screen` 会得到一个右边空空的文章页。离开 `WordTest` 时清掉 `word_test` 状态——否则切回来会显示上一轮的题目与分数 |
 | `Back` | 依次关闭 confirm/edit/summary；否则按屏返回 Home（Settings 先保存设置；Help 走 `help_back`） |
 | `QuitRequest` | 打开「确定退出 Type Words 吗？」确认弹层 |
 | `StartPractice` / `StartFreePractice` | 按当前设置模式 / 以 `Free` 模式启动练习 |
@@ -305,8 +306,8 @@ app.save_all()
 | `OpenModePicker` / `ModeMove(delta)` / `ModeSelect` / `ModeCancel` | 模式选择弹层：打开弹层、移动光标、确认、取消；确认后按所选模式启动练习 |
 | `OpenArticles` | 打开文章页：载入书本与当前书本的文章（见 6.3）。主页 `a` 键用它；侧栏 / 数字键走 `Navigate(Articles)`，两者最终落到同一个方法 |
 | `DictMove(delta)` | 词库光标移动并夹在有效范围 |
-| `SelectDict(i)` / `SelectSetting(i)` | 只移动光标（越界忽略） |
-| `ActivateDict(i)` | 切换当前学习词库：保存词典、回主页、刷新任务与 Toast |
+| `SelectDict(i)` / `SelectSetting(i)` | 只移动光标（越界忽略）；词库页的 `i` 是条目下标（内置词典在前） |
+| `ActivateDict(i)` | 把词库页第 `i` 个条目设为当前学习词典：内置词典改 `study_index`，资源词库走 `select_dict` 重新加载词表；随后保存词典、回主页、刷新任务并 Toast（内置「已切换到内置词典 X」、资源「已切换到词库 X」） |
 | `SettingsMove(delta)` | 设置光标移动并夹在 `0..SETTING_ROWS.len()-1` |
 | `ActivateSetting(i)` | 设置光标置 `i` 并执行该项（见第 8 节） |
 | `StatsScroll(delta)` | 统计页滚动，上限为「最近 14 天」记录数减一 |

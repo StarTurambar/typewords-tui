@@ -33,11 +33,13 @@ use crate::store::{FileStore, LoadStatus};
 
 pub mod action;
 pub mod buttons;
+pub mod dicts;
 pub mod focus;
 pub mod keymap;
 pub mod mouse;
 
 pub use action::Action;
+pub use dicts::{DictEntry, DictEntryKind};
 pub use focus::FocusDir;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -742,6 +744,9 @@ impl App {
         if let Err(err) = app.boot.ensure_study_dict() {
             app.fatal = Some(format!("加载词库失败: {err}"));
         }
+        // 光标先落到当前学习词典：词库页第一行是内置词典「收藏」，
+        // 停在 0 时任何「先取 dict_cursor 再操作」的路径都会指向收藏。
+        app.dict_cursor = app.dict_entry_of_study().unwrap_or(0);
         app.refresh_stats();
         app.refresh_task_preview();
         // 首帧就选中主页主按钮：否则「初次打开」没有任何高亮，方向键的
@@ -899,6 +904,7 @@ impl App {
         if let Err(err) = self.boot.ensure_study_dict() {
             self.fatal = Some(format!("加载词库失败: {err}"));
         }
+        self.dict_cursor = self.dict_entry_of_study().unwrap_or(0);
         self.save_dict_now();
         self.save_settings_now();
         self.refresh_stats();
@@ -2651,18 +2657,28 @@ impl App {
 
     // ── 词条管理 ─────────────────────────────────────────────────────────
 
-    /// 打开词库页当前选中词典的词条管理页。
+    /// 打开词库页当前选中条目的词条管理页。
+    ///
+    /// 内置词典（收藏 / 错词 / 已掌握）的词条就在存档里，不经过 Catalog：
+    /// 直接把 `studyIndex` 指向它即可，随后的读取 / 修改都落在 `dict.json`。
+    /// 资源词库仍走 `select_dict`（按 id 从词条文件重新加载词表）。
     fn open_selected_words(&mut self) {
-        let index = self.dict_cursor;
-        let Some(resource) = self.boot.catalog.resources().get(index).cloned() else {
+        let Some(entry) = self.dict_entry_at(self.dict_cursor) else {
             return;
         };
-        let id = resource.id_string();
-        if let Err(err) = self.boot.select_dict(&id) {
-            self.toast(NoticeLevel::Error, format!("打开词库失败: {err}"));
-            return;
+        match entry.kind {
+            DictEntryKind::System => {
+                self.boot.base.set_study_index(entry.index);
+                self.save_dict_now();
+            }
+            DictEntryKind::Resource => {
+                if let Err(err) = self.boot.select_dict(&entry.id) {
+                    self.toast(NoticeLevel::Error, format!("打开词库失败: {err}"));
+                    return;
+                }
+                self.save_dict_now();
+            }
         }
-        self.save_dict_now();
         self.open_words();
     }
 

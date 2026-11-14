@@ -54,7 +54,20 @@ impl Bootstrapped {
     }
 
     /// 确保当前词典已加载词表；为空则按 id 重新加载或选第一本词库。
+    ///
+    /// 内置词典（收藏 / 错词 / 已掌握）是例外：它们的词条存在存档里，没有
+    /// 「按 id 从资源文件重新加载」这一步，词条为空也是合法状态。如果按普通
+    /// 词库的规则回退到 cet4 / 第一本，用户上次特意选的收藏/错词会在重启后
+    /// 悄悄消失。
     pub fn ensure_study_dict(&mut self) -> Result<()> {
+        if self
+            .base
+            .study_dict()
+            .map(|dict| dict.system)
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let need_load = self
             .base
             .study_dict()
@@ -124,7 +137,13 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     };
 
     if let Some(id) = dict_id {
-        bootstrapped.select_dict(id)?;
+        // 内置词典（收藏 / 错词 / 已掌握）不在 Catalog 里，没有「按 id 加载词表」
+        // 这一步——词条就在存档里，直接把 studyIndex 指过去即可。
+        // 因此 tw --dict wordCollect 与词库页 Enter 得到同一结果。
+        match bootstrapped.base.system_dict_index(id) {
+            Some(index) => bootstrapped.base.set_study_index(index),
+            None => bootstrapped.select_dict(id)?,
+        }
     } else {
         bootstrapped.ensure_study_dict()?;
     }

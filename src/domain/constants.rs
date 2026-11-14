@@ -103,6 +103,21 @@ pub fn stage_name(stage: WordPracticeStage) -> &'static str {
     }
 }
 
+/// 内置词典的用途说明（词库页详情面板用）。
+///
+/// 存档里的 `Dict::description` 只有「已掌握」写了说明，其余为空；而这句说明是
+/// 程序行为的一部分，不随用户存档变化，因此按 id 给出，不依赖存档字段。
+pub fn system_dict_hint(id: &str) -> &'static str {
+    match id {
+        DICT_WORD_COLLECT => {
+            "练习中按 Enter 收藏的单词会存进这里；可以设为当前词典复习，或在词条页移除。"
+        }
+        DICT_WORD_WRONG => "输入错误的单词会自动记进这里；练对或在词条页标记「认识」后移除。",
+        DICT_WORD_KNOWN => "标记为已掌握的单词会存进这里，不再出现在练习中；可在词条页移除。",
+        _ => "内置词典，词条随练习自动维护。",
+    }
+}
+
 /// 词典状态存档版本（Web 的 SAVE_DICT_KEY.version）。
 pub const DICT_STATE_VERSION: u32 = 4;
 /// 设置存档版本（Web 的 SAVE_SETTING_KEY.version）。

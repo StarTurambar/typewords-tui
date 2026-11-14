@@ -26,7 +26,7 @@ pub struct Cli {
     /// 数据目录（存档、导入词库）
     #[arg(long, global = true, value_name = "DIR")]
     pub home: Option<PathBuf>,
-    /// 直接进入指定词库（id 或 enName）
+    /// 直接进入指定词库（id 或 enName；内置词典可用 wordCollect / wordWrong / wordKnown）
     #[arg(long, value_name = "DICT_ID")]
     pub dict: Option<String>,
     /// 启动时覆盖练习模式（system/free/review/shuffle/identify/dictation/listen）

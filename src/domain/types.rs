@@ -756,6 +756,17 @@ impl BaseState {
             .find(|dict| dict.system && dict.matches_id(id))
     }
 
+    /// 内置词典（收藏 / 错词 / 已掌握）在 word.book_list 里的下标。
+    ///
+    /// 按 id / enName 匹配，不假设它们固定占 0~2：Web 存档的 book_list
+    /// 顺序不保证与本仓库默认值相同。
+    pub fn system_dict_index(&self, id: &str) -> Option<usize> {
+        self.word
+            .book_list
+            .iter()
+            .position(|dict| dict.system && dict.matches_id(id))
+    }
+
     pub fn collect_word(&self) -> Option<&Dict> {
         self.find_system(DICT_WORD_COLLECT)
     }
