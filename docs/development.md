@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **414 个测试**：101 个单元测试 + 313 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **418 个测试**：102 个单元测试 + 316 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -73,7 +73,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/domain/statistics.rs` | 2 | 跨天会话计数去重、single/旧记录兼容 |
 | `src/app/mod.rs` | 1 | 30 秒周期保存只在时长真正推进时触发 |
 | `src/domain/session.rs` | 1 | 除默写外每种模式换词都自动朗读 |
-| `src/domain/flow/mod.rs` | 1 | 有内置 flow 的 7 个模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应 |
+| `src/domain/flow/mod.rs` | 2 | 有内置 flow 的 7 个模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应、两种单词测试与「自定义流程」不在内置列表里且 `get_flow_id_for_mode` 兜底成 `system` |
 
 ### 4.2 集成测试（`tests/`）
 
@@ -89,7 +89,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
 | `tests/system_dicts.rs` | 10 | 内置词典（收藏 / 错词 / 已掌握）：在词库页排在最前且可渲染、`w` 打开词条页、删词只改 `dict.json`（资源文件不变）、`Enter` 设为当前并落盘 `studyIndex`、重启后保持（空词典也不回退）、`--dict` 接受内置词典 id、收藏有词可练习、已掌握不建会话、切回资源词库保留进度、鼠标点行先选中再激活 |
 | `tests/shell_nav.rs` | 9 | 外壳导航：宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
-| `tests/flows.rs` | 16 | 自定义练习流程：新建副本、编辑步骤（含步骤光标 h/l）、启用内置流程切换模式与持久化、编辑页底栏提示 `]` 换节点（`Tab` 只换栏）、流程页 `●` 只标「下一轮实际生效」的流程（逐个模式开练比对 `session.flow()`）、已启用但未生效只标「（已启用）」、自定义流程模式未启用时无 `●` |
+| `tests/flows.rs` | 17 | 自定义练习流程：新建副本、编辑步骤（含步骤光标 h/l）、启用内置流程切换模式与持久化、编辑页底栏提示 `]` 换节点（`Tab` 只换栏）、流程页 `●` 只标「下一轮实际生效」的流程（逐个模式开练比对 `session.flow()`）、已启用但未生效只标「（已启用）」、自定义流程模式未启用时无 `●`、两种单词测试模式没有任何 `●`（页头改说明「不经过流程编排」，60 列下仍看得懂） |
 | `tests/store_roundtrip.rs` | 8 | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除、练习缓存版本不支持（不移动文件）、`tw doctor` 列出全部存档（含 `practice-article.json` 与 `flows.json`） |
 | `tests/end_to_end.rs` | 5 | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；只剩 1 个错词、小组只有 1 个词时巩固阶段不会卡住 |
 | `tests/audio.rs` | 4 | 朗读触发：换词自动朗读、单词测试切题朗读与 `Ctrl+P` 重播（用 `audio::record_speech` 断言） |
