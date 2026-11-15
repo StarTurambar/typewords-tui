@@ -95,6 +95,18 @@ fn read_only_commands_work_while_data_dir_is_locked() {
     .expect("export-web 不应被数据目录锁拒绝");
     assert!(out.is_file());
 
+    // export-dict 同理：TUI 正在跑的时候照样能把词库倒出来。
+    let words = fixture.root.path().join("toy-export.json");
+    typewords_tui::run(cli(
+        &fixture,
+        Command::ExportDict {
+            id: Some("toy".to_string()),
+            out: Some(words.clone()),
+        },
+    ))
+    .expect("export-dict 不应被数据目录锁拒绝");
+    assert!(words.is_file());
+
     drop(lock);
 }
 

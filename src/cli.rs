@@ -1,4 +1,4 @@
-//! 命令行入口：参数、doctor、task 预览、import-dict。
+//! 命令行入口：参数、doctor、task 预览、词库导入导出（import-dict / export-dict）。
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -7,10 +7,10 @@ use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 
 use crate::bootstrap;
-use crate::domain::catalog::import_dict as do_import_dict;
+use crate::domain::catalog::{Catalog, DictResource, import_dict as do_import_dict};
 use crate::domain::rng;
 use crate::domain::study_task::create_study_task;
-use crate::domain::types::{Dict, WordPracticeMode};
+use crate::domain::types::{Dict, Word, WordPracticeMode};
 use crate::paths::Paths;
 
 #[derive(Parser, Debug, Clone)]
@@ -69,6 +69,15 @@ pub enum Command {
     Task,
     /// 导入词库 JSON 到数据目录
     ImportDict { file: PathBuf },
+    /// 导出词库词条为 JSON（import-dict 的逆操作）
+    ExportDict {
+        /// 词库 id 或 enName；缺省取全局 --dict，再缺省取当前学习词库
+        #[arg(value_name = "DICT_ID")]
+        id: Option<String>,
+        /// 输出路径，缺省写到标准输出
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// 导入网页版导出的备份 JSON（BackupData v5）
     ImportWeb { file: PathBuf },
     /// 导出成网页版能导入的备份 JSON
@@ -290,6 +299,123 @@ pub fn import_dict(paths: &Paths, file: &Path) -> Result<()> {
     );
     println!("使用 tw --dict {} 切换到该词库。", resource.id_string());
     Ok(())
+}
+
+/// `tw export-dict` 的导出目标：词库名称与词条。
+struct ExportTarget {
+    name: String,
+    words: Vec<Word>,
+}
+
+/// 导出词库词条为词条数组 JSON（`import-dict` 的逆操作）。
+pub fn export_dict(paths: &Paths, id: Option<&str>, out: Option<&Path>) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut sink = stdout.lock();
+    export_dict_to(&mut sink, paths, id, out)
+}
+
+/// [`export_dict`] 的实现。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
+/// 与 [`doctor_to`] 同一个理由；`--out` 缺省时输出就是可直接再导入的 JSON 本体。
+pub fn export_dict_to(
+    sink: &mut impl Write,
+    paths: &Paths,
+    id: Option<&str>,
+    out: Option<&Path>,
+) -> Result<()> {
+    let target = resolve_export_target(paths, id)?;
+    let text = serde_json::to_string_pretty(&target.words)?;
+    match out {
+        Some(path) => {
+            // 与 import-dict 一样走原子写：中途失败不会把目标文件截成半截，
+            // 也不会把一份写了一半的词库留在磁盘上。
+            crate::fs::write_atomic(path, &format!("{text}\n"))
+                .with_context(|| format!("写入词库文件失败: {}", path.display()))?;
+            writeln!(
+                sink,
+                "已导出词库: {}（{} 词）→ {}",
+                target.name,
+                target.words.len(),
+                path.display()
+            )?;
+        }
+        None => writeln!(sink, "{text}")?,
+    }
+    Ok(())
+}
+
+/// 解析要导出的词库。
+///
+/// 先查词库目录（内置词库与 `import-dict` 导入的词库都在这里，词条来自词条
+/// 文件）；再查存档——收藏 / 错词 / 已掌握三本内置词典的**词条只在
+/// `dict.json` 里**，没有词条文件，词库目录里也查不到它们。`id` 缺省时导出
+/// 当前学习词库。
+fn resolve_export_target(paths: &Paths, id: Option<&str>) -> Result<ExportTarget> {
+    let catalog = Catalog::load(paths)?;
+    if let Some(id) = id
+        && let Some(resource) = catalog.find(id)
+    {
+        return target_from_catalog(&catalog, resource);
+    }
+
+    let base = crate::store::FileStore::new(paths.home.clone())?
+        .load_dict()
+        .value;
+    let dict = match id {
+        Some(id) => base
+            .system_dict_index(id)
+            .and_then(|index| base.word.book_list.get(index)),
+        None => base.study_dict(),
+    };
+    let Some(dict) = dict else {
+        return Err(match id {
+            Some(id) => anyhow!("未找到词库: {id}（用 tw doctor 查看全部词库 id）"),
+            None => anyhow!("还没有当前学习词库，请指定 DICT_ID（tw doctor 可列出全部词库 id）"),
+        });
+    };
+
+    // 普通词库的词表在存档落盘时被清空（`shake_common_dict` 只留元数据），
+    // 按 id / enName 回词条文件补齐；自建词库与内置词典的词条就在存档里。
+    let words = if dict.words.is_empty() {
+        match catalog
+            .find(&dict.id)
+            .or_else(|| catalog.find(&dict.en_name))
+        {
+            Some(resource) => catalog.load_words(resource)?,
+            None => Vec::new(),
+        }
+    } else {
+        dict.words.clone()
+    };
+    let name = if dict.name.is_empty() {
+        dict.id.clone()
+    } else {
+        dict.name.clone()
+    };
+    export_target(name, words)
+}
+
+fn target_from_catalog(catalog: &Catalog, resource: &DictResource) -> Result<ExportTarget> {
+    let name = if resource.name.is_empty() {
+        resource.id_string()
+    } else {
+        resource.name.clone()
+    };
+    export_target(name, catalog.load_words(resource)?)
+}
+
+/// 收尾：过滤空词条并拒绝空词库。
+///
+/// 空词条既练不到，也会让导出的词数比界面上的数字大；空词库导出成 `[]`
+/// 之后 `import-dict` 又会拒收（它要求至少一个可用词），与其造出一个导不
+/// 回去的文件，不如当场报错。
+fn export_target(name: String, mut words: Vec<Word>) -> Result<ExportTarget> {
+    words.retain(Word::is_usable);
+    if words.is_empty() {
+        return Err(anyhow!("词库中没有可用单词: {name}"));
+    }
+    Ok(ExportTarget { name, words })
 }
 
 #[cfg(test)]

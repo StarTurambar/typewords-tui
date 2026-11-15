@@ -86,7 +86,10 @@ fn run_resolved(home: PathBuf, cli: Cli, log_file: Option<&Path>, report_dir: &P
 /// 这里刻意写成**白名单**：新增子命令默认会被加锁（宁可多锁一次，也不要
 /// 漏掉互斥），只有确认只读的命令才登记进来。
 fn is_read_only(command: Option<&Command>) -> bool {
-    matches!(command, Some(Command::Doctor | Command::ExportWeb { .. }))
+    matches!(
+        command,
+        Some(Command::Doctor | Command::ExportWeb { .. } | Command::ExportDict { .. })
+    )
 }
 
 /// 按子命令分发；是否持锁由 [run_resolved] 决定。
@@ -96,6 +99,11 @@ fn dispatch(paths: Paths, cli: Cli) -> Result<()> {
         Some(Command::Doctor) => cli::doctor(&paths),
         Some(Command::Task) => cli::task_preview(&paths, &cli),
         Some(Command::ImportDict { file }) => cli::import_dict(&paths, &file),
+        Some(Command::ExportDict { id, out }) => cli::export_dict(
+            &paths,
+            id.as_deref().or(cli.dict.as_deref()),
+            out.as_deref(),
+        ),
         Some(Command::ImportWeb { file }) => cli::import_web(&paths, &file),
         Some(Command::ExportWeb { out }) => cli::export_web(&paths, out.as_deref()),
         None => app::run(paths, cli),
@@ -120,6 +128,7 @@ fn command_label(command: Option<&Command>) -> &'static str {
         Some(Command::Doctor) => "doctor",
         Some(Command::Task) => "task",
         Some(Command::ImportDict { .. }) => "import-dict",
+        Some(Command::ExportDict { .. }) => "export-dict",
         Some(Command::ImportWeb { .. }) => "import-web",
         Some(Command::ExportWeb { .. }) => "export-web",
     }
