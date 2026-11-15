@@ -66,6 +66,36 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     result
 }
 
+/// 文章页的滚轮：指针落在哪一栏就滚哪一栏。
+///
+/// 左栏（书本）的滚动就是「换书」——换书后文章光标随新书回到第一篇；右栏
+/// （文章）只移动文章光标，绝不碰书本。两栏之外（导航栏 / 顶栏 / 底栏）返回
+/// `None`。早期实现不看指针位置、一律发 `ArticleBookMove`：在右侧文章列表
+/// 上滚一格，整本书被换掉，文章光标也被重置。
+pub fn wheel_action(
+    content: Rect,
+    column: u16,
+    row: u16,
+    delta: i32,
+) -> Option<crate::app::Action> {
+    let layout = layout(content);
+    if inside(layout.books, column, row) {
+        Some(crate::app::Action::ArticleBookMove(delta))
+    } else if inside(layout.articles, column, row) {
+        Some(crate::app::Action::ArticleMove(delta))
+    } else {
+        None
+    }
+}
+
+/// 终端坐标是否落在矩形里。
+///
+/// 与 `Target::contains` 同一套开区间语义（右边 / 下边不含），命中区不会因为
+/// 边界上的一个格子互相重叠。
+fn inside(rect: Rect, column: u16, row: u16) -> bool {
+    column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom()
+}
+
 /// 书本 / 文章列表页。
 pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Articles, |frame, content| {

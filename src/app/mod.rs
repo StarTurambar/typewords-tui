@@ -2398,23 +2398,36 @@ impl App {
     }
 
     /// 移动书本列表的光标。
+    ///
+    /// 滚轮 / 点击落在书本栏时，当前栏（高亮）跟着切到左栏，之后的 ↑/↓ 也
+    /// 继续换书。只有**真的换了书**才重置文章光标并重读文章文件：光标已经在
+    /// 边界上（只有一本书，或滚轮停在最后一本书）时不该把用户挑好的文章光标
+    /// 打回第一篇，也不必每格滚轮都读一遍文件。
     fn move_article_book(&mut self, delta: i32) {
         let total = self.article_books.len() as i32;
         if total == 0 {
             return;
         }
-        let next = (self.article_book_cursor as i32 + delta).clamp(0, total - 1);
-        self.article_book_cursor = next as usize;
+        self.article_pane_left = true;
+        let next = (self.article_book_cursor as i32 + delta).clamp(0, total - 1) as usize;
+        if next == self.article_book_cursor {
+            return;
+        }
+        self.article_book_cursor = next;
         self.article_cursor = 0;
         self.load_selected_book();
     }
 
     /// 移动文章列表的光标。
+    ///
+    /// 与 `move_article_book` 对称：落在文章栏的滚轮 / 点击把当前栏切到右栏，
+    /// 只移动文章光标，书本与已载入的文章列表原样保留。
     fn move_article(&mut self, delta: i32) {
         let total = self.article_list.len() as i32;
         if total == 0 {
             return;
         }
+        self.article_pane_left = false;
         let next = (self.article_cursor as i32 + delta).clamp(0, total - 1);
         self.article_cursor = next as usize;
     }

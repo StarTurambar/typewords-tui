@@ -172,6 +172,86 @@ fn install_article_assets(assets_root: &std::path::Path) {
     .expect("复制文章资源");
 }
 
+/// 往文章目录里补第二本书：第一本 `toy.json`（11、12），第二本 `second.json`（21、22）。
+///
+/// fixture 只有一本书，单本书的书本光标永远被夹在 0，"滚轮有没有换书"看不出
+/// 差别；补一本才能把"在右栏滚动却换了整本书"这个缺陷钉住。
+fn install_second_article_book(assets_root: &std::path::Path) {
+    let list = assets_root.join("list");
+    let articles = assets_root.join("dicts").join("en").join("article");
+    let books = serde_json::json!([
+        {
+            "id": 1,
+            "enName": "toybook",
+            "name": "测试文章集",
+            "description": "测试用文章",
+            "url": "toy.json",
+            "length": 2,
+            "language": "en",
+            "translateLanguage": "zh_CN",
+            "type": "article"
+        },
+        {
+            "id": 2,
+            "enName": "secondbook",
+            "name": "第二文章集",
+            "description": "测试用文章",
+            "url": "second.json",
+            "length": 2,
+            "language": "en",
+            "translateLanguage": "zh_CN",
+            "type": "article"
+        }
+    ]);
+    std::fs::write(
+        list.join("article.json"),
+        serde_json::to_string(&books).unwrap(),
+    )
+    .expect("写入两本书的文章目录");
+    let second = serde_json::json!([
+        {
+            "id": 21,
+            "title": "第三篇",
+            "titleTranslate": "Article Three",
+            "text": "Nice to meet you.",
+            "textTranslate": "很高兴认识你。",
+            "audioSrc": ""
+        },
+        {
+            "id": 22,
+            "title": "第四篇",
+            "titleTranslate": "Article Four",
+            "text": "See you tomorrow.",
+            "textTranslate": "明天见。",
+            "audioSrc": ""
+        }
+    ]);
+    std::fs::write(
+        articles.join("second.json"),
+        serde_json::to_string(&second).unwrap(),
+    )
+    .expect("写入第二本书的文章");
+}
+
+/// 在命中区内滚一格滚轮（经过真实的鼠标事件入口）。
+fn wheel(app: &mut app::App, area: Rect, column: u16, row: u16, down: bool) {
+    use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
+
+    app.on_mouse(
+        MouseEvent {
+            kind: if down {
+                MouseEventKind::ScrollDown
+            } else {
+                MouseEventKind::ScrollUp
+            },
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+}
+
 /// 文章页的选中行要有可见高亮：书本栏选中整块 accent，切到文章栏后
 /// 高亮跟着移动到右侧。
 #[test]
@@ -405,6 +485,96 @@ fn clicking_the_articles_nav_item_loads_the_article_list() {
         !app.article_list.is_empty(),
         "点侧栏进文章页也应列出当前书本的文章"
     );
+}
+
+/// 文章页的滚轮作用于指针所在的那一栏。
+///
+/// 早期实现不论指针在左栏还是右栏都返回 `ArticleBookMove`：在右侧文章列表
+/// 上滚动会把整本书换掉，文章光标也被重置回第一篇。现在左栏换书、右栏只
+/// 移动文章光标，栏外（导航栏 / 底栏）不响应。
+#[test]
+fn the_wheel_scrolls_the_pane_under_the_pointer() {
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    install_article_assets(&fixture.assets());
+    install_second_article_book(&fixture.assets());
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let area = Rect::new(0, 0, 120, 40);
+
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.article_books.len(), 2, "应读到两本书");
+    assert_eq!(app.article_list[0].id, 11, "进页应载入第一本书的文章");
+
+    // 右栏第二篇文章的可见行；滚轮落在这一栏里。
+    let article_row = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::ArticleMove(1))
+        .expect("文章栏应有第二篇的鼠标目标")
+        .rect;
+    let (article_x, article_y) = (article_row.x + 2, article_row.y);
+
+    // 右栏向下滚：只移动文章光标，不换书、不丢光标。
+    wheel(&mut app, area, article_x, article_y, true);
+    assert_eq!(app.article_book_cursor, 0, "右栏滚轮不该换书");
+    assert_eq!(
+        app.article_list[0].id, 11,
+        "右栏滚轮不该把整本书换掉（文章列表应还是第一本）"
+    );
+    assert_eq!(app.article_cursor, 1, "右栏滚轮应把文章光标下移");
+    assert!(!app.article_pane_left, "滚轮所在的栏应成为当前栏");
+
+    // 同一栏向上滚：光标回到第一篇。
+    wheel(&mut app, area, article_x, article_y, false);
+    assert_eq!(app.article_cursor, 0, "右栏向上滚应把文章光标上移");
+    assert_eq!(app.article_book_cursor, 0, "右栏滚轮仍不该换书");
+
+    // 左栏向下滚：换到第二本书，文章光标随新书回到第一篇。
+    let book_row = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::ArticleBookMove(1))
+        .expect("书本栏应有第二本书的鼠标目标")
+        .rect;
+    wheel(&mut app, area, book_row.x + 2, book_row.y, true);
+    assert_eq!(app.article_book_cursor, 1, "左栏滚轮应换书");
+    assert_eq!(app.article_list[0].id, 21, "换书后应载入第二本书的文章");
+    assert_eq!(app.article_cursor, 0, "换书后文章光标回到第一篇");
+    assert!(app.article_pane_left, "滚轮所在的栏应成为当前栏");
+
+    // 滚回第一本书。
+    wheel(&mut app, area, book_row.x + 2, book_row.y, false);
+    assert_eq!(app.article_book_cursor, 0);
+    assert_eq!(app.article_list[0].id, 11);
+
+    // 文章光标停在第二篇时，左栏再往上滚：已经在第一本书，换不了书，
+    // 文章光标也不该被打回第一篇。
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.article_cursor, 1);
+    wheel(&mut app, area, book_row.x + 2, book_row.y, false);
+    assert_eq!(app.article_book_cursor, 0, "已在第一本书，滚轮不该换书");
+    assert_eq!(app.article_cursor, 1, "书没换时不该重置文章光标");
+
+    // 滚轮已把当前栏切到左栏，按 → 回文章栏，再检查栏外滚轮不动光标。
+    press(&mut app, KeyCode::Right);
+    assert!(!app.article_pane_left);
+
+    // 导航栏上滚轮：页面内容一动都不该动。
+    let nav_row = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::Navigate(app::Screen::Home))
+        .expect("侧栏应有单词入口")
+        .rect;
+    wheel(&mut app, area, nav_row.x + 2, nav_row.y, true);
+    assert_eq!(app.article_book_cursor, 0, "导航栏滚轮不该换书");
+    assert_eq!(app.article_list[0].id, 11, "导航栏滚轮不该换书");
+    assert_eq!(app.article_cursor, 1, "导航栏滚轮不该移动文章光标");
+    assert!(!app.article_pane_left, "导航栏滚轮不该改变当前栏");
+
+    // 底栏（内容区之外）同样不响应。
+    wheel(&mut app, area, article_x, area.height - 1, true);
+    assert_eq!(app.article_cursor, 1, "底栏滚轮不该移动文章光标");
+    assert_eq!(app.article_book_cursor, 0);
 }
 
 /// 文章跟打结束后要落在能操作的页面上。
