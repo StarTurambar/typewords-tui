@@ -564,13 +564,15 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 - **导入覆盖的备份**：`tw import-web` 覆盖前留下的 `<文件名>.bak-<时间戳>.json` 不会被自动清理；确认导入结果无误后可删除。需要退回时关闭程序，用备份文件覆盖同名存档（`dict.json` / `setting.json` / `practice-word.json` / `practice-article.json`）即可。
 - **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` / `practice-article.json` 版本不符 → 忽略并在下次保存时覆盖。四类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
 
-`tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**存档文件大小**（不存在则标注）、自定义主题目录与全部主题、主题加载告警。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
+`tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**全部存档文件的大小**（`dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`，不存在则标注）、自定义主题目录与全部主题、主题加载告警。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
 
 ```text
 存档：
   - dict.json: 48213 bytes
   - setting.json: 不存在
   - practice-word.json: 1204 bytes
+  - practice-article.json: 386 bytes
+  - flows.json: 不存在
 ```
 
 ## 10. 安全与隐私
