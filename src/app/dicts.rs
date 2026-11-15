@@ -134,6 +134,9 @@ impl App {
             let current = study
                 .map(|study| study.matches_id(&id) || study.matches_id(&resource.en_name))
                 .unwrap_or(false);
+            // 词数与百分比同源：词典已在存档里就按有效词数算（词表可能已
+            // 加载，也可能被 shake 成只剩元数据），否则才退到目录里登记的长度，
+            // 具体取值见 `App::resource_word_count`。
             entries.push(DictEntry {
                 kind: DictEntryKind::Resource,
                 index,

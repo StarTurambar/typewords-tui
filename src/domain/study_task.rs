@@ -90,7 +90,10 @@ pub fn get_current_study_word(
 
     let ignore_set = base.ignore_words_set(settings.ignore_simple_word);
     let per_day = dict.per_day();
-    let start = dict.last_learn_index.min(words.len());
+    // 进度分母与 `per_day()` / 结算推进同源。读作 `length` 时，元数据比实际
+    // 词表大就永远判不出「最后一组」，整本学完也进不了总复习。
+    let total = dict.effective_length();
+    let start = dict.last_learn_index.min(total);
     let complete = dict.complete;
     // 学完判定只看词表（`words`，即实际词数），不看词库目录里的登记值
     // `dict.length`：删过词 / 换过更短的词库文件后登记值会大于真实词数，
@@ -223,7 +226,7 @@ pub fn create_shuffle_task(
 mod tests {
     use super::*;
     use crate::domain::rng::seeded;
-    use crate::domain::types::{Card, Dict};
+    use crate::domain::types::Dict;
 
     /// 构造一本「目录登记词数」与词表实际词数不一致的学习词典。
     ///
@@ -314,5 +317,40 @@ mod tests {
         let mut rng = seeded(7);
         let task = create_study_task(&base, &settings, &mut rng).task_words;
         assert_eq!(task.new.len(), 4, "应按实际词表继续取新词");
+    }
+
+    fn base_with_words(count: usize, last_learn_index: usize, per_day: usize) -> BaseState {
+        let mut base = BaseState::default();
+        base.word.book_list.push(Dict {
+            length: count,
+            last_learn_index,
+            per_day_study_number: per_day,
+            words: (0..count)
+                .map(|index| Word::new(format!("w{index}")))
+                .collect(),
+            ..Dict::default()
+        });
+        // 默认存档里已经有三本内置词典，当前词典是刚追加的那本。
+        base.word.study_index = (base.word.book_list.len() - 1) as i32;
+        base
+    }
+
+    /// 只剩最后一个词时也要把它出成新词：`is_end` 不能在 `total - 1` 就成立。
+    #[test]
+    fn the_last_word_is_still_offered_as_a_new_word() {
+        let base = base_with_words(2, 1, 1);
+        let mut rng = seeded(7);
+        let task = get_current_study_word(&base, &SettingState::default(), &mut rng);
+        assert_eq!(task.new.len(), 1, "还剩最后一个词，应该出题");
+        assert_eq!(task.new[0].word, "w1");
+    }
+
+    /// 词表学完之后不再出新词，转入复习。
+    #[test]
+    fn a_finished_word_list_offers_no_new_words() {
+        let base = base_with_words(2, 2, 1);
+        let mut rng = seeded(7);
+        let task = get_current_study_word(&base, &SettingState::default(), &mut rng);
+        assert!(task.new.is_empty(), "学完之后不该再出新词");
     }
 }

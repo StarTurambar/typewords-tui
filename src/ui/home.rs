@@ -421,15 +421,10 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
     };
     frame.render_widget(Paragraph::new(date_line), row(1));
 
-    let (percent, last, length) = dict
-        .map(|dict| {
-            (
-                dict.progress_percent(),
-                dict.last_learn_index,
-                dict.effective_length(),
-            )
-        })
-        .unwrap_or((0, 0, 0));
+    // 百分比与「N / M 词」取同一份进度快照：两套分母并存时这一屏会同时
+    // 出现「已学 30%」和「6 / 12 词」。
+    let dict_progress = dict.map(|dict| dict.progress()).unwrap_or_default();
+    let percent = dict_progress.percent();
     let percent_text = format!("{percent}%");
     let bar_width = (left.width as usize)
         .saturating_sub(display_width(&percent_text) + 2)
@@ -437,7 +432,7 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
     let mut progress = widgets::thin_bar_spans(
         percent,
         bar_width,
-        if dict.map(|dict| dict.complete).unwrap_or(false) {
+        if dict_progress.complete {
             theme.good
         } else {
             theme.accent_alt
@@ -448,7 +443,7 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
     progress.push(Span::styled(percent_text, Style::default().fg(theme.muted)));
     frame.render_widget(Paragraph::new(Line::from(progress)), row(2));
 
-    let left_text = if dict.map(|dict| dict.complete).unwrap_or(false) {
+    let left_text = if dict_progress.complete {
         "已学完，进入总复习阶段".to_string()
     } else {
         format!("当前进度：已学 {percent}%")
@@ -457,7 +452,7 @@ fn render_hero(app: &App, frame: &mut Frame, layout: &HomeLayout, theme: &Theme)
         Paragraph::new(two_part_line(
             Span::styled(left_text, Style::default().fg(theme.dim)),
             Span::styled(
-                format!("{last} / {length} 词"),
+                format!("{} / {} 词", dict_progress.learned, dict_progress.total),
                 Style::default().fg(theme.muted),
             ),
             left.width as usize,

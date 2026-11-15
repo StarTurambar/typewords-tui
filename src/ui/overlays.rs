@@ -465,12 +465,7 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
     let layout = summary_layout(area, summary_extra_lines(summary));
     clear_modal_backdrop(frame, area, layout.rect, theme);
     widgets::paint_rect(frame, layout.rect, theme.panel);
-    let percent = if summary.length == 0 {
-        0
-    } else {
-        ((summary.last_learn_index.min(summary.length) as f64 / summary.length as f64) * 100.0)
-            .round() as u32
-    };
+    let percent = summary.percent();
     let muted = Style::default().fg(theme.muted);
     let value = Style::default().fg(theme.fg);
     // 两份结算共用弹层，但指标口径不同：单词会话看「新词 / 复习 / 词典
@@ -509,7 +504,11 @@ pub fn render_summary(frame: &mut Frame, area: Rect, theme: &Theme, summary: &Su
             Line::from(vec![
                 Span::styled("学习进度 ", muted),
                 Span::styled(
-                    format!("{} / {}", summary.last_learn_index, summary.length),
+                    format!(
+                        "{} / {}",
+                        summary.last_learn_index.min(summary.length),
+                        summary.length
+                    ),
                     value,
                 ),
                 Span::styled(

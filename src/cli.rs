@@ -10,7 +10,7 @@ use crate::bootstrap;
 use crate::domain::catalog::import_dict as do_import_dict;
 use crate::domain::rng;
 use crate::domain::study_task::create_study_task;
-use crate::domain::types::WordPracticeMode;
+use crate::domain::types::{Dict, WordPracticeMode};
 use crate::paths::Paths;
 
 #[derive(Parser, Debug, Clone)]
@@ -158,22 +158,9 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
     let dict = boot
         .study_dict()
         .ok_or_else(|| anyhow!("没有当前学习词典"))?;
-    // 词数与进度都按词表实际词数显示：目录登记的 `length` 只是登记值，
-    // 删过词的词库里它会大于真实词数（学完判定也不认它）。
-    let length = dict.effective_length();
-    println!(
-        "词库: {}（{} 词，每日 {} 词）",
-        dict.name,
-        length,
-        dict.per_day()
-    );
-    println!(
-        "学习进度: {}/{} ({}%){}",
-        dict.last_learn_index,
-        length,
-        dict.progress_percent(),
-        if dict.complete { "，已完成" } else { "" }
-    );
+    let (dict_line, progress_line) = dict_progress_lines(dict);
+    println!("{dict_line}");
+    println!("{progress_line}");
     println!(
         "今日任务: 新词 {} / 复习 {}（到期 {}，随机补 {}）",
         result.task_words.new.len(),
@@ -188,6 +175,34 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
         println!("  review: {}  {}", word.word, word.trans_joined());
     }
     Ok(())
+}
+
+/// `tw task` 的词库行与进度行。
+///
+/// 两行的词数与百分比都取有效词数（[`Dict::effective_length`] 经
+/// [`crate::domain::types::DictProgress`]）：早期实现这里写的是 `dict.length`，
+/// 与界面上的百分比各用一套分母。
+fn dict_progress_lines(dict: &Dict) -> (String, String) {
+    let progress = dict.progress();
+    (
+        format!(
+            "词库: {}（{} 词，每日 {} 词）",
+            dict.name,
+            progress.total,
+            dict.per_day()
+        ),
+        format!(
+            "学习进度: {}/{} ({}%){}",
+            progress.learned,
+            progress.total,
+            progress.percent(),
+            if progress.complete {
+                "，已完成"
+            } else {
+                ""
+            }
+        ),
+    )
 }
 
 /// 导入网页版导出的备份。
@@ -255,4 +270,32 @@ pub fn import_dict(paths: &Paths, file: &Path) -> Result<()> {
     );
     println!("使用 tw --dict {} 切换到该词库。", resource.id_string());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::types::Word;
+
+    /// `tw task` 的词数与百分比必须同源：存档里 `length` 比实际词表大时，
+    /// 旧实现会打印出「12 词 … 6/20 (30%)」这种自相矛盾的组合。
+    #[test]
+    fn task_preview_uses_the_effective_word_count_as_denominator() {
+        let words: Vec<Word> = (0..12)
+            .map(|index| Word::new(format!("w{index}")))
+            .collect();
+        let dict = Dict {
+            name: "测试词库".to_string(),
+            length: 20,
+            last_learn_index: 6,
+            words,
+            ..Dict::default()
+        };
+        let (dict_line, progress_line) = dict_progress_lines(&dict);
+        assert!(
+            dict_line.contains("（12 词"),
+            "词数应取有效词数：{dict_line}"
+        );
+        assert_eq!(progress_line, "学习进度: 6/12 (50%)");
+    }
 }
