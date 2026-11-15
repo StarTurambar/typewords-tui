@@ -6,6 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
 use typewords_tui::domain::flow::PracticeStepTemplateId;
 use typewords_tui::domain::types::WordPracticeMode;
+use typewords_tui::ui::focus;
 
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
@@ -220,6 +221,57 @@ fn the_flow_editor_moves_the_step_cursor() {
     assert_eq!(app.flow_step_cursor, 1, "l 在末步停住");
     press(&mut app, KeyCode::Char('h'));
     assert_eq!(app.flow_step_cursor, 0, "h 移回上一步");
+}
+
+/// 流程编辑页的底栏必须提示 `] 换节点`，而不是早已改作换栏的 `Tab`。
+///
+/// `Tab` 改成「导航栏 ↔ 内容区换栏」后，换节点挪到了 `]`；底栏一度仍写着
+/// 「Tab 换节点」，用户照着按只会换栏。这条测试同时锁住提示文案与键位行为，
+/// 避免二者再次漂移。
+#[test]
+fn the_flow_editor_footer_teaches_the_bracket_key() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    // 内置流程不能编辑：先新建副本，再进编辑模式。
+    press(&mut app, KeyCode::Char('n'));
+    let flow_id = app.flow_entries().last().expect("新流程").id.clone();
+    press(&mut app, KeyCode::Char('e'));
+    assert!(app.flow_editing, "自建流程应能进入编辑模式");
+
+    let text = render_text(&app, 120, 40);
+    assert!(
+        text.contains("] 换节点"),
+        "底栏应提示「] 换节点」，实际：\n{text}"
+    );
+    assert!(
+        !text.contains("Tab 换节点"),
+        "`Tab` 已改为换栏，底栏不应再写「Tab 换节点」：\n{text}"
+    );
+
+    // 提示与键位一致：`]` 换节点，`Tab` 只换栏、不动节点光标。
+    let node_count = app
+        .flow_store
+        .flows
+        .get(&flow_id)
+        .expect("流程")
+        .config
+        .nodes
+        .len();
+    assert!(node_count > 1, "复制来的流程应有多个节点");
+    let node_before = app.flow_node_cursor;
+    press(&mut app, KeyCode::Char(']'));
+    assert_eq!(
+        app.flow_node_cursor,
+        (node_before + 1) % node_count,
+        "`]` 应切到下一个节点"
+    );
+
+    let node_before = app.flow_node_cursor;
+    let pane_before = focus::pane(&app);
+    press(&mut app, KeyCode::Tab);
+    assert_ne!(focus::pane(&app), pane_before, "`Tab` 应换栏");
+    assert_eq!(app.flow_node_cursor, node_before, "`Tab` 不应再换节点");
 }
 
 #[test]
