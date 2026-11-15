@@ -172,6 +172,34 @@ fn article_practice_help_returns_to_the_typing_page() {
     assert_eq!(practice.typing.cursor(), cursor, "帮助页不该动跟打进度");
 }
 
+/// 练习中打开的整屏帮助同样可以切分页：`←` / `→` 只切页，`Esc` 才返回练习。
+#[test]
+fn practice_help_switches_tabs_without_leaving_the_practice() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.start_practice();
+    assert_eq!(app.screen, app::Screen::Practice);
+    let word = app
+        .session
+        .as_ref()
+        .expect("练习会话")
+        .current_word()
+        .word
+        .clone();
+
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, app::Screen::Help, "? 应打开整屏帮助");
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, app::HelpTab::Faq);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, app::HelpTab::About);
+
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, app::Screen::Practice, "帮助页返回应回到练习页");
+    let session = app.session.as_ref().expect("练习会话应保留");
+    assert_eq!(session.current_word().word, word, "帮助页不该动练习进度");
+}
+
 /// 跟打页的 `Ctrl+Z` 切换当前句译文（与练习页的「切换翻译」同一个键）。
 #[test]
 fn article_practice_toggles_the_translation_panel_on_ctrl_z() {

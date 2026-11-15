@@ -260,9 +260,24 @@ fn focus_action(app: &App, key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// 帮助页的分页键：`←` / `→`（`h` / `l` 别名）在三个分页间移动，到边停住。
+///
+/// 分页是帮助页自己的横向操作，优先于通用焦点导航——否则 `←` / `→` 会被
+/// 焦点模型解释成「移动选中 / 跨栏」，用户看不出帮助页还有另外两页。
+fn help_tab_action(app: &App, key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Left | KeyCode::Char('h') => Some(Action::HelpSelectTab(app.help_tab.prev())),
+        KeyCode::Right | KeyCode::Char('l') => Some(Action::HelpSelectTab(app.help_tab.next())),
+        _ => None,
+    }
+}
+
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
-    // 练习 / 跟打中打开的帮助页是整屏只读页：保持「滚动之外任意键返回」。
+    // 练习 / 跟打中打开的帮助页是整屏只读页：分页与滚动之外任意键返回。
     if app.screen == Screen::Help && app.in_typing_session() {
+        if let Some(action) = help_tab_action(app, key) {
+            return Some(action);
+        }
         return match key.code {
             KeyCode::Up | KeyCode::Char('k') => Some(Action::HelpScroll(-1)),
             KeyCode::Down | KeyCode::Char('j') => Some(Action::HelpScroll(1)),
@@ -271,9 +286,12 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             _ => Some(Action::HelpBack),
         };
     }
-    // 菜单帮助页不在练习中：方向键 / Tab / Enter 走统一的焦点语义，
-    // 其余按键保持「任意键返回」（数字键也返回，不切页）。
+    // 菜单帮助页不在练习中：`←` / `→` 切分页，方向键 / Tab / Enter 走统一的
+    // 焦点语义，其余按键保持「任意键返回」（数字键也返回，不切页）。
     if app.screen == Screen::Help {
+        if let Some(action) = help_tab_action(app, key) {
+            return Some(action);
+        }
         return match key.code {
             KeyCode::PageUp => Some(Action::HelpScroll(-5)),
             KeyCode::PageDown => Some(Action::HelpScroll(5)),

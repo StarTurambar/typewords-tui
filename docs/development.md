@@ -142,7 +142,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain                          # 只输出文本，直接在终端对比
 ```
 
-`docs/screenshots/` 的 26 张图由下表组合生成（Windows、Cascadia Mono + 微软雅黑、`--scale 2`）。`shot` 对 `dict` / `dict-builtin` / `stats` / `settings` / `shortcuts` / `adv-fsrs` / `help` 走真实入口（数字键、`s`、设置行 `Enter`、`?`），底栏因此带「选中 X」焦点提示；直接改 `app.screen` 会留下上一页的焦点身份，截图不要那样写。
+`docs/screenshots/` 的 28 张图由下表组合生成（Windows、Cascadia Mono + 微软雅黑、`--scale 2`）。`shot` 对 `dict` / `dict-builtin` / `stats` / `settings` / `shortcuts` / `adv-fsrs` 走真实入口（数字键、`s`、设置行 `Enter`），底栏因此带「选中 X」焦点提示；`help` / `help-faq` / `help-about` 同样走真实入口（`?` + `→`），但帮助页底栏显示的是分页提示（`←→` 分页）。直接改 `app.screen` 会留下上一页的焦点身份，截图不要那样写。`help-about` 会把数据目录换成占位路径，避免截图带出本机路径。
 
 | 文件 | 命令参数（screen, 宽, 高, theme） |
 | --- | --- |
@@ -169,7 +169,9 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain                
 | `articles-120x40-dark.png` | `articles 120 40 dark` |
 | `articlepractice-120x40-dark.png` | `articlepractice 120 40 dark` |
 | `flows-120x40-dark.png` | `flows 120 40 dark` |
-| `help-120x40-dark.png` | `help 120 40 dark` |
+| `help-120x40-dark.png` | `help 120 40 dark`（默认「快捷键」分页） |
+| `help-faq-120x40-dark.png` | `help-faq 120 40 dark`（帮助页按一次 `→` 到「常见问题」） |
+| `help-about-120x40-dark.png` | `help-about 120 40 dark`（按两次 `→` 到「关于与反馈」；数据目录为占位路径） |
 | `summary-120x40-dark.png` | `summary 120 40 dark` |
 | `summary-article-120x40-dark.png` | `summary-article 120 40 dark` |
 

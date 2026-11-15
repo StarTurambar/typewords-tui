@@ -61,6 +61,57 @@ pub enum Screen {
     Help,
 }
 
+/// 帮助页的分页。
+///
+/// 上游把「FAQ」「关于」「反馈」拆成 help / about / feedback 三个页面，其中
+/// about 与 feedback 渲染的是同一个 `About.vue`；终端里合并成一个帮助页的
+/// 分页条：快捷键（TUI 自己的键位总览）、常见问题、关于与反馈。帮助页仍是
+/// 一个屏幕（`Screen::Help`），入口与返回语义不变。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HelpTab {
+    /// 快捷键总览，打开帮助时的默认分页。
+    #[default]
+    Shortcuts,
+    /// 常见问题。
+    Faq,
+    /// 关于与反馈（对应上游 about / feedback 两页）。
+    About,
+}
+
+impl HelpTab {
+    /// 全部分页，顺序即分页条上的顺序。
+    pub const ALL: [HelpTab; 3] = [Self::Shortcuts, Self::Faq, Self::About];
+    /// 分页数量（`ALL` 的长度）。
+    pub const COUNT: usize = Self::ALL.len();
+
+    /// 分页条上的标签。
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Shortcuts => "快捷键",
+            Self::Faq => "常见问题",
+            Self::About => "关于与反馈",
+        }
+    }
+
+    /// 左移一页；到第一页停住（不回绕，与全站方向键一致）。
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Shortcuts => Self::Shortcuts,
+            Self::Faq => Self::Shortcuts,
+            Self::About => Self::Faq,
+        }
+    }
+
+    /// 右移一页；到最后一页停住（不回绕）。
+    pub fn next(self) -> Self {
+        match self {
+            Self::Shortcuts => Self::Faq,
+            Self::Faq => Self::About,
+            Self::About => Self::About,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Toast {
     pub message: String,
@@ -627,6 +678,8 @@ pub struct App {
     pub stats_month: (i32, u32),
     /// 统计页日历选中的日期
     pub stats_day: chrono::NaiveDate,
+    /// 帮助页当前分页（快捷键 / 常见问题 / 关于与反馈）。
+    pub help_tab: HelpTab,
     pub help_scroll: u16,
     /// 键入练习页底部动作按钮的选中下标（行优先，见 [`buttons`]）。
     ///
@@ -824,6 +877,7 @@ impl App {
                 (today.year(), today.month())
             },
             stats_day: chrono::Local::now().date_naive(),
+            help_tab: HelpTab::default(),
             help_scroll: 0,
             typing_button: None,
             show_toolbar: true,
@@ -3980,6 +4034,7 @@ impl App {
 
     /// 打开键入练习中的整屏帮助；返回时由 `help_back` 回到对应练习页。
     fn open_typing_help(&mut self) {
+        self.help_tab = HelpTab::Shortcuts;
         self.help_scroll = 0;
         self.set_screen(Screen::Help);
     }

@@ -8,7 +8,7 @@
 
 | 维度 | 上游 TypeWords（Web / Tauri） | typewords-tui |
 | --- | --- | --- |
-| 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 66 个 Rust 文件、约 2.9 万行，12 个屏幕 + 7 类弹层 |
+| 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 67 个 Rust 文件、约 2.9 万行，13 个屏幕 + 7 类弹层 |
 | 产物与环境 | `nuxt generate` 静态站；桌面端是 Tauri 安装包（WebView2 载入同一份前端），运行在浏览器或桌面窗口 | 单个 `tw` 二进制 + 只读 `assets/`，运行在终端（最小 60 × 20），无 WebView、无 Node 运行时 |
 | 数据与网络 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1)；在线查词、百度翻译、有道发音、Supabase 同步、umami 埋点 | 数据目录 5 份 JSON：`dict.json`(4)、`setting.json`(23)、`practice-word.json`(2)、`practice-article.json`(1)、`flows.json`（无版本）；默认离线，唯一联网能力是可选的有道发音（系统 `curl` 下载 mp3，外部播放器播放） |
 | 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 30 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
@@ -32,7 +32,8 @@
 | 分组 | 功能 | 上游（页面 / 文件） | TUI 现状 | 状态 |
 | --- | --- | --- | --- | --- |
 | 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分：当前词库、今日任务、统计、我的词典、推荐齐全；无月历、任务词表预览、改进度入口 |
-| 外观 | 侧栏一级导航 | `layouts/default.vue` | `src/ui/shell.rs` | 部分：单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6；无反馈、文档、资源分享 |
+| 外观 | 侧栏一级导航 | `layouts/default.vue` | `src/ui/shell.rs` | 部分：单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6；反馈与关于并入帮助页分页，无文档页与资源分享 |
+| 帮助 | 快捷键参考 / FAQ / 关于 / 反馈 | `app/pages/help.vue`、`about.vue`、`feedback.vue`（about 与 feedback 复用 `components/About.vue`） | `src/ui/help.rs`：「快捷键」「常见问题」「关于与反馈」三个分页 | 部分：FAQ 与联系方式按终端形态重写（无微信群 / 工单 / 小程序，改为仓库 issue + 诊断信息），关于页展示当前数据目录；快捷键总览是 TUI 独有（上游在设置页看键位） |
 | 外观 | 主题 | CSS 变量 + `hooks/theme.ts` | 13 token、6 套内置 + 自定义 JSON | 行为不同：自定义主题是 TUI 独有；`auto` 等同深色，不跟随系统 |
 | 词库 | 词库目录、切换与每日词数 | `(words)/dict-list.vue`、`components/word/PracticeSettingDialog.vue` | `src/ui/dict_picker.rs`；设置页「复习 → 每日词数」+ 主页 / 词库页 `+` `-` | 部分：三本内置词典 + 本地目录，可设为当前并打开词条页；无搜索、分类分组、封面、在线目录；每日词数步进 5、设置页可精确输入，无滑块与预计完成天数 |
 | 词库 | 修改学习进度 / 跳组 | `ChangeLastPracticeIndexDialog.vue`、`GroupList.vue` | 状态行「第 N 组」可点击 → 跳组弹层 | 已对齐 |
@@ -182,6 +183,7 @@ Web 备份 data.json                        TUI 数据目录
 | xlsx 词库导入导出 | 词库导入导出只走 JSON（`tw import-dict` / `tw export-dict`），不支持 xlsx | xlsx 需要新依赖，与「保持轻量」冲突 |
 | 节点级流程编辑 | 流程页可增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点词表来源 | 终端里编辑多级结构的交互成本高 |
 | 文章逐句音频与课后题 | 没有 LRC 时间轴，无法做逐句高亮；课后题也没有实现 | 不打包 mp3，改用系统 TTS 整句朗读 |
+| 文档页（资源分享） | 上游 `pages/doc.vue` 收录英语学习资源与网盘 / 站外链接，TUI 没有对应页面 | 资源靠扫码或打开外链，终端里都不成立；帮助页「关于」只说明完整文档在发布包 `docs/` |
 
 ### 6.2 不可对等能力
 

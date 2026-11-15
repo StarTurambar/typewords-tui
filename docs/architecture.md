@@ -174,7 +174,7 @@ panic 钩子的组合顺序不能变：crash 的钩子在 main 里最先安装�
 
 App 是唯一的状态持有者。输入分两条路径：
 
-- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行；Action 目前有 99 个变体。
+- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行；Action 目前有 100 个变体。
 - 练习页键盘（以及文章跟打页键盘）：App::on_practice_key / on_article_practice_key 直接调用键入状态机与会话方法，不经过 Action。这里是输入频率最高、状态迁移最复杂的路径。
 
 此外 App::bootstrap 与 App::on_tick 也直接更新状态。因此更准确的约束是：domain 提供受控迁移函数，app 是唯一修改状态的地方，ui 只读。
@@ -191,7 +191,7 @@ App 是唯一的状态持有者。输入分两条路径：
 
 ### 6.2 屏幕与弹层
 
-12 个屏幕（app::Screen）：
+13 个屏幕（app::Screen）：
 
 | 变体 | 页面 | 外壳 / 入口 |
 | --- | --- | --- |
@@ -206,7 +206,8 @@ App 是唯一的状态持有者。输入分两条路径：
 | Stats | 统计页 | 侧栏「统计」；数字 4 |
 | Settings | 设置页 | 侧栏「设置」；数字 6 |
 | Shortcuts | 快捷键编辑页 | 设置页「快捷键」 |
-| Help | 帮助页 | 数字 5 或 ? |
+| AdvFsrs | 高级 FSRS 页 | 设置页「FSRS → 高级 FSRS」 |
+| Help | 帮助页（快捷键 / 常见问题 / 关于与反馈三个分页） | 数字 5 或 ? |
 
 7 种弹层：summary、edit、confirm、word_edit、mode_picker、group_picker、collect_picker。正常交互中互斥；渲染顺序固定为 summary → edit → confirm → word_edit → mode_picker → group_picker → collect_picker（后画的在上），打开时给全 buffer 加 DIM 模拟遮罩。
 
