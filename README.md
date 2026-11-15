@@ -157,6 +157,6 @@ Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的�
 
 ## 开发与贡献
 
-提交前跑 `cargo fmt --all --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`（CI 同样覆盖 fmt / clippy / Ubuntu + Windows）。测试体系、截图工具、词库同步与发布检查清单见 [开发指南](docs/development.md)；参与开发前也请读 [贡献指南](CONTRIBUTING.md)，文档纠错可直接提 PR。
+提交前跑 `cargo fmt --all --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`（CI 同样覆盖 fmt / clippy / Ubuntu + Windows；发布 workflow 会在 tag 提交上先重跑同一套，全绿才打包发布）。测试体系、截图工具、词库同步与发布检查清单见 [开发指南](docs/development.md)；参与开发前也请读 [贡献指南](CONTRIBUTING.md)，文档纠错可直接提 PR。
 
 本项目遵循 [GPL-3.0](LICENSE)。词库数据来自上游 TypeWords 仓库，遵循同一许可证。

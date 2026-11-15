@@ -97,4 +97,4 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 - 错误处理：跨层边界用 `anyhow::Result`；启动期不可恢复错误在进入终端前 `bail!`，运行期可恢复错误转 Toast；不用 panic 作控制流。
 - clippy 全目标 `-D warnings`，不要用 `#[allow(...)]` 掩盖可修问题。
 - 保持 TUI 轻量：新增依赖前先确认必要性（不引入 HTTP 客户端或音频库；TTS / 播放器走系统命令），并一并更新 `Cargo.lock`。
-- 发布：改 `Cargo.toml` 的 `version` → 推送 `vX.Y.Z` tag 触发五平台矩阵发布（Windows x86_64、Linux x86_64 gnu / musl、macOS Apple Silicon / Intel）；每个目标产出 `typewords-tui-vX.Y.Z-<target>.tar.gz`（可执行文件 + `assets/` + `docs/` + README + LICENSE）与同名 `.sha256`，Release 另附聚合 `SHA256SUMS`，旧的 `.zip` 不再产出。
+- 发布：改 `Cargo.toml` 的 `version` → 推送 `vX.Y.Z` tag 触发发布。推 tag 不会直接发版：`release.yml` 先 `guard` 校验 tag 与版本、再 `verify` 跑与 CI 同一套 fmt / clippy / Ubuntu+Windows 测试，全绿后才进五平台矩阵打包（Windows x86_64、Linux x86_64 gnu / musl、macOS Apple Silicon / Intel）；每个目标产出 `typewords-tui-vX.Y.Z-<target>.tar.gz`（可执行文件 + `assets/` + `docs/` + README + LICENSE）与同名 `.sha256`，Release 另附聚合 `SHA256SUMS`，旧的 `.zip` 不再产出。

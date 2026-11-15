@@ -304,3 +304,150 @@ fn release_targets_and_checksums_are_documented() {
         "docs/usage.md 应说明聚合校验文件 SHA256SUMS 的用法"
     );
 }
+
+/// 行级切分 workflow 的 jobs: 段：返回 (作业名, 该作业的原始行)。
+/// 只需要看懂本仓库这两个 workflow（作业名缩进 2 格、needs / run 在作业内），不引入 YAML 依赖。
+fn workflow_jobs(workflow: &str) -> Vec<(String, Vec<String>)> {
+    let mut jobs: Vec<(String, Vec<String>)> = Vec::new();
+    let mut in_jobs = false;
+    let mut current: Option<(String, Vec<String>)> = None;
+    for line in workflow.lines() {
+        let line = line.trim_end();
+        if line.trim() == "jobs:" {
+            in_jobs = true;
+            continue;
+        }
+        if !in_jobs {
+            continue;
+        }
+        if !line.is_empty() && !line.starts_with(' ') {
+            in_jobs = false;
+            jobs.extend(current.take());
+            continue;
+        }
+        if let Some(header) = line.strip_prefix("  ")
+            && !header.starts_with(' ')
+            && let Some(name) = header.strip_suffix(':')
+        {
+            jobs.extend(current.take());
+            current = Some((name.trim().to_string(), Vec::new()));
+            continue;
+        }
+        if let Some((_, lines)) = current.as_mut() {
+            lines.push(line.to_string());
+        }
+    }
+    jobs.extend(current.take());
+    jobs
+}
+
+/// 作业里 cargo ... 形式的检查命令（跳过注释行），按出现顺序去重。
+fn cargo_commands(lines: &[String]) -> Vec<String> {
+    let mut commands: Vec<String> = Vec::new();
+    for line in lines {
+        let mut text = line.trim();
+        if text.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = text.strip_prefix("- ") {
+            text = rest.trim();
+        }
+        if let Some(rest) = text.strip_prefix("run:") {
+            text = rest.trim();
+        }
+        if text.starts_with("cargo ") && !commands.iter().any(|known| known == text) {
+            commands.push(text.to_string());
+        }
+    }
+    commands
+}
+
+/// 读取作业的 needs：支持 needs: a、needs: [a, b] 与换行列表三种写法。
+fn job_needs(lines: &[String]) -> Vec<String> {
+    for (index, line) in lines.iter().enumerate() {
+        let Some(rest) = line.trim().strip_prefix("needs:") else {
+            continue;
+        };
+        let rest = rest.trim();
+        if rest.starts_with('[') {
+            return rest
+                .trim_matches(|c| c == '[' || c == ']')
+                .split(',')
+                .map(|item| item.trim().trim_matches('"').to_string())
+                .filter(|item| !item.is_empty())
+                .collect();
+        }
+        if rest.is_empty() {
+            return lines[index + 1..]
+                .iter()
+                .map_while(|follow| follow.trim().strip_prefix("- "))
+                .map(|item| item.trim().trim_matches('"').to_string())
+                .collect();
+        }
+        return vec![rest.trim_matches('"').to_string()];
+    }
+    Vec::new()
+}
+
+/// 发布前必须跑完整套检查：打包只能发生在 fmt / clippy / test 全绿之后。
+///
+/// 这是「推 tag 就发版」那道缺口的回归测试：release.yml 的 package 作业必须显式依赖
+/// 跑过与 ci.yml 相同命令的作业，且 release 作业必须依赖 package。
+#[test]
+fn release_runs_the_ci_suite_before_packaging() {
+    let root = repo_root();
+    let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect(".github/workflows/ci.yml 应存在");
+    let release = fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .expect(".github/workflows/release.yml 应存在");
+
+    let ci_commands: Vec<String> = workflow_jobs(&ci)
+        .iter()
+        .flat_map(|(_, lines)| cargo_commands(lines))
+        .collect();
+    assert!(
+        !ci_commands.is_empty(),
+        "ci.yml 应声明至少一条 cargo 检查命令"
+    );
+
+    let release_jobs = workflow_jobs(&release);
+    let mut verify_names: Vec<String> = Vec::new();
+    let mut verify_commands: Vec<String> = Vec::new();
+    for (name, lines) in &release_jobs {
+        if name.starts_with("verify") {
+            verify_names.push(name.clone());
+            verify_commands.extend(cargo_commands(lines));
+        }
+    }
+    assert!(
+        !verify_names.is_empty(),
+        "release.yml 应在打包前用 verify* 作业跑一遍检查"
+    );
+    for command in &ci_commands {
+        assert!(
+            verify_commands.contains(command),
+            "release.yml 的 verify 作业缺少 ci.yml 的命令「{command}」：推 tag 前必须先跑完整套 CI"
+        );
+    }
+
+    let package = release_jobs
+        .iter()
+        .find(|(name, _)| name == "package")
+        .expect("release.yml 应有 package 作业");
+    let package_needs = job_needs(&package.1);
+    for name in &verify_names {
+        assert!(
+            package_needs.contains(name),
+            "package 必须 needs: {name}，否则测试红灯也会照常打包发布"
+        );
+    }
+
+    let publish = release_jobs
+        .iter()
+        .find(|(name, _)| name == "release")
+        .expect("release.yml 应有 release 作业");
+    assert!(
+        job_needs(&publish.1).iter().any(|dep| dep == "package"),
+        "release 作业必须 needs: package，不能绕过打包与冒烟"
+    );
+}

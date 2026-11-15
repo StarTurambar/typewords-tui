@@ -101,7 +101,7 @@ src/ 共 64 个 Rust 文件，按目录分组：
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
 - scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）。
 - assets/：list/word.json、list/article.json、dicts/en/word/CET4_T.json（2607 词）、dicts/en/article/NCE_1.json（5 篇）。
-- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（tag 触发五平台 tar.gz 发布：Windows x86_64、Linux x86_64 gnu + musl、macOS arm64 与 x86_64）。
+- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（`v*` tag 触发：先 `guard` 校验 tag 与版本、`verify` 跑与 ci.yml 同一套 fmt / clippy / 测试，全绿后才打五平台 tar.gz 并发布：Windows x86_64、Linux x86_64 gnu + musl、macOS arm64 与 x86_64）。
 
 ## 5. 进程生命周期
 
