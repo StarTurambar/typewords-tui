@@ -104,7 +104,7 @@
 
 | `Command` | 流程 | 进入 TUI |
 | --- | --- | --- |
-| `Doctor` | `cli::doctor`：打印版本、数据/资源目录、词库目录与每个词库的词数、存档文件大小、主题 id/名称/告警 | 否 |
+| `Doctor` | `cli::doctor`（实际写入逻辑在 `cli::doctor_to`，便于测试断言输出）：打印版本、数据/资源目录、词库目录与每个词库的实际可练习词数（`Catalog::load_words`，空词条不计）、存档文件大小、主题 id/名称/告警 | 否 |
 | `Task` | `cli::task_preview`：装载存档与词库，用 `cli.seed`（缺省 42）构造随机源，打印今日任务的新词/复习/到期数与前 5 个词 | 否 |
 | `ImportDict { file }` | `cli::import_dict`：校验并复制词库 JSON、登记到数据目录的 `list/word.json`，打印词库信息 | 否 |
 
