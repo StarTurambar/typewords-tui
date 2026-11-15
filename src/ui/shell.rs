@@ -497,6 +497,11 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
 /// 选中项名称在主页是按钮名、在导航栏是页面名、在其它页面由页面自己的
 /// 光标决定（词库名 / 设置项名 / 日期……），所以这里返回 String。
 fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
+    // 帮助页进入时默认就有 Page 焦点，焦点提示会一直盖住「←→ 分页」：
+    // 分页键是帮助页唯一的横向操作，比「选中 帮助」更值得占底栏。
+    if app.screen == Screen::Help {
+        return None;
+    }
     let label = crate::ui::focus::focused_label(app, area)?;
     let pane = crate::ui::focus::pane(app);
     let home = app.screen == Screen::Home;
@@ -592,7 +597,9 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("r", "恢复默认"),
             ("esc", "返回"),
         ],
-        Screen::Help => &[("↑↓", "滚动"), ("其它键", "返回")],
+        // 帮助页有自己的分页键（←/→ 或 h/l）：「任意键返回」之外最该提示的
+        // 是还有另外两页，否则用户只看得到「快捷键」。
+        Screen::Help => &[("←→", "分页"), ("↑↓", "滚动"), ("esc", "返回")],
         Screen::Practice => &[],
     }
 }

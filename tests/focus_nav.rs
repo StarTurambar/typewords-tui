@@ -948,9 +948,12 @@ fn stats_arrows_scroll_and_pick_dates() {
 }
 
 /// 帮助页：内容区方向键滚动，Tab 进导航栏；Enter 返回上一层。
+///
+/// 用 120 × 26 而不是 120 × 40：帮助页在 40 行时快捷键分页一屏放得下，
+/// 本来就没有可滚动的内容（滚动上限按屏幕行数现算，不是固定值）。
 #[test]
 fn help_page_scrolls_and_returns() {
-    let (_fixture, mut app) = test_app(WIDE);
+    let (_fixture, mut app) = test_app((120, 26));
     press(&mut app, KeyCode::Char('?'));
     assert_eq!(app.screen, Screen::Help);
     assert_eq!(app.focus, Some(FocusId::Page));

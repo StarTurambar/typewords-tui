@@ -452,6 +452,49 @@ fn help_scrolls_at_min_size() {
     assert!(scrolled.contains("↓") || scrolled.contains("↑"));
 }
 
+/// 帮助页覆盖上游的 FAQ / 关于 / 反馈三个页面。
+///
+/// 分页标签常驻；FAQ 分页回答终端形态下的常见问题，关于与反馈分页给出
+/// 项目 / 上游仓库、许可证、当前数据目录与提 issue 需要附带的诊断信息。
+#[test]
+fn help_tabs_cover_faq_and_about_feedback() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+
+    let shortcuts = render_text(&app, 120, 40);
+    for tab in ["快捷键", "常见问题", "关于与反馈"] {
+        assert!(shortcuts.contains(tab), "分页条应列出「{tab}」");
+    }
+    assert!(shortcuts.contains("Ctrl+C"), "快捷键分页应列出练习页键位");
+
+    app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    let faq = render_text(&app, 120, 40);
+    assert!(
+        faq.contains("数据保存在哪里"),
+        "FAQ 应回答数据保存位置: {faq}"
+    );
+    assert!(faq.contains("会联网吗"), "FAQ 应回答联网问题");
+    assert!(!faq.contains("Ctrl+I"), "FAQ 分页不该还渲染快捷键表: {faq}");
+
+    app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    let about = render_text(&app, 120, 40);
+    assert!(
+        about.contains("https://github.com/StarTurambar/typewords-tui"),
+        "关于分页应给出项目仓库地址: {about}"
+    );
+    assert!(
+        about.contains(env!("CARGO_PKG_VERSION")),
+        "关于分页应显示版本号"
+    );
+    assert!(about.contains("数据目录"), "关于分页应显示当前数据目录");
+    assert!(
+        about.contains("tw doctor"),
+        "反馈分页应说明提 issue 要附的诊断信息"
+    );
+    assert!(about.contains("上游"), "关于分页应说明与上游项目的关系");
+}
+
 /// 词条编辑弹层打开时，鼠标点击不能穿透到下层页面。
 ///
 /// `hit.rs` 三处弹层判定都漏了 `word_edit`，点击会落到词条列表和侧栏上，

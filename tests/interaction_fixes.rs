@@ -11,7 +11,7 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Rect;
-use typewords_tui::app::{self, Action, Screen};
+use typewords_tui::app::{self, Action, HelpTab, Screen};
 use typewords_tui::domain::shortcut::{BaseKey, ShortcutAction, ShortcutKey};
 use typewords_tui::domain::types::WordPracticeMode;
 use unicode_width::UnicodeWidthStr;
@@ -545,6 +545,90 @@ fn clicking_the_help_scroll_indicator_scrolls_instead_of_exiting() {
         action,
         Some(Action::HelpBack),
         "点 ↓ 滚动指示器不该退出帮助页"
+    );
+}
+
+/// 帮助页三个分页：`←` / `→`（`h` / `l` 别名）切换，到边停住，换页回到顶部。
+///
+/// 上游把 FAQ / 关于 / 反馈拆成 help / about / feedback 三个页面；终端里合并
+/// 成同一个帮助页的三个分页。分页键之外的按键仍是「任意键返回」。
+#[test]
+fn help_page_switches_between_its_three_tabs() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, Screen::Help);
+    assert_eq!(
+        app.help_tab,
+        HelpTab::Shortcuts,
+        "打开帮助默认停在快捷键分页"
+    );
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.help_scroll, 1);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::Faq);
+    assert_eq!(app.help_scroll, 0, "切换分页应回到顶部");
+
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::About);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::About, "最后一页再按 → 应停住");
+
+    press(&mut app, KeyCode::Char('h'));
+    assert_eq!(app.help_tab, HelpTab::Faq);
+    press(&mut app, KeyCode::Char('h'));
+    assert_eq!(app.help_tab, HelpTab::Shortcuts);
+    assert_eq!(app.screen, Screen::Help, "切分页不该离开帮助页");
+
+    // 分页键之外仍是「任意键返回」：数字键返回而不是切页。
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(app.screen, Screen::Home);
+}
+
+/// 鼠标点分页标签切换分页，而不是退出帮助页。
+///
+/// 分页标签的命中矩形来自与绘制同一份布局（`ui::help::layout`），
+/// 画在哪就能点在哪。
+#[test]
+fn clicking_a_help_tab_switches_pages() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    let area = Rect::new(0, 0, 120, 40);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::HelpSelectTab(HelpTab::About))
+        .expect("帮助页分页条应为每个分页注册点击目标");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.help_tab, HelpTab::About);
+    assert_eq!(app.screen, Screen::Help, "点分页标签不该退出帮助页");
+}
+
+/// 重新打开帮助总是从「快捷键」分页开始，不沿用上次停留的分页。
+#[test]
+fn reopening_help_starts_on_the_shortcuts_tab() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::About);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Home);
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(
+        app.help_tab,
+        HelpTab::Shortcuts,
+        "再次打开帮助应回到第一个分页"
     );
 }
 

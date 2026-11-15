@@ -7,7 +7,7 @@
 //!
 //!   screen: home | home-focus | home-nav-focus | practice | practice-buttons | practice-collect |
 //!           wordtest | words | articles | flows | articlepractice | dict | stats | settings |
-//!           shortcuts | help | summary | summary-article | edit | confirm
+//!           shortcuts | help | help-faq | help-about | summary | summary-article | edit | confirm
 //!   width/height: 终端列/行，默认 120 x 40
 //!   theme: 写入 app.boot.settings.theme 的字符串（内置 dark/light/high-contrast/
 //!          midnight/paper/ikb，自定义主题名也可传；未知名字由 app 自行回退）
@@ -37,7 +37,7 @@ use ratatui::style::{Color, Modifier};
 use serde_json::{Value, json};
 use unicode_width::UnicodeWidthStr;
 
-use typewords_tui::app::{self, App, SETTING_ROWS, Screen};
+use typewords_tui::app::{self, App, HelpTab, SETTING_ROWS, Screen};
 use typewords_tui::cli::Cli;
 use typewords_tui::domain::types::WordPracticeMode;
 use typewords_tui::paths::{Paths, locate_assets};
@@ -60,6 +60,8 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "settings",
     "shortcuts",
     "help",
+    "help-faq",
+    "help-about",
     "summary",
     "summary-article",
     "edit",
@@ -292,12 +294,40 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
                 bail!("could not open shortcuts (screen={:?})", app.screen);
             }
         }
-        "help" => {
-            app.screen = Screen::Home;
-            press(app, KeyCode::Char('?'));
-            if app.screen != Screen::Help {
-                bail!("could not open help (screen={:?})", app.screen);
+        // 帮助页有三个分页：快捷键（默认）、常见问题、关于与反馈。分页切换
+        // 走真实按键（← / →），截图里能看到分页条的高亮与右侧键位提示。
+        "help" => open_help(app)?,
+        "help-faq" => {
+            open_help(app)?;
+            press(app, KeyCode::Right);
+            if app.help_tab != HelpTab::Faq {
+                bail!(
+                    "help-faq: → did not switch to the FAQ tab (got {:?})",
+                    app.help_tab
+                );
             }
+        }
+        "help-about" => {
+            open_help(app)?;
+            press(app, KeyCode::Right);
+            press(app, KeyCode::Right);
+            if app.help_tab != HelpTab::About {
+                bail!(
+                    "help-about: → → did not switch to the about tab (got {:?})",
+                    app.help_tab
+                );
+            }
+            // 「关于」分页会显示当前数据目录。截图里换成稳定的示例路径，
+            // 否则每台机器 / 每次临时目录名都不同，截图无法比对。
+            let assets = app
+                .paths
+                .as_ref()
+                .map(|paths| paths.assets.clone())
+                .unwrap_or_default();
+            app.paths = Some(Paths {
+                home: std::path::PathBuf::from(r"C:\Users\you\AppData\Local\typewords-tui"),
+                assets,
+            });
         }
         "confirm" => {
             // 主页按 q 请求退出 → 确认弹层（不构造 ConfirmState）。
@@ -322,6 +352,16 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             reach_article_summary(app)?;
         }
         other => bail!("unsupported screen {other:?}"),
+    }
+    Ok(())
+}
+
+/// 从主页按 `?` 打开帮助（走真实入口，保留默认焦点与底栏提示）。
+fn open_help(app: &mut App) -> Result<()> {
+    app.screen = Screen::Home;
+    press(app, KeyCode::Char('?'));
+    if app.screen != Screen::Help {
+        bail!("could not open help (screen={:?})", app.screen);
     }
     Ok(())
 }

@@ -2,7 +2,9 @@
 
 use chrono::Datelike;
 
-use super::{App, ConfirmAction, ConfirmFocus, ConfirmState, FocusDir, Screen, SummaryButton};
+use super::{
+    App, ConfirmAction, ConfirmFocus, ConfirmState, FocusDir, HelpTab, Screen, SummaryButton,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -147,6 +149,8 @@ pub enum Action {
     EditChar(char),
     EditBackspace,
     // 帮助
+    /// 帮助页切换分页（快捷键 / 常见问题 / 关于与反馈）。
+    HelpSelectTab(HelpTab),
     HelpScroll(i32),
     HelpBack,
 }
@@ -314,6 +318,7 @@ impl App {
                     edit.buffer.pop();
                 }
             }
+            Action::HelpSelectTab(tab) => self.select_help_tab(tab),
             Action::HelpScroll(delta) => self.scroll_help(delta),
             Action::HelpBack => self.help_back(),
         }
@@ -384,6 +389,9 @@ impl App {
                 self.set_screen(Screen::ArticlePractice);
             }
             Screen::Help => {
+                // 进帮助页总是从「快捷键」分页开始：上一次停在哪一页不该
+                // 影响下一次打开；分页与滚动也一起回到起点。
+                self.help_tab = HelpTab::Shortcuts;
                 self.help_scroll = 0;
                 self.set_screen(Screen::Help);
             }
@@ -751,11 +759,21 @@ impl App {
         self.settings_cursor = next as usize;
     }
 
+    /// 切换帮助页分页；换页回到顶部，不把上一页的滚动位置带过去。
+    fn select_help_tab(&mut self, tab: HelpTab) {
+        if self.help_tab == tab {
+            return;
+        }
+        self.help_tab = tab;
+        self.help_scroll = 0;
+    }
+
     fn scroll_help(&mut self, delta: i32) {
         let next = (self.help_scroll as i32 + delta).max(0);
-        // 上限按帮助页的实际条目数算，而不是写死 80——写死的值在条目
-        // 变多时会截断，条目变少时又会滚过头。
-        let max = crate::ui::help::max_scroll() as i32;
+        // 上限按当前分页、当前终端尺寸下的实际屏幕行数算，而不是写死 80——
+        // 写死的值在条目变多时会截断，条目变少时又会滚过头。三个分页长度
+        // 不同、正文还会折行，必须现算。
+        let max = crate::ui::help::max_scroll(self) as i32;
         self.help_scroll = next.min(max) as u16;
     }
 

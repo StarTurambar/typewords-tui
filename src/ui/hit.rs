@@ -28,13 +28,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
 
     // 练习 / 跟打中的帮助页整屏显示（不画侧栏），命中区也要按整屏算。
     if app.screen == Screen::Help && app.in_typing_session() {
-        let content = Rect::new(
-            area.x + 2,
-            area.y + 1,
-            area.width.saturating_sub(4),
-            area.height.saturating_sub(1),
-        );
-        return super::help::targets(app, content);
+        return super::help::targets(app, super::help::fullscreen_content(area));
     }
 
     // 独占整屏的页面不画侧栏，也不能注册侧栏的命中区——
