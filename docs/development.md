@@ -43,7 +43,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
-25 个源文件带单元测试：
+27 个源文件带单元测试：
 
 | 文件 | 覆盖点 |
 | --- | --- |
@@ -61,6 +61,8 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `src/cli.rs` | `tw task` 的「N 词」与进度行都用有效词数（`dict_progress_lines`） |
 | `src/fs.rs` | 原子写与目录锁：临时名唯一且带 PID、不复用残留的旧固定名文件、rename 失败清理、并发写只留完整内容；`DirLock` 互斥到守卫释放并记录 PID |
 | `src/paths.rs` | 资源目录识别与优先级、`lock_home` 先创建数据目录再取锁 |
+| `src/logging.rs` | 默认落点 `<home>/logs/tw-<日期>.log`、`--log` 用其父目录做报告目录、行格式与级别过滤、保留窗口（未来时间戳不删）、只回看末尾 256 KB 的最近行、过期清理只删匹配 `tw-*.log` / `crash-*.txt` 的文件 |
+| `src/crash.rs` | 报告正文含时间 / 版本 / 数据目录 / 资源目录 / 日志文件 / panic 消息与位置 / 回溯 / 最近日志、路径缺失时的占位、同秒崩溃报告加序号、双击早退条件 `should_pause` 的各组合 |
 | `src/audio/tts.rs` | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
 | `src/audio/player.rs` | 仅整词可发音、缺少播放程序时报错、脚本参数拼接 |
 | `src/theme/mod.rs` | 颜色解析（`#rgb` / `#rrggbb` / ANSI）、主题回退 |
@@ -75,7 +77,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 ### 4.2 集成测试（`tests/`）
 
-27 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`。
+29 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`。
 
 | 文件 | 覆盖点 |
 | --- | --- |
@@ -99,6 +101,8 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/home_resume.rs` | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
 | `tests/import_dict.rs` | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |
 | `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
+| `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录；日志是进程级全局状态，用例串行 |
+| `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
 | `tests/layering.rs` | `src/domain/` 不依赖 `app` / `ui` / `store` / `theme` |
 | `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
 | `tests/typing_keys.rs` | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
@@ -123,8 +127,8 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | 清空断点 | `--reset-practice` 同时清 `practice-word.json` 与 `practice-article.json` |
 | 练习页可视化 | `cargo run --locked --example dump -- <mode> [typed] [宽] [高] [big 或 plain]`，`mode` 取 `system` / `free` / `review` / `shuffle` / `identify` / `dictation` / `listen` |
 | 任意页面快照 | `cargo run --locked --example shot -- <screen> [宽] [高] [theme] [--plain]`；screen 取第 6 节表内名称，另有 `edit` / `confirm` 两个弹层快照 |
-| panic 定位 | `src/app/mod.rs` 的 `install_panic_hook` 先恢复终端与鼠标捕获再打印；配合 `RUST_BACKTRACE=1` 看回溯 |
-| 日志 | 没有日志设施（不写日志文件）；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤 |
+| panic 定位 | panic 会自动写 `<日志目录>/crash-<时间戳>.txt`：panic 消息与位置、完整回溯、最近 40 行日志，**不需要** `RUST_BACKTRACE`；TUI 里的 panic 由 `src/app/mod.rs` 的 `install_panic_hook` 先恢复终端与鼠标捕获再转交 `crash` 钩子 |
+| 日志 | 默认开启，`<home>/logs/tw-<日期>.log`；`--log FILE` 换路径、`--no-log` 关闭、`--log-level debug` 连 Toast 的成功 / 提示类与清理记录一起记；日志与崩溃报告同目录（用过 `--log` 就取它所在的目录），保留 14 / 30 天。写失败只警告一次，不阻断启动 |
 | 手工检查存档 | 5 份存档都是可读 JSON，字段含义与版本策略见 [persistence.md](persistence.md) |
 
 ## 6. 截图与视觉检查

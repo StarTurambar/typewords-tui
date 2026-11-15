@@ -27,8 +27,10 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 
 ## 架构
 
-    main.rs → lib.rs::run(cli)
-      ├─ Paths::resolve()            资源目录 / 数据目录解析
+    main.rs（先装 crash 的 panic 钩子）→ lib.rs::run(cli)
+      ├─ Paths::resolve_home()       数据目录解析（先于资源目录：日志要尽早可用）
+      ├─ logging::init() / crash::set_context()   运行日志 + 崩溃报告上下文
+      ├─ Paths::resolve_in()         资源目录解析
       ├─ cli.rs                      doctor / task / import-dict / import-web / export-web（不进 TUI）
       └─ app::run(paths, cli)
            ├─ App::bootstrap()       store + domain + theme 装载，失败则在进入终端前 bail!
@@ -44,6 +46,7 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 | app | `src/app/` | 唯一的状态修改者，渲染入口调用 ui |
 | ui | `src/ui/` | 只读 `App`，**不得**修改状态 |
 | audio | `src/audio/` | 终端响铃、系统 TTS、有道下载 + 外部播放器；子进程不阻塞事件循环 |
+| logging / crash | `src/logging.rs`、`src/crash.rs` | 运行日志（`<home>/logs/tw-<日期>.log`，追加写、保留 14 天）与 panic 崩溃报告（`crash-*.txt`，保留 30 天、无需 `RUST_BACKTRACE`）；只依赖 std + chrono + anyhow，日志写失败不影响启动 |
 | 入口/装配 | `main.rs`/`lib.rs`/`cli.rs`/`paths.rs`/`bootstrap.rs`/`backup.rs` | 参数、路径、装载、子命令、网页版备份适配 |
 
 必须保持的不变量：
@@ -65,6 +68,8 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 | `practice-word.json` | 2 | 断点单词练习缓存（游标 + 任务词表 + 统计快照），结算后删除 |
 | `practice-article.json` | 1 | 文章跟打断点缓存（文章 id + 句子进度 + 用时），结算后删除 |
 | `flows.json` | 无 | 自建练习流程（`{ activeId, flows }`） |
+
+另有 `<home>/logs/`：运行日志 `tw-<日期>.log` 与崩溃报告 `crash-<时间戳>.txt`，程序自动创建，**不属于存档**（无信封 / 版本号，删了不影响进度，备份时可留可删）。
 
 写入是「同目录唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename」；写入口启动时对 `<home>/.tw.lock` 取排他锁（`Paths::lock_home`，只读的 `tw doctor` / `tw export-web` 不取锁）；解析失败隔离为 `*.corrupt-<时间戳>.json`；`dict.json`/`setting.json` 版本高于程序支持版本时**只读不覆盖**，练习缓存版本不受支持时忽略（不移动文件）。完整字段与版本策略见 `docs/persistence.md`。
 

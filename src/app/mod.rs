@@ -28,6 +28,7 @@ use crate::domain::types::{
     WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
+use crate::logging;
 use crate::paths::Paths;
 use crate::store::{FileStore, LoadStatus};
 
@@ -621,9 +622,17 @@ impl App {
     }
 
     pub fn toast(&mut self, level: NoticeLevel, message: impl Into<String>) {
+        let message = message.into();
+        // 运行期错误（保存失败、词库读取失败等）只以 Toast 出现，用户退出后
+        // 就再也看不到；同步写进日志，反馈问题时才有现场。
+        match level {
+            NoticeLevel::Error => logging::error(&message),
+            NoticeLevel::Warning => logging::warn(&message),
+            NoticeLevel::Success | NoticeLevel::Info => logging::debug(&message),
+        }
         let now = timer::now_ms();
         self.toasts.push(Toast {
-            message: message.into(),
+            message,
             level,
             until: now + 3200,
         });
@@ -4050,11 +4059,16 @@ impl App {
 
     pub fn run(mut self) -> Result<()> {
         install_panic_hook();
+        logging::info("进入 TUI：备用屏幕 + 鼠标捕获");
         let mut terminal = ratatui::init();
         let _ = execute!(std::io::stdout(), EnableMouseCapture);
         let result = self.event_loop(&mut terminal);
         let _ = execute!(std::io::stdout(), DisableMouseCapture);
         ratatui::restore();
+        match &result {
+            Ok(()) => logging::info("TUI 已退出，终端已恢复"),
+            Err(err) => logging::error(format!("TUI 异常退出: {err:#}")),
+        }
         result
     }
 
@@ -4114,6 +4128,10 @@ fn terminal_area() -> ratatui::layout::Rect {
         .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24))
 }
 
+/// 包在启动时安装的崩溃报告钩子外面：先恢复终端，再让 crash 模块写报告。
+///
+/// 只做「恢复终端 + 转交」，报告内容与回车等待都在 crate::crash 里，
+/// 这样进入 TUI 之前发生的 panic 同样有报告。
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -4126,6 +4144,7 @@ fn install_panic_hook() {
 pub fn run(paths: Paths, cli: Cli) -> Result<()> {
     let app = App::bootstrap(paths, cli)?;
     if let Some(fatal) = &app.fatal {
+        logging::error(format!("启动失败: {fatal}"));
         anyhow::bail!("{fatal}");
     }
     app.run()

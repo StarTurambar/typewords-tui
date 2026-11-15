@@ -131,8 +131,9 @@ Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的�
       themes/*.json          # 自定义主题（启动时加载）
       dicts/、list/          # 通过 import-dict 导入的词库
       .tw.lock               # 数据目录独占锁（写入口常驻）
+      logs/                  # 运行日志 tw-<日期>.log 与崩溃报告 crash-<时间戳>.txt（不属于存档）
 
-写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename；同一数据目录同时只允许一个写实例。解析失败的存档会隔离为 `*.corrupt-<时间戳>.json`；版本高于程序支持的 `dict.json` 与 `setting.json` 只读不覆盖。备份、迁移与字段含义见 [存档与数据格式](docs/persistence.md)。
+写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename；同一数据目录同时只允许一个写实例。运行日志默认开启并写在 `<home>/logs/`（`--log` / `--no-log` / `--log-level` 可调），panic 时同目录还会生成 `crash-<时间戳>.txt`，报 issue 时附上即可。解析失败的存档会隔离为 `*.corrupt-<时间戳>.json`；版本高于程序支持的 `dict.json` 与 `setting.json` 只读不覆盖。备份、迁移与字段含义见 [存档与数据格式](docs/persistence.md)。
 
 ## 文档
 

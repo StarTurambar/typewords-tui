@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 
 use crate::domain::catalog::Catalog;
 use crate::domain::types::{BaseState, Dict, SettingState};
+use crate::logging;
 use crate::paths::Paths;
 use crate::store::{FileStore, LoadStatus};
 use crate::theme::ThemeRegistry;
@@ -146,6 +147,20 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     let themes = ThemeRegistry::load(&paths.themes_dir());
     notices.extend(themes.warnings().iter().cloned());
 
+    logging::info(format!(
+        "存档装载: dict.json {:?}, setting.json {:?}",
+        dict_loaded.status, setting_loaded.status
+    ));
+    logging::info(format!(
+        "词库目录: {} 本；自定义主题: {} 个",
+        catalog.resources().len(),
+        themes.custom_count()
+    ));
+    for notice in &notices {
+        // 这些告警在界面里只显示 3.2 秒的 Toast，用户回头排障时全靠日志。
+        logging::warn(notice);
+    }
+
     let mut bootstrapped = Bootstrapped {
         store,
         base: dict_loaded.value,
@@ -171,5 +186,13 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     // 自建词典与内置词典不会从资源重载词表，也要按词表实际词数校准一次；
     // 资源词库在上面的 select_dict 里已经校准过（此处幂等）。
     bootstrapped.normalize_study_progress();
+    if let Some(dict) = bootstrapped.study_dict() {
+        logging::info(format!(
+            "当前学习词典: {}（{} 词，每日 {} 词）",
+            dict.name,
+            dict.effective_length(),
+            dict.per_day()
+        ));
+    }
     Ok(bootstrapped)
 }

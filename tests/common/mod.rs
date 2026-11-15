@@ -143,6 +143,9 @@ impl Fixture {
             theme: None,
             seed: Some(42),
             reset_practice: false,
+            log: None,
+            no_log: false,
+            log_level: typewords_tui::logging::Level::Info,
             command: None,
         }
     }

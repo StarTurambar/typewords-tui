@@ -18,6 +18,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 - 42 个可改绑的快捷键动作、6 套内置主题与用户自定义主题。
 - 系统 TTS / 终端响铃的音频实现，可选有道发音。
 - 与网页版备份 JSON（BackupData v5）互通的 tw import-web / tw export-web。
+- 默认开启的运行日志与 panic 崩溃报告（`<home>/logs/`），以及 Windows 双击启动时的早退保护。
 
 非目标（不计划在 TUI 内实现）：Supabase 云同步、在线查词 / 翻译、多语言界面、Web / Tauri 界面、xlsx 与 ZIP / mp3 打包备份、跨设备冲突合并。
 
@@ -53,8 +54,10 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 
 ## 3. 分层与依赖规则
 
-    main.rs -> lib.rs::run(cli)
-      -> Paths::resolve                资源目录 / 数据目录
+    main.rs（先装 crash 的 panic 钩子）-> lib.rs::run(cli)
+      -> Paths::resolve_home          数据目录（先于资源目录：日志要尽早可用）
+      -> logging / crash              初始化运行日志、记下崩溃报告上下文
+      -> Paths::resolve_in            资源目录
       -> cli.rs                        doctor / task / import-dict / import-web / export-web
       -> app::run(paths, cli)
            -> App::bootstrap           bootstrap.rs: store + domain + theme
@@ -72,20 +75,22 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 | app | src/app/ | App 状态机、Action、键鼠映射、焦点、事件循环、保存时机 | 依赖 domain / store / bootstrap / cli / paths；渲染入口调用 ui |
 | ui | src/ui/ | ratatui 布局与绘制、token → Color、鼠标命中 | 只读 App 与 domain 数据，不修改状态 |
 | audio | src/audio/ | 终端响铃、系统 TTS、有道下载与外部播放器 | 只依赖 domain 的设置；子进程不阻塞事件循环 |
+| logging / crash | src/logging.rs、src/crash.rs | 运行日志（追加写、按启动日期分文件、保留清理）、panic 崩溃报告与 Windows 早退保护 | 只依赖 std + chrono + anyhow；不做业务判断，写日志失败不影响启动 |
 | 入口/装配 | src/main.rs、lib.rs、cli.rs、paths.rs、bootstrap.rs、backup.rs | 解析参数与路径、装载初始状态、分派子命令、网页版备份适配 | 最外层，可依赖所有层 |
 
-两条必须记住的实际约束：
+三条必须记住的实际约束：
 
 1. domain 不依赖终端，因此可以被单元测试与 tw task 直接复用；与上游实现对照时，它也是主要隔离层。
 2. app 与 ui 在同一 crate 内互相引用：App::render 调用 ui::render，App::theme 返回 ui::Theme，各页面直接读 App 字段。这是省去视图模型的刻意取舍，代价是两块耦合较紧；ui 的写权限必须保持在「只读 App、只通过 Target 产出 Action」。
+3. logging / crash 是进程级全局状态（`static Mutex`），只在 main.rs 与 lib::run 里初始化；其它层只通过 `logging::info/warn/error/debug` 打点，不碰全局。业务层不因为日志失败而失败。
 
 ## 4. 代码地图
 
-src/ 共 64 个 Rust 文件，按目录分组：
+src/ 共 66 个 Rust 文件，按目录分组：
 
 | 目录 | 文件与职责 |
 | --- | --- |
-| src/（7） | main.rs 入口；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 5 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出 |
+| src/（9） | main.rs 入口（第一件事装 panic 钩子）；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 5 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出；logging.rs 运行日志；crash.rs 崩溃报告与早退保护 |
 | src/app/（7） | mod.rs App、事件循环、on_tick、会话集成、SETTING_ROWS；action.rs Action 与 apply_action；buttons.rs 两个键入页的动作按钮；dicts.rs 词库页条目与词数唯一口径；focus.rs 焦点状态机；keymap.rs 非练习键位 → Action；mouse.rs 鼠标 → Action |
 | src/audio/（4） | mod.rs 音频分发；bell.rs 终端响铃；tts.rs 系统 TTS（Windows 常驻 PowerShell）；player.rs 有道发音下载与外部播放器 |
 | src/domain/（17） | mod.rs；types.rs 存档模型与整数枚举；constants.rs；catalog.rs 词库目录 / 词条加载 / import_dict；study_task.rs 今日任务；fsrs.rs FSRS-6 移植；scheduler.rs 评级与到期；typing.rs 键入状态机；question.rs 自测题；session.rs 练习会话；article.rs 文章模型 / 断句 / 跟打；shortcut.rs 42 动作键位表；wordbook.rs 词条管理；statistics.rs 统计落盘与聚合；timer.rs 计时；i18n.rs 中文文案；rng.rs 可注入随机源 |
@@ -96,7 +101,7 @@ src/ 共 64 个 Rust 文件，按目录分组：
 
 测试与辅助：
 
-- tests/：27 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
+- tests/：29 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
 - scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）。
@@ -107,9 +112,10 @@ src/ 共 64 个 Rust 文件，按目录分组：
 
 ### 5.1 启动与子命令
 
-1. main.rs 调用 Cli::parse()，再调用 typewords_tui::run(cli)。
-2. lib.rs 先 Paths::resolve(cli.assets, cli.home)：数据目录 --home > TYPEWORDS_HOME > 系统本地数据目录；资源目录 --assets > TYPEWORDS_ASSETS > exe 同级 assets/ > 当前目录及最多 3 级祖先的 assets/ 或 public/。
-3. 按 cli.command 分派；无子命令才进入 TUI。
+1. main.rs 第一件事是 `crash::install_hook()`（早于 Cli::parse 与任何路径解析），再 Cli::parse()、调用 typewords_tui::run(cli)；run 返回错误时 `crash::report_fatal_error` 打印 `Error: <错误链>` 与日志路径，Windows 双击启动（无参数、交互式终端）再等一次回车，退出码 1。
+2. lib.rs::run 先 Paths::resolve_home（数据目录：--home > TYPEWORDS_HOME > 系统本地数据目录），再 `logging::init` 初始化运行日志（--log / --no-log / --log-level；返回实际日志文件，不写日志时为 None）并 `crash::set_context` 记下数据目录与报告目录，随后记录平台、进程号、命令行、数据目录与日志文件。资源目录缺失这类最常见的启动失败因此也在日志里。
+3. run_resolved 再 Paths::resolve_in（资源目录：--assets > TYPEWORDS_ASSETS > exe 同级 assets/ > 当前目录及最多 3 级祖先的 assets/ 或 public/），补一次 `crash::set_context`（资源目录 + 日志文件）并记录资源目录；只读入口（tw doctor / tw export-web）直接分派，其余入口先取 <home>/.tw.lock 再分派，两条路径都记「执行: <子命令>」。
+4. 按 cli.command 分派；无子命令才进入 TUI。返回时按结果记「进程退出: 正常」或「进程退出: 失败: <错误链>」。
 
 | 命令 | 行为 | 进入 TUI |
 | --- | --- | --- |
@@ -119,7 +125,7 @@ src/ 共 64 个 Rust 文件，按目录分组：
 | tw import-web FILE | 解析网页版 BackupData v5，按版本与结构校验后拆成 dict / setting / practice-article 等文件，覆盖前留 .bak，失败回滚；取锁 | 否 |
 | tw export-web [--out FILE] | 把当前数据目录导出成网页版可导入的 BackupData v5；只读，不取锁 | 否 |
 
-4. App::bootstrap 的顺序：
+5. App::bootstrap 的顺序：
    - bootstrap::load 创建 FileStore、读 dict.json / setting.json、加载 Catalog 与 ThemeRegistry；损坏、版本过高、主题告警收进 notices。--dict 先匹配三本系统词典 id，否则按 id / enName 选择资源词库。
    - 应用 --mode（cli::parse_mode）与 --theme 覆盖；构造 Rng（--seed 或随机种子）。
    - notices 转 Warning Toast；主题回退时追加提示。
@@ -127,8 +133,10 @@ src/ 共 64 个 Rust 文件，按目录分组：
    - ensure_study_dict：系统词典保持不动；资源词库缺词表时按 id 重载，找不到则回退 cet4 或第一本；装载后按实际词数校正 length 与进度，丢弃不匹配的旧断点。
    - refresh_stats 与 refresh_task_preview 计算主页缓存。
    - 词库加载失败记 fatal；app::run 在进入终端前 bail!，不留下半初始化界面。
-5. App::run：ratatui::init() 进入备用屏幕、开启鼠标捕获、安装 panic hook（panic 时恢复终端与鼠标捕获），进入事件循环。
-6. 事件循环退出后 save_all()：保存词典、设置与未结算的练习 / 文章缓存；关闭鼠标捕获并恢复终端。
+6. App::run：先在 crate::crash 的钩子外面包一层 `install_panic_hook`（panic 时先关鼠标捕获、`ratatui::restore()`，再转交 crash 钩子写报告与等回车），记录「进入 TUI」，`ratatui::init()` 进入备用屏幕并开启鼠标捕获，进入事件循环；退出后关闭捕获、恢复终端，并记「TUI 已退出，终端已恢复」或「TUI 异常退出」。
+7. 事件循环退出后 save_all()：保存词典、设置与未结算的练习 / 文章缓存；关闭鼠标捕获并恢复终端。
+
+panic 钩子的组合顺序不能变：crash 的钩子在 main 里最先安装（只在第一次调用时安装，保留原钩子并在写报告后转交），app 的钩子装在它外面，只负责恢复终端再转交。报告自身 panic 不会递归（`crash::REPORTING` 只放行第一次）。`set_context` 分两次调用——先数据目录、资源目录解析成功后再补齐——因此连「找不到 assets/」的崩溃报告也能落到数据目录。
 
 ### 5.2 事件循环
 
@@ -387,6 +395,15 @@ FSRS（fsrs.rs + scheduler.rs）：
 - bootstrap：FileStore + Catalog + ThemeRegistry 装配；readonly 标记；notices；ensure_study_dict；normalize_study_progress。
 - cli：参数与 5 个子命令的入口；parse_mode 接受英文模式名与中文别名；doctor_to 便于测试断言输出。
 
+### 7.7 logging / crash
+
+- logging 只依赖 std + chrono + anyhow：Level（Error < Warn < Info < Debug；parse 大小写不敏感、warning 等同 warn）、Options、resolve_location（显式 --log FILE 用该文件与它的父目录，相对路径视为当前目录；否则 <home>/logs/tw-<本地日期>.log）、init（建目录并试写，失败只警告一次并返回 None；随后按修改时间清理 14 天前的 tw-*.log 与 30 天前的 crash-*.txt）。
+- 日志是进程级全局 `static SINK: Mutex<Option<Sink>>`，每行单独 open + append + close——崩溃现场最需要的最后几行不会留在用户态缓冲区；一行是「时间戳 级别 消息」，级别左对齐占 5 列。给崩溃报告附现场用 recent_lines，只回看文件末尾 256 KB，不整份读入内存。
+- 保留策略是纯函数 prune_matching（前缀 + 后缀 + 时长；修改时间读不到或时间戳在未来时保留），日志与崩溃报告共用。
+- crash：set_context 分两次写入路径（先数据目录，资源目录解析成功后再补资源目录 / 日志文件 / 报告目录）；install_hook 只在第一次调用时安装，保留原钩子并在写报告后转交；报告自身 panic 不会递归（REPORTING 只放行第一次）；报告正文由纯函数 build_report 生成，便于单测。
+- panic 报告落在「日志所在目录」的 crash-<YYYYMMDD-HHMMSS>.txt（同一秒冲突加序号，绝不覆盖），含路径、panic 消息与位置、Backtrace::force_capture() 全量回溯（不需要 RUST_BACKTRACE）、最近 40 行日志；路径同时写进日志并打印到 stderr。--no-log 只关日志，报告仍写 <home>/logs/。写报告前会再清理一次 30 天前的报告。
+- Windows 早退保护：should_pause 是纯函数（Windows + 无命令行参数 + stdin 与 stderr 都是终端），TW_NO_PAUSE 或 CI 环境变量跳过；set_enter_wait_enabled 供测试进程关掉等待。
+
 ## 8. 关键设计决策
 
 | 决策 | 理由 | 代价 |
@@ -423,7 +440,10 @@ FSRS（fsrs.rs + scheduler.rs）：
 | 设置项只建模一部分 | SettingState 建模 43 个具名字段，未建模的上游字段经 extra 原样保存 |
 | 练习缓存只支持 v2 | 旧版本缓存直接忽略（不移动文件），不提供迁移 |
 | 无存档迁移框架 | 旧版本缺字段靠 serde(default)，版本号高于支持版本时只读 |
-| 无运行日志 | 不写日志文件；排障依赖 tw doctor、Toast、--seed 与复现步骤 |
+| 日志是纯文本 | 只有「时间戳 级别 消息」单行文本，没有结构化字段（JSON）与字段级检索；级别过滤在写入端，没有远程上报、轮转压缩或按大小切分 |
+| 日志文件按启动日期命名 | 文件名在 init 时确定，跨零点的长会话继续写同一个文件；保留清理只在启动时（写崩溃报告时另清一次报告） |
+| 回溯可能不完整 | release 构建带 strip，崩溃报告里的符号名可能只剩地址；要读带符号的回溯就用 debug 构建复现 |
+| 崩溃报告只覆盖 panic | 启动期 anyhow 致命错误只进日志与 stderr（report_fatal_error），不生成 crash-*.txt；被强制结束等非 panic 退出没有任何报告 |
 
 ## 11. 文档地图
 

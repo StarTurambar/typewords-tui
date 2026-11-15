@@ -65,6 +65,9 @@ fn real_dict_session_saves_and_reloads() {
         theme: None,
         seed: Some(7),
         reset_practice: false,
+        log: None,
+        no_log: true,
+        log_level: typewords_tui::logging::Level::Info,
         command: None,
     };
 

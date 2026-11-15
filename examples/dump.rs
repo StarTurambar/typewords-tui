@@ -47,6 +47,9 @@ fn main() {
         theme: None,
         seed: Some(7),
         reset_practice: false,
+        log: None,
+        no_log: true,
+        log_level: typewords_tui::logging::Level::Info,
         command: None,
     };
     let mut app = app::build_for_test(paths, cli).expect("app");

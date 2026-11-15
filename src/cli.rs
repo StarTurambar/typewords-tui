@@ -42,6 +42,21 @@ pub struct Cli {
     /// 清空当前练习缓存
     #[arg(long)]
     pub reset_practice: bool,
+    /// 运行日志文件（缺省 <home>/logs/tw-<日期>.log）
+    #[arg(long, global = true, value_name = "FILE", conflicts_with = "no_log")]
+    pub log: Option<PathBuf>,
+    /// 关闭运行日志（崩溃报告仍写入日志目录）
+    #[arg(long, global = true)]
+    pub no_log: bool,
+    /// 日志级别：error / warn / info / debug
+    #[arg(
+        long,
+        global = true,
+        value_name = "LEVEL",
+        default_value = "info",
+        value_parser = crate::logging::parse_level
+    )]
+    pub log_level: crate::logging::Level,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -93,6 +108,11 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
     writeln!(out, "{}", crate::version_line())?;
     writeln!(out, "数据目录: {}", paths.home.display())?;
     writeln!(out, "资源目录: {}", paths.assets.display())?;
+    writeln!(
+        out,
+        "日志目录: {}（--log 可指定文件，--no-log 关闭）",
+        paths.logs_dir().display()
+    )?;
 
     let catalog = crate::domain::catalog::Catalog::load(paths)?;
     writeln!(out, "\n词库（{} 本）：", catalog.resources().len())?;

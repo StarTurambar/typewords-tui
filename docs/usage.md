@@ -72,7 +72,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | Linux | `$XDG_DATA_HOME/typewords-tui`，缺省 `~/.local/share/typewords-tui` |
 | macOS | `~/Library/Application Support/typewords-tui` |
 
-首次运行自动创建目录并写入 5 份存档：`dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）、`setting.json`（设置）、`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）、`flows.json`（自建流程），另有 `themes/`、`dicts/`、`list/`；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-web` 只读，TUI 运行时也能用。
+首次运行自动创建目录并写入 5 份存档：`dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）、`setting.json`（设置）、`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）、`flows.json`（自建流程），另有 `themes/`、`dicts/`、`list/`，以及运行日志与崩溃报告的 `logs/`（不是存档，删了不影响学习进度）；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-web` 只读，TUI 运行时也能用。
 
 ### 升级与版本兼容
 
@@ -89,6 +89,9 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 另接受 `smart` 与中文别名；单词测试与自定义流程只能在界面里用 `m` 选；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
 | `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`，不动词典与设置，仅 TUI 生效 |
+| `--log FILE` | 运行日志文件 | 全局参数，可放在子命令前后；缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
+| `--no-log` | 关闭运行日志 | 全局参数；崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
+| `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 全局参数，缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |
 
 `-h` / `--help` 与 `-V` / `--version` 由 clap 生成，后者输出版本号。
 
@@ -96,7 +99,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 
 | 子命令 | 作用 | 输出要点 |
 | --- | --- | --- |
-| `tw doctor` | 打印解析到的路径与词库 / 存档 / 主题状态，不进入界面、不写存档 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 目录登记词数 / 实际可练习词数（空词条不计，与程序真正加载的词数一致）与词条文件路径（缺失显示 `<缺失>`，解析失败显示原因）；5 份存档的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
+| `tw doctor` | 打印解析到的路径与词库 / 存档 / 主题状态，不进入界面、不写存档 | 版本行、数据目录、资源目录、日志目录（`<home>/logs`，`--log` 可指定文件、`--no-log` 关闭）；每本词库的 id / enName / 名称 / 目录登记词数 / 实际可练习词数（空词条不计，与程序真正加载的词数一致）与词条文件路径（缺失显示 `<缺失>`，解析失败显示原因）；5 份存档的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
 | `tw task` | 只预览今日任务，不进入界面 | 当前词库与每日词数、学习进度（`已学 N / M` 与百分比同源，分母是有效词数）、今日任务（新词 / 复习，到期数与随机补足数）与前 5 个新词、复习词；需取数据目录锁 |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 打印词库名、词数与 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份；导入后需重启程序 |
@@ -116,6 +119,37 @@ tw doctor --home D:\tmp\twhome       # 全局参数也可放在子命令之后
 tw task --seed 42                    # 预览今日任务，固定随机种子
 tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict my-words 切换
 ```
+
+## 日志与崩溃报告
+
+运行日志默认开启，不需要任何参数；panic 时还会自动生成崩溃报告。两者的默认落点都是 `<home>/logs/`。
+
+### 运行日志
+
+| 项 | 说明 |
+| --- | --- |
+| 文件 | `<home>/logs/tw-<YYYY-MM-DD>.log`，日期取**启动当天**的本地日期（跨零点的长会话仍写同一个文件）；追加写，目录不存在会创建 |
+| 行格式 | `YYYY-MM-DD HH:MM:SS.mmm LEVEL message`，级别为 `ERROR` / `WARN` / `INFO` / `DEBUG`（左对齐占 5 列）；每行单独打开追加写，进程崩溃前的最后几行也会留下 |
+| 级别 | `--log-level error` / `warn` / `info` / `debug`，缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时可临时用 `debug` |
+| 换位置 / 关闭 | `--log FILE` 指定日志文件（目录不存在会创建），`--no-log` 关闭运行日志，两者互斥 |
+| 保留 | 启动时清理日志所在目录里的过期文件：日志保留 14 天、崩溃报告保留 30 天（按修改时间，只匹配 `tw-*.log` 与 `crash-*.txt`，其它文件不动） |
+
+记录内容：版本头、平台、进程号、命令行、数据目录 / 资源目录 / 日志文件、数据目录锁获取、执行的子命令、存档装载状态与词库 / 主题数量、当前学习词典、界面 Toast 里的错误与警告（成功 / 提示类只有 `debug` 才记）、进入与退出 TUI、进程退出（正常 / 失败）与错误链。日志写失败（例如目录不可写）只在 stderr 打一条警告，程序照常运行；所有入口（包括只读的 `tw doctor` / `tw export-web`）都会追加日志，日志写入不取数据目录锁。
+
+### 崩溃报告
+
+- **位置与文件名**：与日志同目录——默认 `<home>/logs/`，用过 `--log` 就是该文件所在的目录（该目录不可创建时降级到系统临时目录的 `typewords-tui-crash/`）；文件名为 `crash-<YYYYMMDD-HHMMSS>.txt`，同一秒内多次崩溃追加 `-2`、`-3`，不覆盖旧报告。`--no-log` 只关运行日志，崩溃报告仍然生成。
+- **内容**：生成时间、版本、进程号、平台、命令行、当前目录、可执行文件、数据目录、资源目录、日志文件（尚未解析到的显示「（未解析）」/「（未启用）」）、panic 消息与位置、完整回溯、最近 40 行日志，以及反馈提示。回溯用 `std::backtrace::force_capture` 捕获，**不需要**设置 `RUST_BACKTRACE`。
+- **怎么用**：报告写好后路径会打印到 stderr（「程序崩溃，崩溃报告已写入: …」）；提 issue 时把这个 `.txt` 与同目录最近的 `tw-*.log` 一起附上，再写清复现步骤。报告写失败（目录不可写）只会再提示一次，不会递归写第二份。
+- **覆盖范围**：只有 panic 会生成报告；启动期的致命错误（`Error: …`）写进日志与 stderr，不生成 `crash-*.txt`。
+
+### Windows 双击启动的早退保护
+
+从资源管理器双击 `tw.exe`（没有任何命令行参数，且 stdin 与 stderr 都是终端）时，早期错误或 panic 之后会显示「按回车键退出...」并等待回车，控制台窗口不会一闪而过：
+
+- 加了参数启动（从 cmd / PowerShell、脚本、快捷方式带参数）不会等待。
+- 设置 `TW_NO_PAUSE`（任意值，如 `TW_NO_PAUSE=1`）或在 `CI` 环境下运行会自动跳过等待，适合自动化。
+- 早期错误的输出（stderr）是 `Error: <错误链>`、`日志文件: <路径>` 与反馈提示；`--no-log` 时改为提示 `运行日志未启用；可用 --log <FILE> 指定日志文件。`
 
 ## 界面导览
 
@@ -343,8 +377,9 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 | `<home>/setting.json` | 设置项（含主题与练习模式选择） |
 | `<home>/practice-word.json` / `practice-article.json` | 单词 / 文章断点缓存 |
 | `<home>/flows.json`、`<home>/.tw.lock`、`<home>/themes/`、`<home>/dicts/`、`<home>/list/` | 自建练习流程（无版本号）、数据目录锁（内容是持锁进程 PID，常驻不删）、自定义主题、导入的词条文件与用户词库目录 |
+| `<home>/logs/` | 运行日志 `tw-<日期>.log` 与崩溃报告 `crash-<时间戳>.txt`；**不是存档**，删了不影响学习进度，详见[日志与崩溃报告](#日志与崩溃报告) |
 
-- **备份 / 迁移**：先退出所有 tw 实例，再复制整个数据目录（锁文件可留可删）；恢复或换机器时把备份目录放回原路径，或用 `--home` / `TYPEWORDS_HOME` 指向备份目录。重置与损坏：删 `practice-word.json` 只清断点缓存（等价 `--reset-practice`）；删 `setting.json` 恢复默认设置；删 `dict.json` 会丢失学习进度、统计、FSRS 卡片与三本系统词典（谨慎）。存档损坏会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；版本过高的 `dict.json` / `setting.json` 本次运行只读、不覆盖；练习缓存版本不符会被忽略。设置页「清除所有数据」等价于把两份主存档恢复默认，不需要手工删文件；完整字段与版本策略见 [存档与数据格式](persistence.md)。
+- **备份 / 迁移**：先退出所有 tw 实例，再复制整个数据目录（锁文件与 `logs/` 可留可删——日志与崩溃报告不属于存档）；恢复或换机器时把备份目录放回原路径，或用 `--home` / `TYPEWORDS_HOME` 指向备份目录。重置与损坏：删 `practice-word.json` 只清断点缓存（等价 `--reset-practice`）；删 `setting.json` 恢复默认设置；删 `dict.json` 会丢失学习进度、统计、FSRS 卡片与三本系统词典（谨慎）。存档损坏会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；版本过高的 `dict.json` / `setting.json` 本次运行只读、不覆盖；练习缓存版本不符会被忽略。设置页「清除所有数据」等价于把两份主存档恢复默认，不需要手工删文件；完整字段与版本策略见 [存档与数据格式](persistence.md)。
 
 ## 常见问题与排障
 
@@ -369,6 +404,8 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 | macOS 打开被拦（提示「无法验证开发者」或「已损坏」） | 发布包未签名，从浏览器下载的二进制带 quarantine 隔离属性 | 先按「下载发布包」校验 sha256，再执行 `xattr -d com.apple.quarantine ./tw` |
 | Linux 运行报 `GLIBC_2.3x not found` | 发行版 glibc 比构建基线（Ubuntu 22.04）旧，`x86_64-unknown-linux-gnu` 包跑不起来 | 改用 `x86_64-unknown-linux-musl` 静态包，不依赖系统 glibc |
 | 解压后没有执行权限（Permission denied） | 解压工具没保留可执行位，或手动复制过二进制 | 执行 `chmod +x tw` 后再运行 |
+| Windows 双击启动窗口一闪而过 | 早期错误或 panic 后进程立刻退出，控制台窗口随之关闭 | 看 `<home>/logs/` 里的日志与 `crash-*.txt`；双击启动本应显示「按回车键退出...」并等待回车，没有停住说明是带参数启动或设置了 `TW_NO_PAUSE` / `CI` |
+| 程序崩溃 | panic（索引越界、断言失败等）会生成崩溃报告 | 打开 `<home>/logs/crash-<时间戳>.txt` 看 panic 消息、位置、完整回溯与最近 40 行日志，连同同目录日志一起附到 issue；`--no-log` 下报告仍会生成 |
 
 ### FAQ
 
@@ -380,7 +417,7 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 
 ## 反馈与贡献
 
-- **提 issue** 建议附：`tw --version` 输出、`tw doctor` 输出、操作系统与终端（如 Windows Terminal）、复现步骤、是否使用 `--home` / `--assets` / `--seed`，以及相关 Toast 文案；涉及随机行为时附上 `--seed` 值。
+- **提 issue** 建议附：`tw --version` 输出、`tw doctor` 输出、操作系统与终端（如 Windows Terminal）、复现步骤、是否使用 `--home` / `--assets` / `--seed`，以及相关 Toast 文案；涉及随机行为时附上 `--seed` 值；程序崩溃或行为异常时附上 `<home>/logs/` 里最近的 `tw-*.log` 与 `crash-*.txt`（用过 `--log` 就附上该文件所在目录）。
 - **参与开发**：构建、测试、截图与发布流程见 [开发指南](development.md)；分层与模块职责见 [总体架构](architecture.md)；文档约定见 [文档索引](README.md)。许可证为 GPL-3.0，词库数据来自上游 TypeWords 仓库，遵循同一许可证。
 
 ## 相关文档

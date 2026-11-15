@@ -16,11 +16,23 @@ pub struct Paths {
 
 impl Paths {
     pub fn resolve(assets_arg: Option<PathBuf>, home_arg: Option<PathBuf>) -> Result<Self> {
-        let home = home_arg
+        let home = Self::resolve_home(home_arg)?;
+        Self::resolve_in(home, assets_arg)
+    }
+
+    /// 只解析数据目录。
+    ///
+    /// 日志初始化必须在资源目录解析之前完成（缺少 assets/ 是最常见的启动
+    /// 失败，错误要进日志），所以这条查找单独拆出来复用。
+    pub fn resolve_home(home_arg: Option<PathBuf>) -> Result<PathBuf> {
+        home_arg
             .or_else(|| env_path("TYPEWORDS_HOME"))
             .or_else(|| dirs::data_local_dir().map(|dir| dir.join("typewords-tui")))
-            .ok_or_else(|| anyhow!("无法确定数据目录，请使用 --home 指定"))?;
+            .ok_or_else(|| anyhow!("无法确定数据目录，请使用 --home 指定"))
+    }
 
+    /// 已知数据目录时只解析资源目录（失败信息与 [Paths::resolve] 完全一致）。
+    pub fn resolve_in(home: PathBuf, assets_arg: Option<PathBuf>) -> Result<Self> {
         let assets = locate_assets(assets_arg.as_deref()).ok_or_else(|| {
             anyhow!(
                 "找不到词库资源目录（需要包含 list/word.json）。可用 --assets 或环境变量 TYPEWORDS_ASSETS 指定；发布包可把 assets/ 放在可执行文件同级"
@@ -49,6 +61,11 @@ impl Paths {
     /// 用户自定义主题目录：`<home>/themes/*.json`。
     pub fn themes_dir(&self) -> PathBuf {
         self.home.join("themes")
+    }
+
+    /// 运行日志与崩溃报告目录：`<home>/logs/`（首次写日志时创建）。
+    pub fn logs_dir(&self) -> PathBuf {
+        self.home.join("logs")
     }
 }
 
