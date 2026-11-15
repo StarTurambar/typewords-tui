@@ -83,3 +83,51 @@ fn real_dict_session_saves_and_reloads() {
     assert_eq!(restored.screen, typewords_tui::app::Screen::Practice);
     assert!(restored.session.is_some());
 }
+
+/// 仓库内置文章书目必须和文章文件对得上：书本行写「N 篇」，就要能列出 N 篇。
+///
+/// 曾经 `assets/list/article.json` 登记 72 篇、`assets/dicts/en/article/NCE_1.json`
+/// 只有 5 篇：文章页的左栏写「72 篇」，右栏却只列出 5 条。
+#[test]
+fn real_article_catalog_matches_the_article_file() {
+    let Some(assets) = locate_assets(None) else {
+        return;
+    };
+    let home = tempfile::tempdir().unwrap();
+    let paths = Paths {
+        home: home.path().to_path_buf(),
+        assets,
+    };
+
+    // 书目文件里登记的 length 必须就是文章文件里的篇数（数据维护规则）。
+    let catalog_file = paths.assets.join("list").join("article.json");
+    let catalog: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(&catalog_file).expect("文章书目"))
+            .expect("解析");
+    let books = typewords_tui::domain::article::load_books(&paths).expect("文章书目");
+    assert_eq!(books.len(), catalog.len(), "书目与解析结果条数应一致");
+    for (book, entry) in books.iter().zip(catalog.iter()) {
+        let articles = typewords_tui::domain::article::load_articles(&paths, book)
+            .unwrap_or_else(|error| panic!("读取《{}》的文章失败: {error:#}", book.name));
+        assert_eq!(
+            book.length,
+            Some(articles.len()),
+            "《{}》显示 {:?} 篇，但文件里有 {} 篇",
+            book.name,
+            book.length,
+            articles.len()
+        );
+        assert_eq!(
+            entry["length"].as_u64().map(|value| value as usize),
+            Some(articles.len()),
+            "《{}》在 article.json 里登记的 length 应与文章文件一致",
+            book.name
+        );
+    }
+
+    let nce1 = books
+        .iter()
+        .find(|book| book.en_name == "nce1")
+        .expect("应内置《新概念英语1》");
+    assert_eq!(nce1.length, Some(5), "《新概念英语1》内置 5 篇文章");
+}

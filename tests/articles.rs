@@ -273,6 +273,75 @@ fn the_article_list_is_loaded_on_first_entry() {
     );
 }
 
+/// 书本行上的「N 篇」必须和右侧列出来的文章数一致。
+///
+/// 早期实现直接渲染 `article.json` 里登记的 `length`：资源登记 72 篇、文件里
+/// 只有 2 篇时，左栏写「72 篇」而右栏只列出 2 条。
+#[test]
+fn the_book_count_matches_the_number_of_listed_articles() {
+    let fixture = common::Fixture::new();
+    // 书目登记一个和资源文件对不上的篇数（fixture 的 toy.json 只有 2 篇）。
+    let catalog = serde_json::json!([{
+        "id": 1,
+        "enName": "toybook",
+        "name": "测试文章集",
+        "description": "测试用文章",
+        "url": "toy.json",
+        "length": 72,
+        "language": "en",
+        "translateLanguage": "zh_CN",
+        "type": "article"
+    }]);
+    std::fs::write(
+        fixture.assets().join("list").join("article.json"),
+        serde_json::to_string(&catalog).unwrap(),
+    )
+    .expect("改写文章目录");
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    press(&mut app, KeyCode::Char('a'));
+    let book = app.article_books.first().expect("应读到文章书本");
+    assert_eq!(
+        book.length,
+        Some(app.article_list.len()),
+        "书本行的篇数应等于右侧列出的文章数"
+    );
+    assert_eq!(book.length, Some(2), "测试文章集实际只有 2 篇文章");
+
+    let text = render_text(&app, 120, 40);
+    assert!(text.contains("2 篇"), "书本行应显示实际篇数:\n{text}");
+    assert!(
+        !text.contains("72 篇"),
+        "不该显示目录里过时的登记值:\n{text}"
+    );
+}
+
+/// 文章文件读不到时，书本行如实显示「篇数未知」，不拿目录登记值充数。
+///
+/// 登记值只代表上游快照，和资源文件对不上时不可信；文件损坏时更无从得知
+/// 真实篇数，此时宁可显示未知，也不显示一个可能错误的数字。
+#[test]
+fn an_unreadable_article_file_shows_an_unknown_count() {
+    let fixture = common::Fixture::new();
+    let article_file = fixture
+        .assets()
+        .join("dicts")
+        .join("en")
+        .join("article")
+        .join("toy.json");
+    std::fs::write(&article_file, "not json").expect("写坏文章文件");
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+    press(&mut app, KeyCode::Char('a'));
+    let book = app.article_books.first().expect("应读到文章书本");
+    assert_eq!(book.length, None, "读不到文章文件时篇数应为未知");
+    assert!(app.article_list.is_empty(), "读不到文章时列表应为空");
+
+    let text = render_text(&app, 120, 40);
+    assert!(text.contains("篇数未知"), "应如实显示篇数未知:\n{text}");
+    assert!(!text.contains("2 篇"), "不该拿目录里的登记值充数:\n{text}");
+}
+
 /// 侧栏 / 顶栏点进文章页，也必须列出当前书本的文章。
 ///
 /// 早期只有主页按 `a` 走 `open_articles`（会载入书本与文章），侧栏与数字

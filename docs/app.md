@@ -353,7 +353,7 @@ app.save_all()
 
 ### 6.3 文章页的进入路径
 
-文章页有多个入口：主页按 `a`、侧栏 / 顶栏点「文章」、数字键 `2`。**它们必须走同一个方法**——`open_articles`。文章资源是懒加载的（书本在 `assets/list/article.json`、文章在 `assets/dicts/en/article/*.json`），`App` 启动时这两个列表都是空的；`open_articles` 负责载入书本、重置两个光标，再调 `load_selected_book` 载入当前书本的文章。
+文章页有多个入口：主页按 `a`、侧栏 / 顶栏点「文章」、数字键 `2`。**它们必须走同一个方法**——`open_articles`。文章资源是懒加载的（书本在 `assets/list/article.json`、文章在 `assets/dicts/en/article/*.json`），`App` 启动时这两个列表都是空的；`open_articles` 负责载入书本、重置两个光标，再调 `load_selected_book` 载入当前书本的文章。`load_books` 不采信目录里登记的 `length`，篇数直接用每本书文章文件里的实际篇数（文件读不到时该行显示「篇数未知」），所以书本行的「N 篇」和右侧能列出的文章数始终是同一个数字——早期直接渲染 `article.json` 的登记值，出现过「写着 72 篇、只列出 5 篇」。
 
 `open_articles` 还会刷新 `article_resume`：有跟打断点时，缓存对应的那篇文章会标出「上次第 N 句」，选中它按 `Enter` 从断点句子继续；选其他文章则从头开始。启动时不会自动进入跟打页——跟打的恢复只发生在这个显式入口。
 

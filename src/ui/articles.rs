@@ -98,10 +98,16 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                                 Modifier::empty()
                             }),
                     ),
-                    Span::styled(
-                        format!("  {} 篇", book.length),
-                        Style::default().fg(theme.dim),
-                    ),
+                    // 篇数是 `load_books` 从文章文件里数出来的实际篇数，不采信
+                    // 目录里的登记值：写「N 篇」就必须能列出 N 条，两个数字来自
+                    // 同一份资源（详见 `domain::article::load_books`）。文件读不到
+                    // 时篇数未知，如实显示，不拿没核对过的登记值充数。
+                    match book.length {
+                        Some(length) => {
+                            Span::styled(format!("  {length} 篇"), Style::default().fg(theme.dim))
+                        }
+                        None => Span::styled("  篇数未知", Style::default().fg(theme.dim)),
+                    },
                 ]))
             })
             .collect();

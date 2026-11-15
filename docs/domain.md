@@ -30,7 +30,7 @@
 | `src/domain/typing.rs` | 键入状态机 | `TypingEngine`、`TypingSettings`、`TypingEvent`、`KeyInput` |
 | `src/domain/question.rs` | 自测选择题 | `build_question`、`Candidate`、`Question` |
 | `src/domain/flow/store.rs` | 自建练习流程的数据结构（`flows.json` 的读写在 `store` 层） | `FlowStore`、`StoredFlow` |
-| `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态（字母、数字与可省略的词间空格）、断点缓存 | `Article`、`parse_sentence`、`gen_sections`、`TypingCell`、`typing_cells`、`typing_target`、`is_typing_char`（字母、数字或空格）、`SentenceTyping`（记录实际输入的字符与实际错误；词间空格可省略，省略时补成正确输入，错字落在下一个字母上）、`ArticleCache`、`ArticleCacheEnvelope` |
+| `src/domain/article.rs` | 文章模型、断句与分词、句子跟打状态（字母、数字与可省略的词间空格）、断点缓存、文章资源加载 | `Article`、`parse_sentence`、`gen_sections`、`TypingCell`、`typing_cells`、`typing_target`、`is_typing_char`（字母、数字或空格）、`SentenceTyping`（记录实际输入的字符与实际错误；词间空格可省略，省略时补成正确输入，错字落在下一个字母上）、`ArticleBook`（`length` 为文章文件里的实际篇数，读不到时 `None`）、`load_books`（篇数只认文章文件）、`load_articles`、`ArticleCache`、`ArticleCacheEnvelope` |
 | `src/domain/wordbook.rs` | 词条搜索过滤、自定义词典、批量标记、排序 | `filter_words`、`mark_mastered`、`mark_know`、`sort_words` |
 | `src/domain/flow/mod.rs` | 流程配置、游标、相位、展示模型 | `PracticeFlowConfig`、`PracticeFlowCursor`、`builtin_flow`、`resolve_phase_by_cursor`、`display_state` |
 | `src/domain/flow/navigator.rs` | 会话内的位置推进 | `Navigator`、`NavState`、`Notice` |
@@ -137,7 +137,7 @@
 
 ### 2.5 三本系统词典与 TUI 扩展
 
-`BaseState::default()` 在 `word.book_list` 中预置三本系统词典，在 `article.book_list` 中预置一本文章收藏（TUI 不加载文章数据）：
+`BaseState::default()` 在 `word.book_list` 中预置三本系统词典，在 `article.book_list` 中预置一本文章收藏（TUI 只保留书目元数据；跟打正文来自资源目录的 `assets/dicts/en/article/*.json`，见 [应用层](app.md) 6.3）：
 
 | 词典 | id / enName | 默认名称 | 数据形态与维护者 |
 | --- | --- | --- | --- |

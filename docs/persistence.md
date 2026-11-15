@@ -23,8 +23,9 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 | `<home>/.<文件名>.tmp` | 临时 | 原子写的中间文件，正常结束后不存在 |
 | `<home>/<文件名>.corrupt-<时间戳>.json` | 隔离产物 | 解析失败的坏存档备份 |
 | `<assets>/list/word.json` | 只读 | 内置词库目录 `DictResource[]` |
+| `<assets>/list/article.json` | 只读 | 内置文章书目 `ArticleBook[]`（进入文章页时读取） |
 | `<assets>/dicts/en/word/*.json` | 只读 | 内置词条数据 `Word[]` |
-| `<assets>/dicts/en/article/*.json` | 不读写 | 上游的文章数据，TUI 不加载 |
+| `<assets>/dicts/en/article/*.json` | 只读 | 内置文章数据 `Article[]`（文章背诵页按需读取，见 6） |
 
 `<home>` 下的目录不会全部预先创建：`dicts/` 与 `list/` 由 `import-dict` 按需创建，`themes/` 需要用户自己创建。程序不写日志文件（没有日志设施），排障依赖 `tw doctor`、Toast 与复现步骤。
 
@@ -164,7 +165,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `simpleWords` | `simple_words` | `string[]` | 「简单词」忽略列表，默认 42 个（`SIMPLE_WORDS`），与 Web 默认值相同 |
 | `load` | `load` | `bool` | 上游遗留的装载标记，TUI 不使用 |
 | `word` | `word` | `BookGroup` | 单词词典组：`bookList` + `studyIndex` |
-| `article` | `article` | `BookGroup` | 文章词典组；TUI 不读取文章，只有 1 本系统「收藏」 |
+| `article` | `article` | `BookGroup` | 文章词典组；TUI 只保留元数据（跟打用的正文来自资源目录，见 6），只有 1 本系统「收藏」 |
 | `dictListVersion` | `dict_list_version` | `u32` | 上游词库目录版本，TUI 默认 1、不参与逻辑 |
 | `fsrsData` | `fsrs_data` | `map` | 单词 → FSRS 卡片，见 3.4 |
 | `noteData` | `note_data` | `map` | 单词 → 笔记字符串；TUI 只读写不展示 |
@@ -401,7 +402,7 @@ function systemPractice() {
       "sentenceIndex": 3,
       "finished": 3,
       "wrongSentences": 0,
-      "total": 72,
+      "total": 12,
       "spend": 45000
     },
     "statStoreData": null
@@ -479,7 +480,7 @@ function systemPractice() {
 
 未建模字段（如 `inflections`、`e2e`、`examsSrc`、`langType`）会被静默忽略。所有数组字段在缺省时按空数组处理；整个文件没有可用词条时加载失败：`词库文件没有可用单词: <path>`。
 
-仓库内置 CET-4 资源为 `assets/dicts/en/word/CET4_T.json`：2607 词、4,487,640 字节（约 4.5 MB），首个词是 `cancel`（`tests/real_assets.rs` 固定了这两个事实）。`dicts/en/article` 下的文章数据不读取，TUI 也不使用 `list/article.json`。
+仓库内置 CET-4 资源为 `assets/dicts/en/word/CET4_T.json`：2607 词、4,487,640 字节（约 4.5 MB），首个词是 `cancel`（`tests/real_assets.rs` 固定了这两个事实）。文章资源是另一套只读资源：书目 `assets/list/article.json` + 文章 `assets/dicts/en/article/*.json`，由文章背诵页按需读取（见 [app.md](app.md) 6.3、[ui.md](ui.md) 8.5），书目登记的 `length` 会被文章文件里的实际篇数校准（见 [domain.md](domain.md)），两边对不上时以文件为准。
 
 ### 6.3 目录合并与文件优先级
 
