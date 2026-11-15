@@ -673,9 +673,22 @@ impl App {
                 before != self.words_cursor
             }
             (Screen::Flows, FocusDir::Up | FocusDir::Down) => {
-                let before = self.flow_cursor;
+                // 流程页有三个光标：列表光标、节点光标（编辑态 ↑/↓）、步骤光标
+                // （编辑态 h/l）。只比 flow_cursor 会把「编辑态移动节点」误判成
+                // 页面光标没动，窄屏「最顶部 ↑ 进顶栏」就会在非首节点上抢走
+                // 焦点；三个一起比才是「页面光标到底动没动」。
+                let before = (
+                    self.flow_cursor,
+                    self.flow_node_cursor,
+                    self.flow_step_cursor,
+                );
                 self.move_selection(if forward { 1 } else { -1 });
-                before != self.flow_cursor
+                before
+                    != (
+                        self.flow_cursor,
+                        self.flow_node_cursor,
+                        self.flow_step_cursor,
+                    )
             }
             (Screen::Shortcuts, FocusDir::Up | FocusDir::Down) => {
                 let before = self.shortcut_cursor;

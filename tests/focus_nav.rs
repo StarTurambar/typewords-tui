@@ -823,6 +823,56 @@ fn narrow_up_from_page_content_enters_topbar() {
     assert_eq!(app.focus, Some(FocusId::Page));
 }
 
+/// 窄屏流程编辑：↑ 移动节点光标，不能顺手把焦点带进顶栏。
+///
+/// 共享的 `move_selection_page` 曾经只比较 `flow_cursor`；编辑态下 ↑/↓ 动的是
+/// `flow_node_cursor`，`flow_cursor` 不变，分支因此报告「页面光标没动」，
+/// 窄屏「内容区最顶部 ↑ 进顶栏」的规则随即生效——用户想选上一个节点，焦点
+/// 却跳到顶栏，紧接着按 ↓ / Enter 操作的就是导航项（可能直接切页）。
+#[test]
+fn narrow_up_in_the_flow_editor_moves_nodes_instead_of_the_topbar() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press_ctrl(&mut app, KeyCode::Char('f'));
+    assert_eq!(app.screen, Screen::Flows);
+    // 内置流程不能编辑：先新建副本，再进编辑模式。
+    press(&mut app, KeyCode::Char('n'));
+    press(&mut app, KeyCode::Char('e'));
+    assert!(app.flow_editing, "自建流程应能进入编辑模式");
+    assert_eq!(app.flow_node_cursor, 0);
+
+    // 首节点按 ↑：内容区确实动不了，仍按窄屏规则进顶栏。
+    press(&mut app, KeyCode::Up);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav), "首节点 ↑ 应进顶栏");
+    assert_eq!(app.flow_node_cursor, 0, "首节点 ↑ 不应移动节点光标");
+
+    // 回内容区，把节点光标移到第二个节点（↓ 不跨栏，一直可用）。
+    press(&mut app, KeyCode::Down);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.flow_node_cursor, 1, "↓ 应移动节点光标");
+
+    // 非首节点按 ↑：节点光标上移，焦点留在内容区，页面也不该被切走。
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.flow_node_cursor, 0, "↑ 应把节点光标移回首节点");
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "节点光标动了就不该跨栏"
+    );
+    assert_eq!(app.screen, Screen::Flows, "焦点不应跳到顶栏后误切页");
+
+    // j / k 与 ↑ / ↓ 同义：编辑态下同样只动节点光标。
+    let node_count = app.flow_entries()[app.flow_cursor].config.nodes.len();
+    assert!(node_count > 1, "复制来的流程应有多个节点");
+    press(&mut app, KeyCode::Char('j'));
+    assert_eq!(app.flow_node_cursor, 1, "j 应把节点光标移到第二个节点");
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    press(&mut app, KeyCode::Char('k'));
+    assert_eq!(app.flow_node_cursor, 0, "k 应把节点光标移回首节点");
+    assert_eq!(focus::pane(&app), Some(Pane::Content), "k 同样不该跨栏");
+    assert_eq!(app.screen, Screen::Flows);
+}
+
 /// 词库页：进入后光标停在当前学习词典、底栏显示它的名字；
 /// 当前词典是最后一行，↓ 到边停住（只读安全）。
 #[test]
