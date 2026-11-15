@@ -105,19 +105,27 @@ fn activating_a_builtin_flow_switches_the_practice_mode() {
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     ctrl(&mut app, 'f');
 
-    // 先建一个自建流程并启用：此时 ● 落在自建流程上，内置行都不标。
+    // 先建一个自建流程并启用：它只是「已启用」，练习模式仍是「学习」，
+    // 所以下一轮跑的仍是内置「学习」流程，● 必须留在这一行。
     press(&mut app, KeyCode::Char('n'));
     let custom_id = app.flow_store.active_id.clone();
     assert!(!custom_id.is_empty(), "新建副本应启用它");
     assert_eq!(
-        active_flow_ids(&app),
-        vec![custom_id.clone()],
-        "启用自建流程后 ● 应在它上面"
-    );
-    assert_eq!(
         app.boot.settings.word_practice_mode,
         WordPracticeMode::System
     );
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["system".to_string()],
+        "模式仍是「学习」时 ● 不能跳到未生效的自建流程上"
+    );
+    let custom_entry = app
+        .flow_entries()
+        .into_iter()
+        .find(|entry| entry.id == custom_id)
+        .expect("应有自建流程");
+    assert!(custom_entry.enabled, "自建流程应标记为已启用");
+    assert!(!custom_entry.active, "未生效的自建流程不该是 active");
 
     // 光标上移一行到「复习」（自建流程排在最后），按 Enter 切回内置流程。
     let review = app
@@ -581,4 +589,144 @@ fn a_corrupt_flow_archive_is_quarantined() {
         .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
         .collect();
     assert_eq!(quarantined.len(), 1, "损坏文件应被隔离保留");
+}
+
+/// 流程页的 `●` 只能是「下一轮练习真正会跑的流程」。
+///
+/// 早期 `●` 同时表示「已启用」和「将实际使用」：启用自建流程后它立刻跳到
+/// 自建行，而练习模式不是「自定义流程」时下一轮跑的仍是内置流程。这里把
+/// 7 个有内置流程的模式 × {无 / 有已启用自建流程} 逐个开练，比对两者。
+#[test]
+fn flow_marker_matches_the_flow_the_next_practice_actually_uses() {
+    for with_custom in [false, true] {
+        for mode in typewords_tui::domain::flow::BUILTIN_FLOW_MODES {
+            let fixture = common::Fixture::new();
+            let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+            ctrl(&mut app, 'f');
+            if with_custom {
+                press(&mut app, KeyCode::Char('n'));
+            }
+            app.boot.settings.word_practice_mode = mode;
+
+            let marked = active_flow_ids(&app);
+            assert_eq!(
+                marked.len(),
+                1,
+                "{mode:?}（自建流程 {with_custom}）应恰好标一条流程：{marked:?}"
+            );
+
+            app.start_practice_with_mode(mode);
+            let session = app
+                .session
+                .as_ref()
+                .unwrap_or_else(|| panic!("{mode:?} 应能开始练习"));
+            assert_eq!(
+                marked[0],
+                session.flow().id,
+                "{mode:?}（自建流程 {with_custom}）标了 ● 的流程与实际生效的流程不一致"
+            );
+        }
+    }
+}
+
+/// 自建流程「已启用」但未生效时：只标文字标签，页头说明怎么切过去。
+#[test]
+fn an_enabled_but_inactive_custom_flow_is_labelled_not_marked() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    press(&mut app, KeyCode::Char('n'));
+    assert_eq!(
+        app.boot.settings.word_practice_mode,
+        WordPracticeMode::System
+    );
+
+    let text = render_text(&app, 120, 40);
+    assert!(
+        text.contains("当前：学习"),
+        "页头「当前」应是实际生效的内置流程：{text}"
+    );
+    assert!(
+        !text.contains("当前：学习 副本"),
+        "未生效的自建流程不能出现在「当前」里：{text}"
+    );
+    assert!(
+        text.contains("已启用「学习 副本」，切到「自定义流程」后生效"),
+        "页头应说明它为什么还没生效：{text}"
+    );
+    assert!(
+        text.contains("学习 副本 （已启用）"),
+        "列表里应标「（已启用）」而不是抢 ●：{text}"
+    );
+}
+
+/// 「自定义流程」模式还没启用自建流程时，没有任何流程会执行。
+///
+/// 此时既不该标 `●`（会让人以为点开就会按它编排），页头也不能写一个
+/// 具体流程名；开练会被拒绝并提示先启用。
+#[test]
+fn custom_mode_without_an_enabled_flow_marks_nothing() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    app.boot.settings.word_practice_mode = WordPracticeMode::Custom;
+
+    assert_eq!(app.effective_flow_id(), None, "没有可用的流程");
+    assert!(
+        active_flow_ids(&app).is_empty(),
+        "没有可用流程时不该标 ●：{:?}",
+        active_flow_ids(&app)
+    );
+    let text = render_text(&app, 120, 40);
+    assert!(
+        text.contains("自定义流程模式尚未启用自建流程"),
+        "页头应说明当前没有可用的流程：{text}"
+    );
+
+    press(&mut app, KeyCode::Esc);
+    app.start_practice_with_mode(WordPracticeMode::Custom);
+    assert!(app.session.is_none(), "没有可用流程时不应开始练习");
+    let toast = app
+        .current_toast(typewords_tui::domain::timer::now_ms())
+        .map(|toast| toast.message.clone())
+        .unwrap_or_default();
+    assert!(
+        toast.contains("自定义流程"),
+        "应提示先启用自建流程，实际：{toast}"
+    );
+}
+
+/// 已启用的自建流程配置损坏时回退内置流程：`●` 必须跟着回到实际生效的那一行。
+#[test]
+fn an_enabled_flow_with_a_broken_config_falls_back_to_the_builtin_flow() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    press(&mut app, KeyCode::Char('n'));
+    let custom_id = app.flow_store.active_id.clone();
+    // 模拟手工改坏 flows.json：节点被清空。
+    app.flow_store
+        .flows
+        .get_mut(&custom_id)
+        .expect("自建流程")
+        .config
+        .nodes
+        .clear();
+    app.boot.settings.word_practice_mode = WordPracticeMode::Custom;
+
+    assert_eq!(
+        app.effective_flow_id().as_deref(),
+        Some("system"),
+        "非法配置应回退到内置 system 流程"
+    );
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["system".to_string()],
+        "回退后 ● 应回到「学习」这一行"
+    );
+    let text = render_text(&app, 120, 40);
+    assert!(
+        text.contains("「学习 副本」的配置不可用，已回退到内置流程"),
+        "页头应说明已经回退：{text}"
+    );
 }
