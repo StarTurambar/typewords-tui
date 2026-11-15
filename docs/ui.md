@@ -103,7 +103,7 @@ ui::render(app, frame)
 
 - 宽屏顶栏：`▎` + 当前页标题（bold）；右侧空间足够时再画 `模式 X  ·  主题名`（`practice_mode_name` + `theme_label`），放不下就省略。
 - 窄屏顶栏：左侧 `Type Words`，右侧 6 个标签；当前页用 `element` 背景 + `fg`，其余 `muted`；键盘焦点落在这 6 个标签上时整块 `accent` 覆盖当前页底色。`narrow_nav_targets` 从 `Type Words` 右侧 2 列开始排布，宽度为标签显示宽度 + 2，放不下的标签不生成。
-- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）；任何页面有键盘焦点时优先显示 `shell::focus_hints`（「选中 X / ↑↓←→ 移动 / enter 触发或切换 / esc 取消或返回 / tab 换栏」；label 由 `ui::focus::focused_label` 按导航栏 / 主页按钮 / 页面光标给出）。右侧是版本号 `v0.3.1`（`CARGO_PKG_VERSION`）。
+- 底栏左侧：有 Toast 时显示最新一条（Success/Warning/Error/Info 分别用 `good`/`warn`/`bad`/`accent_alt`）；无 Toast 时显示当前页快捷键提示（`hints_for(screen)`）。主页在提示区不足 52 列时改用 `HOME_COMPACT_HINTS`（enter 开始、f 自由、d 词库、? 帮助、q 退出）；任何页面有键盘焦点时优先显示 `shell::focus_hints`（「选中 X / ↑↓←→ 移动 / enter 触发或切换 / esc 取消或返回 / tab 换栏」；label 由 `ui::focus::focused_label` 按导航栏 / 主页按钮 / 页面光标给出）。`hints_for` 只是回退提示——能解析出「选中 X」时它被 `focus_hints` 顶替，真正露出的场合是没有选中项的状态（无焦点、文章页空文章栏等），所以文案同样必须与真实键位一致（文章页写「↑↓ 选择 / ←→ 换栏」，而不是按栏分工的「选书本 / 选文章」）。右侧是版本号 `v0.3.1`（`CARGO_PKG_VERSION`）。
 - 终端过小：`render_too_small` 用 `modal_block` 画一个居中提示，不渲染任何页面内容；`App::interactive()` 同一判定（`ui::MIN_WIDTH` / `MIN_HEIGHT`）为假，键盘与鼠标事件全部丢弃，放大窗口后自动恢复。
 
 ## 5. 主页

@@ -273,6 +273,96 @@ fn the_article_list_is_loaded_on_first_entry() {
     );
 }
 
+/// 在 fixture 的书目后面追加一本「空书」：文章文件是空数组。
+///
+/// 空文章栏没有可显示的选中项（`page_label` 返回 `None`），文章页才会回退
+/// 到底栏的常规快捷键提示；有选中项时底栏显示「选中 X」，看不到 `hints_for`。
+/// 追加的书以 fixture 的第一本为模板，只换 id / 书名 / 文章文件。
+fn install_an_empty_book(fixture: &common::Fixture) {
+    let catalog_path = fixture.assets().join("list").join("article.json");
+    let mut catalog: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&catalog_path).unwrap()).unwrap();
+    let mut empty = catalog[0].clone();
+    empty["id"] = serde_json::json!(2);
+    empty["enName"] = serde_json::json!("emptybook");
+    empty["name"] = serde_json::json!("空文章集");
+    empty["url"] = serde_json::json!("empty.json");
+    empty["length"] = serde_json::json!(0);
+    catalog.as_array_mut().expect("书目是数组").push(empty);
+    std::fs::write(&catalog_path, serde_json::to_string(&catalog).unwrap()).expect("改写文章目录");
+    std::fs::write(
+        fixture
+            .assets()
+            .join("dicts")
+            .join("en")
+            .join("article")
+            .join("empty.json"),
+        "[]",
+    )
+    .expect("写入空文章文件");
+}
+
+/// 文章页底栏的常规提示必须描述真实键位：`↑↓` 在当前栏内选、`←→` 换栏。
+///
+/// 底栏一度写着「↑↓ 选书本 / ←→ 选文章」，但方向键不按栏分工：`↑` / `↓`
+/// 移动的是**当前栏**的光标（`App::move_selection`），`←` / `→` 才在书本栏
+/// 与文章栏之间切换（`App::switch_selection_pane`）。这条测试同时锁住提示
+/// 文案与键位行为，避免二者再次漂移。
+#[test]
+fn the_article_footer_hints_match_the_arrow_keys() {
+    let fixture = common::Fixture::new();
+    install_an_empty_book(&fixture);
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.screen, app::Screen::Articles);
+    assert!(app.article_pane_left, "进页应停在书本栏");
+    assert_eq!(app.article_book_cursor, 0);
+
+    // 提示表本身也锁住：`hints_for` 是文章页没有「选中 X」时的回退提示。
+    assert_eq!(
+        typewords_tui::ui::shell::hints_for(app::Screen::Articles),
+        &[
+            ("↑↓", "选择"),
+            ("←→", "换栏"),
+            ("enter", "开始/继续"),
+            ("esc", "返回"),
+        ],
+        "文章页底栏应写「↑↓ 选择 / ←→ 换栏」"
+    );
+
+    // ↑↓ 在当前栏内选行：书本栏里换到第二本书，不换栏。
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.article_book_cursor, 1, "↑↓ 应移动书本栏的光标");
+    assert!(app.article_pane_left, "↑↓ 不该换栏");
+
+    // ←→ 换栏：切到空文章栏后没有「选中 X」，底栏回退到常规提示。
+    press(&mut app, KeyCode::Right);
+    assert!(!app.article_pane_left, "→ 应切到文章栏");
+    let text = render_text(&app, 120, 40);
+    let footer = text.lines().last().expect("底栏");
+    let expected = "↑↓ 选择  ←→ 换栏  enter 开始/继续  esc 返回";
+    assert!(
+        footer.contains(expected),
+        "文章页底栏提示应为「{expected}」：{footer:?}"
+    );
+    assert!(
+        !footer.contains("选书本") && !footer.contains("选文章"),
+        "方向键不按栏分工，底栏不该再写「选书本 / 选文章」：{footer:?}"
+    );
+
+    // ↑↓ 在文章栏里移动文章光标（回到有文章的书，再切到文章栏试）。
+    press(&mut app, KeyCode::Left);
+    assert!(app.article_pane_left, "← 应切回书本栏");
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.article_book_cursor, 0, "↑ 应回到第一本书");
+    press(&mut app, KeyCode::Right);
+    assert!(!app.article_pane_left, "→ 应切到文章栏");
+    assert_eq!(app.article_cursor, 0);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.article_cursor, 1, "↑↓ 应移动文章栏的光标");
+}
+
 /// 书本行上的「N 篇」必须和右侧列出来的文章数一致。
 ///
 /// 早期实现直接渲染 `article.json` 里登记的 `length`：资源登记 72 篇、文件里
