@@ -125,7 +125,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | 任意页面快照 | `cargo run --example shot -- <screen> [w] [h] [theme] [--plain]`，screen 支持 `home/home-focus/home-nav-focus/practice/practice-buttons/practice-collect/wordtest/words/articles/flows/articlepractice/dict/dict-builtin/stats/settings/shortcuts/help/summary/summary-article/edit/confirm` |
 | panic 定位 | `RUST_BACKTRACE=1`；程序安装了 panic hook，会先恢复终端与鼠标捕获再打印回溯 |
 | 日志 | 程序当前**没有**日志设施（不写日志文件）；排障依赖 `tw doctor`、Toast、`--seed` 与复现步骤 |
-| 手工检查存档 | 存档是可读 JSON：`dict.json`、`setting.json`、`practice-word.json`，字段说明见 [persistence.md](persistence.md) |
+| 手工检查存档 | 存档是可读 JSON：`dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`，字段说明见 [persistence.md](persistence.md) |
 
 ## 6. 截图与视觉检查
 

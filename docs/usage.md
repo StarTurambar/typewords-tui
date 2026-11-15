@@ -135,7 +135,7 @@ tw             # 2. 启动界面
 
 | 子命令 | 作用 | 输出要点 |
 | --- | --- | --- |
-| `tw doctor` | 打印解析到的路径与词库状态，不进入界面、不写存档 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 词数与词条文件路径；`dict.json`/`setting.json`/`practice-word.json` 的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
+| `tw doctor` | 打印解析到的路径与词库状态，不进入界面、不写存档 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 词数与词条文件路径；`dict.json`/`setting.json`/`practice-word.json`/`practice-article.json`/`flows.json` 的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
 | `tw task` | 只预览今日任务，不进入界面 | 当前词库、每日词数、学习进度、今日任务（新词 / 复习，到期数、随机补足数）与前 5 个新词、复习词；随机种子默认 42，可用 `--seed` |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 成功后打印词库名、词数与提示 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份的内容；导入后需重启程序 |

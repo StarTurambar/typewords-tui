@@ -120,3 +120,52 @@ fn practice_cache_unsupported_version_is_ignored_without_moving_file() {
     assert!(notice.contains("不受支持"));
     assert!(store.practice_exists(), "不受支持的缓存不应被移动或删除");
 }
+
+/// tw doctor 的存档清单来自 FileStore::describe_files：数据目录里写过哪份
+/// 存档，清单里就要有哪份，否则排障时看不到对应断点（例如文章跟打缓存）。
+#[test]
+fn doctor_lists_every_save_file_including_article_cache() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    store.save_dict(&BaseState::default()).unwrap();
+    store.save_settings(&SettingState::default()).unwrap();
+    store.save_practice(Some(&Default::default())).unwrap();
+    store
+        .save_practice_article(Some(&Default::default()))
+        .unwrap();
+    store.save_flows(&Default::default()).unwrap();
+
+    let described: Vec<String> = store
+        .describe_files()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        described.iter().any(|name| name == "practice-article.json"),
+        "tw doctor 必须列出文章断点缓存，实际清单: {described:?}"
+    );
+    let missing: Vec<String> = store
+        .describe_files()
+        .into_iter()
+        .filter(|(_, size)| size.is_none())
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "已写出的存档不应显示成「不存在」: {missing:?}"
+    );
+
+    let mut written: Vec<String> = std::fs::read_dir(fixture.home())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.ends_with(".json"))
+        .collect();
+    written.sort();
+    let mut described_sorted = described;
+    described_sorted.sort();
+    assert_eq!(
+        described_sorted, written,
+        "tw doctor 的存档清单与数据目录里实际写出的存档不一致"
+    );
+}

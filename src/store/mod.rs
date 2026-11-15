@@ -401,11 +401,15 @@ impl FileStore {
     }
 
     /// 供 doctor 展示：列出已知存档文件与大小。
+    ///
+    /// 顺序与模块文档一致（词典 → 设置 → 单词断点 → 文章断点 → 自建流程）。
+    /// 这里漏掉一份存档，`tw doctor` 就会在排障时看不到它对应的断点或进度。
     pub fn describe_files(&self) -> Vec<(String, Option<u64>)> {
         [
             "dict.json",
             "setting.json",
             "practice-word.json",
+            "practice-article.json",
             FLOW_FILE_NAME,
         ]
         .iter()
