@@ -8,7 +8,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::{Action, App, EditTarget, SETTING_ROWS, SettingKind};
+use crate::app::{Action, App, ConfirmAction, EditTarget, SETTING_ROWS, SettingKind};
 use crate::domain::constants::practice_mode_name;
 use crate::domain::i18n::tr;
 use crate::ui::shell::{self, Nav};
@@ -261,7 +261,7 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
             number_text(target, app.setting_number_value(target)),
             theme.fg,
         ),
-        SettingKind::Action(_) => ("按 Enter 重置".to_string(), theme.dim),
+        SettingKind::Action(action) => action_hint(action, theme),
         SettingKind::Shortcuts => ("按 Enter 打开".to_string(), theme.dim),
         SettingKind::AudioSource => (
             if app.boot.settings.tts_source == "youdao" {
@@ -271,6 +271,22 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
             },
             theme.accent_alt,
         ),
+    }
+}
+
+/// 动作行的右侧提示：文案与配色都要交代这个动作到底做什么。
+///
+/// 早期实现把所有动作统一写成「按 Enter 重置」，「清除所有数据」（不可撤销）
+/// 于是看起来和「清空当前练习进度」（只删断点缓存）一样轻。现在各自用自己的
+/// 动词，危险动作再用 `bad` 色标出来。
+///
+/// 这里刻意穷举 `ConfirmAction` 且不写 `_` 兜底：将来新增动作时编译器会
+/// 逼着补一条文案，而不是悄悄落回同一句话。
+fn action_hint(action: ConfirmAction, theme: &Theme) -> (String, Color) {
+    match action {
+        ConfirmAction::Quit => ("按 Enter 退出".to_string(), theme.dim),
+        ConfirmAction::ResetPractice => ("按 Enter 重置".to_string(), theme.dim),
+        ConfirmAction::ClearAllData => ("按 Enter 清除 · 不可撤销".to_string(), theme.bad),
     }
 }
 
