@@ -1,607 +1,314 @@
 # 存档与数据格式
 
-typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本地 JSON 文件，词库则是只读 JSON 资源。程序启动时把这些文件读进内存，运行中按固定时机原子写回。本文是这些文件的权威说明：目录与路径解析、存档信封与写入协议、三份带版本号的存档与一份无版本号的流程存档的字段、资源词库格式、`import-dict`、与上游 Web 端的数据互通，以及备份/恢复与隐私注意事项。
-
-> 适用范围：`src/store/`、`src/paths.rs`、`src/bootstrap.rs`、`src/domain/catalog.rs`、`src/cli.rs` 的 `doctor`/`import-dict`、`src/domain/types.rs` 的存档模型；对应版本：typewords-tui 0.3.1。
+本文是 typewords-tui 本地数据格式的权威说明：数据目录与资源目录如何解析，5 份存档的结构、写入协议与版本策略，各文件的字段与不变量，资源词库 / 文章格式，`import-dict`，与网页版的数据互通，以及备份 / 恢复 / 重置。读者是要排查存档问题或改动持久化代码的维护者；用户视角的操作步骤见 [使用手册](usage.md)。
 
 ## 1. 数据目录与路径解析
 
-程序区分两套目录：**数据目录（home，可写）** 存所有用户数据；**资源目录（assets，只读）** 存随程序分发的词库。两者的解析入口都是 `src/paths.rs` 的 `Paths::resolve`。
+程序区分两套目录：可写的**数据目录**（home，存全部用户数据）与只读的**资源目录**（assets，随包分发的词库）。两者都由 `src/paths.rs` 的 `Paths::resolve` 解析。
 
 ### 1.1 目录布局
 
-| 路径 | 读/写 | 内容 |
+| 路径 | 读写 | 内容 |
 | --- | --- | --- |
 | `<home>/dict.json` | 读写 | 词典状态 `BaseState`，版本 4 |
 | `<home>/setting.json` | 读写 | 设置 `SettingState`，版本 23 |
-| `<home>/practice-word.json` | 读写/删除 | 断点练习缓存 `PracticeCacheCompact`，版本 2 |
-| `<home>/practice-article.json` | 读写/删除 | 文章跟打断点缓存 `ArticleCacheEnvelope`，版本 1 |
-| `<home>/flows.json` | 读写 | 自建练习流程 `FlowStore`（无版本号，见 [领域逻辑 · 流程](domain.md)） |
+| `<home>/practice-word.json` | 读写、可删 | 单词练习断点 `PracticeCacheCompact`，版本 2 |
+| `<home>/practice-article.json` | 读写、可删 | 文章跟打断点 `ArticleCacheEnvelope`，版本 1 |
+| `<home>/flows.json` | 读写 | 自建练习流程 `FlowStore`，无版本号 |
 | `<home>/themes/*.json` | 启动时只读 | 自定义主题（格式见 [主题系统](themes.md)） |
-| `<home>/dicts/<language>/word/<url>` | 导入时写、运行时读 | `import-dict` 导入的用户词库 |
-| `<home>/list/word.json` | 导入时写、启动时读 | 用户词库目录，与内置目录合并 |
-| `<home>/.<文件名>.tw-<pid>-<n>.tmp` | 临时 | 原子写的中间文件，每次写入独占一个名字；正常结束后不存在，崩溃可能残留，可安全删除 |
-| `<home>/.tw.lock` | 读写 | 数据目录独占锁文件（`src/fs.rs` 的 `LOCK_FILE_NAME`），内容是持锁进程 PID，常驻不删 |
-| `<home>/<文件名>.corrupt-<时间戳>.json` | 隔离产物 | 解析失败的坏存档备份 |
-| `<assets>/list/word.json` | 只读 | 内置词库目录 `DictResource[]` |
-| `<assets>/list/article.json` | 只读 | 内置文章书目 `ArticleBook[]`（进入文章页时读取） |
-| `<assets>/dicts/en/word/*.json` | 只读 | 内置词条数据 `Word[]` |
-| `<assets>/dicts/en/article/*.json` | 只读 | 内置文章数据 `Article[]`（文章背诵页按需读取，见 6） |
+| `<home>/list/word.json` | 导入 / 新建词典时写，启动时读 | 用户词库目录，与内置目录合并 |
+| `<home>/dicts/<language>/word/<url>` | 导入 / 编辑词条时写，运行时读 | 用户词库词条 |
+| `<home>/.tw.lock` | 写入口 | 数据目录锁（`src/fs.rs` 的 `LOCK_FILE_NAME`），内容是持锁 PID，常驻不删 |
+| `<home>/.<文件名>.tw-<pid>-<n>.tmp` | 临时 | 原子写中间文件；正常结束后不存在，崩溃可能残留，可安全删除 |
+| `<home>/<文件名>.corrupt-<时间戳>.json`、`<home>/<文件名>.bak-<时间戳>.json` | 隔离 / 导入产物 | 解析失败被移走的坏存档；`tw import-web` 覆盖前留下的旧内容 |
+| `<assets>/list/*.json`、`<assets>/dicts/en/{word,article}/*.json` | 只读 | 内置词库目录与词条、文章书目与正文 |
 
-`<home>` 下的目录不会全部预先创建：`dicts/` 与 `list/` 由 `import-dict` 按需创建，`themes/` 需要用户自己创建。程序不写日志文件（没有日志设施），排障依赖 `tw doctor`、Toast 与复现步骤。
+`<home>` 下的子目录不预建：`dicts/`、`list/` 在导入或新建词典时按需创建，`themes/` 由用户自建。程序不写日志文件，排障靠 `tw doctor`、Toast 与复现步骤。
 
-### 1.2 数据目录（home）的解析顺序
+### 1.2 数据目录解析顺序
 
-1. `--home DIR` 命令行参数；
+1. `--home DIR`；
 2. 环境变量 `TYPEWORDS_HOME`（空值视为未设置）；
-3. `dirs::data_local_dir()` 下的 `typewords-tui` 子目录——Windows 通常为 `%LOCALAPPDATA%\typewords-tui`，Linux 为 `$XDG_DATA_HOME/typewords-tui`（缺省 `~/.local/share/typewords-tui`），macOS 为 `~/Library/Application Support/typewords-tui`；
-4. 以上都不可用时启动失败：`无法确定数据目录，请使用 --home 指定`。
+3. `dirs::data_local_dir()/typewords-tui`——Windows 通常 `%LOCALAPPDATA%\typewords-tui`，Linux 为 `$XDG_DATA_HOME/typewords-tui`（缺省 `~/.local/share/…`），macOS 为 `~/Library/Application Support/typewords-tui`；
+4. 都不可用则启动失败：`无法确定数据目录，请使用 --home 指定`。
 
-数据目录本身用 `create_dir_all` 创建：只读入口经 `store::FileStore::new`，写入口经 `Paths::lock_home` 的 `ensure_home`，TUI 启动与各子命令都会触发；创建失败会报 `创建数据目录失败 <路径>: <原因>`。注意只读入口（`tw doctor` / `tw export-web`）只创建目录、不写任何文件；`tw task` 与其它写入口此外还会创建 `.tw.lock`。
+目录由 `create_dir_all` 创建（只读入口经 `store::FileStore` 的构造，写入口经 `Paths::lock_home` 的 `ensure_home`），失败时启动报错并以「创建数据目录失败」开头、带上路径与原因。只读入口只创建目录，不写文件、不创建锁文件。
 
-**数据目录锁**：写入口在启动时对 `<home>/.tw.lock` 取独占锁（`src/paths.rs` 的 `Paths::lock_home` → `src/fs.rs` 的 `try_lock_dir`，返回 `DirLock` 守卫）。取锁的入口是 TUI 本体与 `tw task`、`tw import-dict`、`tw import-web`；`tw doctor` 与 `tw export-web` 只读，不取锁。抢锁失败会在进入 TUI 之前报错退出、进程返回非 0（终端不会被弄坏）：
+### 1.3 数据目录锁：写入口与只读入口
 
-```text
-另一个实例正在使用该数据目录（<home>）：请先退出那个 tw 进程，或用 --home 换一个数据目录
-```
+写入口启动时对 `<home>/.tw.lock` 取独占锁：`Paths::lock_home` → `src/fs.rs` 的 `try_lock_dir` 返回 `DirLock` 守卫，`lib::run` 让守卫活到进程退出。取锁的入口是 TUI、`tw task`、`tw import-dict`、`tw import-web`；`tw doctor` 与 `tw export-web` 在 `lib::is_read_only` 白名单里，不取锁，可在别的实例运行时排障与导出。
 
-因此同一个 `<home>` 同一时刻只允许一个写入口。锁随进程正常退出或崩溃自动释放（句柄关闭即释放），锁文件本身**不删除**——删掉一个正在被持锁的文件会制造「两把锁」竞态；文件内容只记录持锁进程的 PID，供人工排障参考，判断是否被占用永远以操作系统锁为准。`.tw.lock` 在首次以写入口启动时创建；`tw doctor` / `tw export-web` 不创建它。
+- 用非阻塞 `try_lock`：抢不到锁立刻报错退出（终端不会被弄坏），退出码非 0，文案为 `另一个实例正在使用该数据目录（<home>）：请先退出那个 tw 进程，或用 --home 换一个数据目录`。
+- 锁随进程退出或崩溃自动释放（句柄关闭即释放），锁文件**不删除**——删一个正被持锁的文件会制造「两把锁」竞态。文件内容只是 PID，判断是否被占用永远以操作系统锁为准；跨进程用例在 `tests/data_dir_lock.rs`。
 
-### 1.3 资源目录（assets）的解析顺序
+### 1.4 资源目录解析顺序
 
-`locate_assets` 依次尝试，返回**第一个包含 `list/word.json` 的目录**：
+`locate_assets` 取**第一个包含 `list/word.json` 的目录**（`is_assets_root`），依次尝试：
 
-1. `--assets DIR`（目录不合格时不会报错，而是继续尝试后续候选）；
-2. 环境变量 `TYPEWORDS_ASSETS`；
-3. 可执行文件同级的 `assets/`；
-4. 当前目录及其最多 3 级祖先下的 `assets/`（每个祖先先试 `assets/` 再试 `public/`，用于开发期或从上游仓库内运行）；
-5. 全部失败时启动失败：`找不到词库资源目录（需要包含 list/word.json）。可用 --assets 或环境变量 TYPEWORDS_ASSETS 指定；发布包可把 assets/ 放在可执行文件同级`。
+1. `--assets DIR` 与环境变量 `TYPEWORDS_ASSETS`（不合格不报错，继续尝试后续候选）；
+2. 可执行文件同级的 `assets/`；
+3. 当前目录及最多 3 级祖先的 `assets/`、`public/`（每个祖先先试 `assets/` 再试 `public/`，供开发期或从上游仓库内运行）；
+4. 全部失败则启动失败：`找不到词库资源目录（需要包含 list/word.json）…`。
 
 ## 2. 存档信封与写入协议
 
-### 2.1 信封
+### 2.1 信封与 5 份存档
 
-三份存档共用 `src/store/mod.rs` 的 `SaveEnvelope<T>`，形式为 `{ "val": <状态>, "version": <版本>, "updated_at": "<RFC 3339>" }`：
+`src/store/mod.rs` 的 `SaveEnvelope<T>` 形式为 `{ "val": <状态>, "version": <u32>, "updated_at": "<RFC 3339>"? }`：`val` 是状态对象（两份断点缓存允许 `null`，等价「没有缓存」），`version` 是 schema 版本（读取时必须存在），`updated_at` 可选、读取端只保存不使用（`tw export-web` 拿它当文章统计的 `startDate`）。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `val` | 由文件决定 | 真正的状态对象；`practice-word.json` 允许 `null`（等价于没有缓存） |
-| `version` | `u32` | 存档 schema 版本，读取时强制要求存在 |
-| `updated_at` | `Option<String>` | 写入时的 UTC RFC 3339 时间；读取端只保存不使用，TUI 没有多端同步与冲突检测 |
-
-写入使用 `serde_json::to_string` 的**紧凑格式**（单行、无缩进）；手写或格式化编辑不影响读取。`version` 的常量在 `src/domain/constants.rs`：`DICT_STATE_VERSION = 4`、`SETTING_VERSION = 23`、`PRACTICE_CACHE_VERSION = 2`，与上游 Web 端保持一致，便于手工迁移（见第 8 节）。
-
-### 2.2 原子写（`fs::write_atomic`）
-
-1. 确保目标文件的父目录存在（`create_dir_all`）；
-2. 在同目录创建**本次写入独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（例如 `.dict.json.tw-8124-7.tmp`）：`<pid>` 是进程号，`<n>` 是进程内单调递增的计数、每次写入取新值；用 `create_new` 独占创建，撞名（历史残留或 PID 复用）就换下一个序号重试，最多 16 次；
-3. `write_all` 写入内容并 `sync_all`（fsync；失败被忽略，不阻断写入）；
-4. `rename` 覆盖正式文件。临时文件与目标同目录，保证 rename 在同一文件系统内完成；
-5. 写入或 `rename` 失败时删除刚建的临时文件（尽力而为），正式文件保持原内容。
-
-因此进程在写入中途被杀，最坏情况是留下一个过期的 `.tmp` 临时文件——它不属于任何后续写入，不会被复用或删除，可以直接删掉；正式存档要么是旧内容、要么是新内容，不会出现半截 JSON。临时名唯一化后，同一进程内的并发写（存档与用户词库目录同时落盘）也不会再共用同一个中间文件；跨进程的互斥由数据目录锁负责（见 1.2），不再依赖「不要同时运行两个实例」的口头约定。
-
-原子性只覆盖**单份文件**：任何时刻读某个存档，拿到的要么是上一份完整内容、要么是这一份完整内容。`tw doctor` / `tw export-web` 不取锁，所以在另一个实例运行时读到的每个文件各自都是完整的，但**多份文件之间可能来自不同时刻**（例如 `dict.json` 还是几分钟前的、`setting.json` 是刚保存的）；需要一致快照时先退出 TUI，再跑这两个命令。
-
-### 2.3 读取、空文件与 `LoadStatus`
-
-`FileStore::read_envelope` 的处理规则：文件不存在 → `Ok(None)`；文件只有空白字符 → 也按 `Ok(None)` 处理（视为缺失，不隔离、不报错）；读取或解析失败 → 进入隔离流程；成功则返回 `(val, version, updated_at)`。
-
-`load_typed` 把结果归类为 `LoadStatus`：
-
-| 状态 | 触发条件 | 内存值 | 启动提示（`Loaded::notice`） |
+| 文件 | 版本 | 版本常量（`src/domain/constants.rs`） | 对应网页版 key |
 | --- | --- | --- | --- |
-| `Loaded` | 解析成功且 `version <= 期望值` | 文件内容 | 无 |
-| `Missing` | 文件不存在或为空 | 类型的 `Default` | 无 |
-| `Corrupt(reason)` | 读取/解析失败，文件已重命名隔离 | 类型的 `Default` | `存档已损坏，已隔离并恢复默认值：<reason>` |
-| `VersionTooNew { found, expected }` | `version >` 期望值 | 类型的 `Default`，原文件保留 | `存档版本过高（<found> > <expected>），本次不会覆盖，请升级后使用` |
-| `UnsupportedVersion { found, expected }` | 版本不受支持（练习缓存 `version != 2`） | 类型的 `Default`（缓存为 `None`），原文件保留 | `存档版本不受支持（<found> != <expected>），已忽略；下次保存会覆盖` |
+| `dict.json` | 4 | `DICT_STATE_VERSION` | `typing-word-dict` |
+| `setting.json` | 23 | `SETTING_VERSION` | `typing-word-setting` |
+| `practice-word.json` | 2 | `PRACTICE_CACHE_VERSION` | `PracticeSaveWord` |
+| `practice-article.json` | 1 | `PRACTICE_ARTICLE_CACHE_VERSION` | `PracticeSaveArticle` |
+| `flows.json` | 无 | — | `localStorage['PracticeFlowV2']` |
 
-`bootstrap::load` 把 dict/setting 的提示收集进 `notices`，由 `App::bootstrap` 转成 Warning Toast；练习缓存的提示在恢复流程中弹出。Toast 只显示约 3.2 秒（最多同时保留 4 条），长期排障请看第 9 节的 `tw doctor`。
+除 `flows.json` 是裸结构外，其余 4 份都套信封。写入用 `serde_json::to_string` 的紧凑单行格式（`flows.json` 例外，用 `to_string_pretty`）；手写或格式化编辑不影响读取。读取时机：`dict.json` / `setting.json` / `flows.json` 在启动装载时各读一次；两份断点缓存按需读（首页 `Enter` 尝试恢复、进文章页刷新标记）。
+
+### 2.2 原子写
+
+`src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
+
+因此进程中途被杀不会留下半截 JSON：正式文件要么旧内容、要么新内容。残留的 `.tmp` 不属于任何后续写入，不会被复用或删除，可直接清理；临时名唯一化后，同进程内并发写（存档与词库目录同时落盘）也不会互相截断。原子性只覆盖**单份文件**：`tw doctor` / `tw export-web` 不取锁，读到的每份文件各自完整，但多份文件可能来自不同时刻，需要一致快照就先退出所有实例。
+
+### 2.3 读取状态 `LoadStatus`
+
+`FileStore::read_envelope` 的约定：文件不存在或只有空白 → 视为缺失（`Ok(None)`，不隔离、不报错）；读取或解析失败 → 隔离；成功返回 `(val, version, updated_at)`。`load_typed` 把结果归类为：
+
+| 状态 | 触发条件 | 内存值 | 提示（`Loaded::notice`） |
+| --- | --- | --- | --- |
+| `Loaded` / `Missing` | 解析成功且 `version <=` 期望值；或文件不存在、为空 | 文件内容 / 类型的 `Default` | 无 |
+| `Corrupt(reason)` | 读取 / 解析失败，文件已隔离 | 默认值（缓存为 `None`） | `存档已损坏，已隔离并恢复默认值：<reason>` |
+| `VersionTooNew{found,expected}` | `version >` 期望值 | 默认值，原文件保留 | `存档版本过高（…），本次不会覆盖，请升级后使用` |
+| `UnsupportedVersion{found,expected}` | 缓存版本不符（单词缓存 `!= 2`、文章缓存 `!= 1`） | `None`，原文件保留 | `存档版本不受支持（…），已忽略；下次保存会覆盖` |
+
+`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；单词缓存的提示在恢复流程里弹（`restore_practice_from_cache`），文章缓存的在 `refresh_article_resume`（启动与进文章页各一次）；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
-解析失败时，`FileStore::quarantine` 把坏文件**重命名**为同目录下的 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（时间戳取本地时间），然后在 `Corrupt` 的 `reason` 中记录 `<错误>（已移动到 <隔离路径>）`。原文件名随即恢复为缺失状态，程序用默认值继续运行，下次保存会生成新的存档。隔离文件不会被自动清理，确认无用后可手工删除。
-
-`practice-word.json` 的解析失败同样会隔离；而**版本不支持**使用独立的 `UnsupportedVersion` 状态：不移动文件、提示「版本不受支持，已忽略」，避免把「不支持」误报成「损坏、已隔离」（见 5.4）。
+解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。
 
 ### 2.5 版本策略
 
-TUI 没有迁移框架：**低于等于期望版本**的存档直接按当前类型反序列化，缺失字段由各结构体的 `#[serde(default)]` 补默认值；**高于期望版本**才触发 `VersionTooNew`。各文件的具体后果：
+没有迁移框架：**低于等于**期望版本直接按当前类型反序列化，缺失字段由各结构体的 `#[serde(default)]` 补默认值；**高于**期望版本才算 `VersionTooNew`。`flows.json` 没有版本概念，解析成功即接受。
 
-| 文件 | 期望版本 | `version < 期望` | `version == 期望` | `version > 期望` |
+| 文件 | 期望 | `version <` 期望 | `==` | `>` 期望 |
 | --- | --- | --- | --- | --- |
-| `dict.json` | 4 | 接受，缺字段补默认 | 接受 | 默认值 + 只读保护（`readonly_dict`） |
-| `setting.json` | 23 | 接受，缺字段补默认 | 接受 | 默认值 + 只读保护（`readonly_settings`） |
-| `practice-word.json` | 2 | 视为不支持（`UnsupportedVersion`） | 接受 | 视为不支持（`UnsupportedVersion`） |
+| `dict.json` | 4 | 接受，缺字段补默认 | 接受 | 默认值 + 只读（`Bootstrapped::readonly_dict`） |
+| `setting.json` | 23 | 接受，缺字段补默认 | 接受 | 默认值 + 只读（`readonly_settings`） |
+| `practice-word.json` | 2 | 不支持 | 接受 | 不支持 |
+| `practice-article.json` | 1 | 不支持 | 接受 | 不支持 |
 
-两个容易踩坑的后果：
+只读的后果：`readonly_dict` 为真时 `App::save_dict_now` 直接返回，本次运行的词库进度、FSRS 卡片与统计都不落盘（原 `dict.json` 完好）；`readonly_settings` 同理拦住 `save_settings_now`，设置修改与 `--mode` / `--theme` 覆盖都不写回。两种只读都**不影响**断点缓存的保存与删除。降级运行同样受保护，升级前仍建议备份数据目录。
 
-- **dict 版本过高**：`bootstrap::load` 置 `readonly_dict = true`，`App::save_dict_now` 直接返回——本次运行的词库进度、FSRS 卡片、统计都不会落盘（关闭程序即丢），但原 `dict.json` 完好。设置与练习缓存仍会按各自规则保存。此时升级程序即可找回数据。
-- **setting 版本过高**：`readonly_settings = true`，`App::save_settings_now` 直接返回——本次运行修改的设置、`--mode`/`--theme` 覆盖都不会写回，原 `setting.json` 完好；提示「本次不会覆盖」对 dict 与 setting 均成立。练习缓存仍会正常保存。降级运行同样受保护，但升级前仍建议备份数据目录。
+### 2.6 落盘前的 `shake_common_dict`
 
-### 2.6 `shake_common_dict`
+`FileStore::save_dict` 先克隆状态并调 `BaseState::shake_common_dict`（`src/domain/types.rs`）：`word.bookList` 中 `custom == false && system == false` 的词典清空 `words`，`article.bookList` 中 `system == false` 的词典清空 `articles`。
 
-`FileStore::save_dict` 在序列化前先克隆状态并调用 `BaseState::shake_common_dict`（定义在 `src/domain/types.rs`）：
-
-```text
-word.bookList 中 custom == false 且 system == false 的词典        → words 清空
-article.bookList 中 system == false 的词典                        → articles 清空
-```
-
-效果是 `dict.json` 只保存「官方资源词库的进度/统计元数据 + 系统词典词条 + 自定义词典词条」，官方词表在下次启动时按 `url` 从资源目录重新加载，避免把约 4.5 MB 词表写进存档。清空发生在**克隆体**上，内存里的当前词表不受影响。给上游的对应实现是 `shakeCommonDict`（`app/core/utils/index.ts`），规则基本一致。
-
-`custom` 标记由目录项（`home/list/word.json` 里的 `"custom": true`）经 `DictResource::to_dict` 带进 `Dict`；标记丢失会让自建词典的词表在下一次保存时被清空，因此 `create_custom_dict` 与 `BaseState::set_study_dict` 都要保证它跟着词典走。
+结果是 `dict.json` 只存官方词库的进度 / 统计元数据 + 系统词典与自定义词典的词条；约 4.5 MB 的官方词表按 `url` 从资源目录重新加载。清空发生在克隆体上，内存词表不受影响。`custom` 标记由目录项（`"custom": true`）经 `DictResource::to_dict` 带进 `Dict`，标记丢了自建词典的词表会在下次保存时被清空。
 
 ## 3. `dict.json`（`BaseState`，版本 4）
 
-### 3.1 示例
-
-下面省略了大部分词条与卡片，只保留结构（数值为示意）：
-
-```json
-{
-  "val": {
-    "simpleWords": ["a", "an", "the"], "load": false,
-    "word": {
-      "bookList": [
-        { "id": "wordCollect", "enName": "wordCollect", "name": "收藏", "system": true, "words": [] },
-        { "id": "wordWrong", "system": true }, { "id": "wordKnown", "system": true },
-        { "id": "1", "enName": "cet4", "name": "CET-4", "url": "CET4_T.json", "length": 2607,
-          "language": "en", "translateLanguage": "zh_CN", "lastLearnIndex": 40,
-          "perDayStudyNumber": 20, "words": [], "custom": false, "system": false,
-          "statistics": [{ "startDate": 1792300000000, "spend": 125000, "total": 20,
-                           "new": 20, "review": 0, "wrong": 1, "sessionRole": "single" }] }
-      ],
-      "studyIndex": 3
-    },
-    "article": { "bookList": [{ "id": "articleCollect", "system": true }], "studyIndex": -1 },
-    "dictListVersion": 1,
-    "fsrsData": {
-      "cancel": { "due": "2026-10-20T08:00:00Z", "stability": 1.69, "difficulty": 4.31,
-                  "elapsed_days": 0, "scheduled_days": 0, "learning_steps": 0,
-                  "reps": 1, "lapses": 0, "state": 1, "last_review": "2026-10-18T13:30:00Z" }
-    },
-    "noteData": {}, "_ignoreWatch": false
-  },
-  "version": 4, "updated_at": "2026-10-18T13:34:19.123456789+00:00"
-}
-```
-
-`studyIndex` 是 `word.bookList` 的下标，示例中 3 表示第 4 本（3 本系统词典之后的第一本学习词库）。默认存档里三本系统词典在 0 / 1 / 2，因此 `0`~`2` 表示当前学习词典就是收藏 / 错词 / 已掌握；Web 存档的 `bookList` 顺序不保证相同，代码按 `system` 标记遍历、不假设下标。没有选中任何词典时为 `-1`（新装与「清除所有数据」后的默认值）。词库页 `Enter` 与 `tw --dict`（内置词典传 `wordCollect` / `wordWrong` / `wordKnown`，或资源词库的 id）都写这个字段，重启后沿用；选中内置词典后即使词表为空，启动也不会自动改指别的词典。
-
-### 3.2 顶层字段
+### 3.1 顶层字段
 
 | JSON 字段 | Rust 字段 | 类型 | 说明 |
 | --- | --- | --- | --- |
-| `simpleWords` | `simple_words` | `string[]` | 「简单词」忽略列表，默认 42 个（`SIMPLE_WORDS`），与 Web 默认值相同 |
-| `load` | `load` | `bool` | 上游遗留的装载标记，TUI 不使用 |
+| `simpleWords` | `simple_words` | `string[]` | 「简单词」忽略列表，默认 42 个（`SIMPLE_WORDS`） |
 | `word` | `word` | `BookGroup` | 单词词典组：`bookList` + `studyIndex` |
-| `article` | `article` | `BookGroup` | 文章词典组；TUI 只保留元数据（跟打用的正文来自资源目录，见 6），只有 1 本系统「收藏」 |
-| `dictListVersion` | `dict_list_version` | `u32` | 上游词库目录版本，TUI 默认 1、不参与逻辑 |
-| `fsrsData` | `fsrs_data` | `map` | 单词 → FSRS 卡片，见 3.4 |
-| `noteData` | `note_data` | `map` | 单词 → 笔记字符串；TUI 只读写不展示 |
-| `_ignoreWatch` | `ignore_watch` | `bool` | 上游「忽略监听」标记，TUI 不使用 |
+| `article` | `article` | `BookGroup` | 文章词典组；TUI 只存元数据，正文来自资源目录 |
+| `fsrsData` | `fsrs_data` | `map` | 单词 → FSRS 卡片（3.3） |
+| `noteData` | `note_data` | `map` | 单词 → 笔记字符串；TUI 读写但不展示 |
+| `dictListVersion` | `dict_list_version` | `u32` | 上游词库目录版本，默认 1、不参与逻辑 |
+| `load` / `_ignoreWatch` | `load` / `ignore_watch` | `bool` | 上游遗留标记，TUI 不使用 |
 
-### 3.3 词典（`Dict`）字段
+`studyIndex` 是 `word.bookList` 的下标，`-1` 表示没有选中词典（新装默认），由词库页 `Enter` 与 `tw --dict` 写入。默认存档的三本系统词典（收藏 / 错词 / 已掌握）在 0 / 1 / 2，但**不要假设下标**：Web 存档的 `bookList` 顺序不保证相同，代码按 `system` 标记遍历（`BaseState::system_dict_index`）。词表为空的内置词典也是合法状态，启动时不会自动改指别的词典（`Bootstrapped::ensure_study_dict`）。
+
+### 3.2 词典 `Dict` 字段
 
 | JSON 字段 | 说明 |
 | --- | --- |
-| `id` | 词典身份；资源文件里的数字 id 会在读取时转成字符串（如 `1`） |
-| `enName` | 上游路由名；读取时也接受 `en_name` 别名，两者都可作为 `--dict` 的取值 |
-| `name` / `description` / `url` / `category` / `tags` / `language` / `translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
-| `length` | 词数缓存；有词表时一律等于 `words.len()`（`Dict::effective_length`）。`select_dict` 加载词表时会把目录登记值校准成实际词条数，`BaseState::set_study_dict` 写回时也会校正非空词表的 `length`，随后 `Dict::normalize_progress` 把 `length` 校准成实际词数（见 [domain.md](domain.md) 12.5） |
-| `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值，随后按实际词数校正：`lastLearnIndex` 已到/越过实际词数时夹回并置 `complete = true`，同时丢弃旧的单词练习断点（见 [domain.md](domain.md) 12.5） |
-| `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
-| `articles` | 文章数组；TUI 原样透传、不读取 |
-| `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，以及可选的 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole`（`single/start/middle/end`，跨天练习用） |
-| `custom` / `system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏（`wordCollect`）、错词（`wordWrong`）、已掌握（`wordKnown`）与文章收藏（`articleCollect`）。三本系统词典的词条就存在这里（`words`），`shake_common_dict` 不会清空它们 |
-| `sourceId` | 官方资源副本的原始 id；TUI 默认为空字符串 |
-| `cover` | 可选封面色，无实际渲染 |
-| 其它未知字段 | 通过 `Dict` 的 `#[serde(flatten)] extra` 原样保留 |
+| `id` | 词典身份；资源里的数字 id 读取时转成字符串 |
+| `enName` | 上游路由名，读取时也接受 `en_name` 别名；`id` 与 `enName` 都可作 `--dict` 取值 |
+| `name`/`description`/`url`/`category`/`tags`/`language`/`translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
+| `length` | 词数缓存；有词表时一律等于 `words.len()`（`Dict::effective_length`）。装载时 `Dict::normalize_progress` 把 `length` 校准成实际词数，并把越过末尾的 `lastLearnIndex` 夹回、置 `complete = true` |
+| `lastLearnIndex`/`perDayStudyNumber`/`complete` | 学习进度、每日词数（即每日目标）、是否已完成 |
+| `words`（词条数组，8.2）、`articles`（文章数组，TUI 原样透传、不读取） | 词条在官方资源词库保存时被清空（2.6） |
+| `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，可选 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole` |
+| `custom`/`system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏 `wordCollect`、错词 `wordWrong`、已掌握 `wordKnown` 与文章收藏 `articleCollect` |
+| `sourceId`、`cover` 与其它未知字段 | 资源副本原始 id（默认空串）、可选封面色（不渲染）；未知字段经 `#[serde(flatten)] extra` 原样保留 |
 
-字段命名规则：所有结构体默认用 `rename_all = "camelCase"`（`translateLanguage`、`lastLearnIndex` 等）；例外是 `_ignoreWatch` 与统计里的 `new` 显式改名，以及 `Card` 保持 ts-fsrs 的 snake_case（见 3.4）。**`Word` 没有 `extra` 透传字段**：资源里的 `inflections`、`e2e`、`examsSrc`、`langType` 等未建模字段读取时被忽略，写回 `dict.json` 的系统词典词条时也不会保留。
+命名规则：结构体默认 `rename_all = "camelCase"`；例外是 `_ignoreWatch`、统计的 `new`（显式 rename）与 `Card`（保持 ts-fsrs 的 snake_case）。**`Word` 没有 `extra` 透传**：资源里的 `inflections`、`e2e`、`examsSrc`、`langType` 等未建模字段读取时被忽略，写回系统词典词条时也不保留。
 
-### 3.4 FSRS 卡片（`fsrsData`）
+### 3.3 FSRS 卡片（`fsrsData`）
 
-`Card` 对应 ts-fsrs 的序列化格式（`src/domain/types.rs` 的 `Card`）：
+`src/domain/types.rs` 的 `Card` 与 ts-fsrs 序列化格式一致：`due`（RFC 3339 到期时间）、`stability` / `difficulty`（记忆稳定度 / 难度）、`elapsed_days` / `scheduled_days` / `learning_steps`（距上次复习天数 / 计划间隔 / 学习步进）、`reps` / `lapses`（复习 / 遗忘次数）、`state`（0 新卡、1 学习中、2 复习中、3 重学中）、`last_review`（可选）。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `due` | RFC 3339 时间 | 下次到期时间（UTC） |
-| `stability` / `difficulty` | `f64` | FSRS 记忆稳定度 / 难度 |
-| `elapsed_days` / `scheduled_days` / `learning_steps` | `f64` | 距上次复习天数、计划间隔、学习步进 |
-| `reps` / `lapses` | `u32` | 复习次数 / 遗忘次数 |
-| `state` | `u8` | 0 新卡、1 学习中、2 复习中、3 重学中 |
-| `last_review` | 可选 RFC 3339 时间 | 上次复习时间 |
+评级不落在这里（`Rating = u8`：Again 1、Hard 2、Good 3、Easy 4）：先写进练习缓存的 `ratingMap`，结算时由 `PracticeSession::settle` 按 `src/domain/fsrs.rs`（自实现 FSRS-6）算出新卡片再写入 `fsrsData`。
 
-评级常量与 Web 一致（`Rating = u8`）：Again 1、Hard 2、Good 3、Easy 4；评级不落在这张表里，而是先写进练习缓存的 `ratingMap`，结算时由 `PracticeSession::settle` 按 `src/domain/fsrs.rs`（自实现的 FSRS-6）计算新卡片后写入 `fsrsData`。
+### 3.4 写入时机
 
-### 3.5 写入时机
-
-`dict.json` 只在以下时机写盘（`App::save_dict_now`，`readonly_dict` 时跳过）：
-
-| 触发 | 说明 |
-| --- | --- |
-| 结算 `finish_session` | `PracticeSession::settle` 写入 `statistics` 与 `fsrsData` 后立即保存 |
-| 离开练习 | `Ctrl+C`（无结算时）、结算后「回主页」不写（已保存过） |
-| `Ctrl+Enter`（重学本组） | 重建会话后立即保存练习缓存（新会话） |
-| 词库页 `Enter` 切换词库（含内置词典）、词库页 `w` 打开词条页、主页/词库页 `+`/`-`、设置页「复习 → 每日词数」（`daily_words`，`PerDay`） | 修改当前词典元数据 / `studyIndex` 后立即保存（写 `dict.json`，不是 `setting.json`） |
-| 词条页编辑 / 删除 / 排序（`App::persist_words`） | 先重写词条文件、同步用户目录里的 `length`，再保存 `dict.json`（词数、笔记与当前词典元数据） |
-| 确认退出 / 事件循环结束 | `save_all` 保存；首次运行即使没进练习，也会在退出时生成 `dict.json` |
-
-练习过程中的收藏/错词/已掌握改动只改内存，靠上述时机落盘；中途崩溃最多丢掉这次会话的未保存改动（练习缓存另算）。FSRS 卡片与统计**只在结算时产生**，练习到一半退出不会写入评级。
-
-### 3.6 只读保护（`readonly_dict` / `readonly_settings`）
-
-`Bootstrapped::readonly_dict` 仅在 `dict.json` 命中 `VersionTooNew` 时为真：内存从 `BaseState::default()` 开始，所有 `save_dict_now` 静默跳过（不弹错误提示），保证旧版本程序绝不覆盖新版存档。`readonly_settings` 同理对应 `setting.json`，为真时 `save_settings_now` 直接返回，本次运行的设置修改与 `--mode`/`--theme` 覆盖都不会写回。二者都不影响练习缓存的保存/删除。
+`dict.json` 只在 `App::save_dict_now` 里写（`readonly_dict` 时跳过）：结算 `finish_session` / `finish_article_practice`（统计与卡片已在 `settle` 里写好）；切词库、打开词条页、改每日词数、保存笔记、词条增删排序（先重写词条文件并同步用户目录的 `length`）；确认退出与事件循环结束时的 `save_all`。首次运行即使没进练习，退出时也会生成 `dict.json`。练习中的收藏 / 错词 / 已掌握改动只改内存，靠上述时机落盘；FSRS 卡片与统计只在本轮结算时产生。
 
 ## 4. `setting.json`（`SettingState`，版本 23）
 
-### 4.1 结构
+`val` 是上游 `SettingState` 的子集：43 个具名字段 + `#[serde(flatten)] extra`，其余上游顶层字段（`fontSize`、`showToolbar`、`webAppVersion`、`ttsVoiceMap` 等）原样透传。字段按用途分组：
 
-`setting.json` 的 `val` 是上游 `SettingState` 的子集；TUI 只建模它需要读写的字段，其余字段通过 `#[serde(flatten)] extra` 原样保留。示例（截断）：
+| 分组 | JSON 键 |
+| --- | --- |
+| 练习与复习 | `wordPracticeMode`、`wordPracticeType`、`wordReviewRatio`、`autoAddRandomReviewWhenNoDue`、`repeatCount`、`repeatCustomCount` |
+| 键入 | `ignoreCase`、`inputWrongClear`、`autoNextWord`、`waitTimeForChangeWord`、`spaceCooldownTime` |
+| 显示与主题 | `theme`、`ignoreSimpleWord`、`showWordQuestion`、`showEtymologyAndRelWords`、`showNearWord`、`showUsageTips`、`alwaysShowNote`、`dictation`、`translate`、`ignoreSymbol` |
+| 音频 | `soundType`、`ttsSource`、`keyboardSoundFile`，开关 `wordSound`/`keyboardSound`/`effectSound`/`articleSound` 与各自的 `…Volume`（`wordSound`/`articleSound` 另有 `…Speed`），以及 `sentenceSoundVolume`/`sentenceSoundSpeed` |
+| FSRS | `fsrsEasyLimit`、`fsrsGoodLimit`、`fsrsHardLimit`、`fsrsParameters` |
+| 快捷键与 TUI 标记 | `shortcutKeyMap`（动作名 → 键位，非法条目读取时回退默认绑定）、`tuiBigWord`（练习页 2 倍大字）、`_ignoreWatch`（不参与逻辑） |
 
-```json
-{
-  "val": {
-    "soundType": "us", "wordReviewRatio": 3, "theme": "auto", "tuiBigWord": true,
-    "fsrsParameters": { "request_retention": 0.9, "maximum_interval": 36500, "w": ["...21 个"] },
-    "shortcutKeyMap": { "nextWord": "Control+ArrowRight" },
-    "_ignoreWatch": false
-  },
-  "version": 23, "updated_at": "2026-10-18T13:34:19+00:00"
-}
-```
+每个设置项的含义、默认值与取值范围见 [设置项参考](settings.md)，这里只记存档层面：
 
-### 4.2 已建模字段
-
-下表覆盖 `SettingState` 的全部字段（键名为 JSON 键，默认值为 `SettingState::default`）。设置项的业务含义与取值范围见 [设置项参考](settings.md)，这里只说明存档层面。
-
-| JSON 键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `soundType` | `"us"` | 音标取英式/美式 |
-| `wordReviewRatio` | `3` | 复习比例 |
-| `autoAddRandomReviewWhenNoDue` | `false` | 无到期复习时随机补足 |
-| `wordPracticeMode` | `0` | 默认练习模式（枚举整型，见 `WordPracticeMode`） |
-| `wordPracticeType` | `0` | 默认练习类型（枚举整型，`WordPracticeType`） |
-| `ignoreCase` / `inputWrongClear` / `autoNextWord` | `true` / `false` / `false` | 键入行为 |
-| `repeatCount` / `repeatCustomCount` | `1` / `null` | 重复次数；`repeatCount == 100` 时取自定义值（设置页「重复次数(自定义)」行可编辑） |
-| `waitTimeForChangeWord` / `spaceCooldownTime` | `300` / `0` | 毫秒；读取时分别夹在 0–10000 |
-| `ignoreSimpleWord` / `showWordQuestion` / `showEtymologyAndRelWords` | `false` / `true` / `false` | 显示与过滤 |
-| `showNearWord` / `showUsageTips` / `alwaysShowNote` | `true` / `true` / `true` | 显示项 |
-| `theme` | `"auto"` | 主题 id，见 [主题系统](themes.md) |
-| `dictation` / `translate` / `ignoreSymbol` | `false` / `true` / `true` | 练习显示 |
-| `fsrsEasyLimit` / `fsrsGoodLimit` / `fsrsHardLimit` | `0` / `3` / `6` | 评级阈值 |
-| `fsrsParameters` | 见 4.4 | FSRS 参数（snake_case 键） |
-| `tuiBigWord` | `true` | **TUI 独有**：练习页是否用 2 倍点阵大字 |
-| `_ignoreWatch` | `false` | 上游「忽略监听」标记，TUI 不使用 |
-
-设置页的「每日词数」一行不在 `setting.json` 里：它改的是 `dict.json` 当前学习词典的 `perDayStudyNumber`（见 3.3 与 [设置项参考](settings.md)）。
-
-### 4.3 透传字段与 `serde` 行为
-
-- 上游 `SettingState` 有 58 个顶层字段，TUI 建模 43 个具名字段（40 个与上游同名 + TUI 专有的 `tuiBigWord`、`ttsSource`、`_ignoreWatch`）；其余 18 个上游顶层字段（`fontSize`、`showToolbar`、`first`、`webAppVersion`、`ttsVoiceMap` 等）在读取时进入 `extra: serde_json::Map<String, Value>`，保存时原样写回。测试 `tests/store_roundtrip.rs` 的 `settings_roundtrip_preserves_unknown_fields` 固定了这一行为：读入 `someFutureField` 后保存，输出 JSON 中仍然存在。
-- 结构体级 `#[serde(default)]` 保证缺失字段取默认值；枚举字段用整型序列化（如 `wordPracticeMode`），未知数值会解析失败并触发隔离。
-- `FsrsParameters` 的参数兜底在 `src/domain/fsrs.rs` 的 `Fsrs::new` 里统一做：`FsrsParameters::effective_w` 只负责权重长度（不是 21 个有限数就回退默认权重），留存率必须落在 `(0,1)`、最大间隔至少一天，否则回退默认值，因此手改坏参数不会让调度崩溃。
-
-### 4.4 默认值与 FSRS 参数
-
-默认 FSRS 参数（`domain/constants.rs` 的 `default_fsrs_parameters`，与上游 ts-fsrs 默认值一致）：`request_retention = 0.9`、`maximum_interval = 36500`、21 个权重 `0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542`、`enable_fuzz = false`、`enable_short_term = true`、学习步进 `["1m","10m"]`、重学步进 `["10m"]`。TUI 全部读取：`w`、`request_retention`、`maximum_interval`、`enable_fuzz`、`enable_short_term` 与两组步进都生效——FSRS-6 逐条移植自上游 ts-fsrs，黄金样本见 `tests/fsrs_parity.rs`。
-
-### 4.5 如何安全新增一个设置项
-
-1. **模型与默认值**：在 `src/domain/types.rs` 的 `SettingState` 加字段，并在 `impl Default` 里给值；新字段自然带 `#[serde(default)]` 语义。字段名用 Rust snake_case，JSON 由 `rename_all = "camelCase"` 生成。
-2. **UI 入口**：布尔/枚举项在 `src/app/mod.rs` 的 `SETTING_ROWS` 加一行（key + `SettingKind`），数字项新增 `EditTarget` 并在 `App::setting_number_value` / `apply_number_value` 中读写与夹取范围，布尔项在 `toggle_setting_bool` 加分支。
-3. **文案与显示**：`src/domain/i18n.rs` 的 `tr` 加中文文案；`src/ui/settings.rs` 的 `SECTIONS` 决定分区标题位置，`setting_value` / `setting_bool` / `number_text` 决定显示值与颜色。
-4. **存档版本**：仅 TUI 自用的字段（如 `tuiBigWord`）**不要**提升 `SETTING_VERSION`——旧存档缺字段由 default 补，Web 端加载设置时只保留自身已知字段（不报错，但该字段在 Web 端会丢失）；只有跟随上游 schema 升级、字段语义变化或需要迁移时才提升版本，并同时确认读取端对旧版本的处理（当前是「直接接受 + 补默认」，没有迁移代码）。
-5. **测试**：补 `tests/app_drive.rs` 的修改-重启-持久化用例；改 `Extra` 透传逻辑时跑 `tests/store_roundtrip.rs`；涉及界面的补 `tests/ui_snapshots.rs`。同步更新 [设置项参考](settings.md)。
+- 写入时机：设置页改值、快捷键改绑 / 清除 / 恢复默认、切换练习模式、切回内置流程等操作后立即 `App::save_settings_now`；离开设置页与快捷键页、确认退出时再保存一次（`save_all`）。`readonly_settings` 为真时全部跳过。
+- 枚举字段（`wordPracticeMode` / `wordPracticeType`）序列化为整型，未知数值解析失败会触发隔离。`waitTimeForChangeWord` / `spaceCooldownTime` 读取后夹在 0–10000 毫秒；`repeatCount == 100` 时取 `repeatCustomCount`。
+- `fsrsParameters` 用 snake_case 键（`request_retention`、`maximum_interval`、`w`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps`），默认值由 `src/domain/constants.rs` 的 `default_fsrs_parameters` 给出；参数兜底统一在 `src/domain/fsrs.rs` 的 `Fsrs::new` 里做，手改坏参数不会让调度崩溃。
+- `extra` 透传由 `tests/store_roundtrip.rs` 的 `settings_roundtrip_preserves_unknown_fields` 固定；设置页的「每日词数」不在 `setting.json`，它改 `dict.json` 当前词典的 `perDayStudyNumber`（3.2）。
+- 新增设置项：`SettingState` 加字段并在 `impl Default` 给值 → 接设置页入口（`src/app/mod.rs` 的 `SETTING_ROWS` / `EditTarget`）→ 补文案与渲染。仅 TUI 自用的字段**不要**提升 `SETTING_VERSION`：旧存档缺字段由 default 补，提升版本只会让旧客户端变成只读；只有跟随上游 schema 变化或需要迁移时才提升。
 
 ## 5. `practice-word.json`（`PracticeCacheCompact`，版本 2）
 
-### 5.1 结构与示例
-
-`val` 为缓存对象；保存 `None` 时程序删除文件而不是写 `null`。词表以**字符串**保存（单词的 `word` 字段），恢复时再按当前词库还原成完整 `Word`。（示例截断）
-
-```json
-{
-  "val": {
-    "taskWordsStr": { "new": ["cancel", "explosive"], "review": [] },
-    "practiceData": {
-      "index": 1, "excludeWords": [], "allWrongWords": ["explosive"],
-      "isTypingWrongWord": false, "wrongTimesMap": { "explosive": 1 }, "wrongTimes": 1,
-      "ratingMap": { "explosive": 2 }, "wordsStr": ["cancel", "explosive", "..."],
-      "wrongWordsStr": ["explosive"], "question": null
-    },
-    "statStoreData": {
-      "stage": 0, "startDate": 1792300000000, "spend": 125000, "total": 20,
-      "newWordNumber": 20, "reviewWordNumber": 0, "inputWordNumber": 5, "wrong": 1,
-      "timerPaused": false, "timerPauseReason": null,
-      "segments": [[1792300000000, 1792300125000]]
-    },
-    "sessionSnapshot": {
-      "flowId": "system",
-      "cursor": { "nodeIndex": 0, "stepIndex": 0, "inWrongWordClear": false, "loop": null, "endActionIndex": null },
-      "nodeWorkingWordKeys": ["cancel", "explosive", "..."]
-    }
-  },
-  "version": 2, "updated_at": "2026-10-18T13:34:19+00:00"
-}
-```
+`val` 为缓存对象；保存 `None` 时删除文件而不是写 `null`。词表以**单词字符串**保存，恢复时按当前词库还原成完整 `Word`。
 
 | 字段 | 说明 |
 | --- | --- |
 | `taskWordsStr.new` / `.review` | 本轮任务词表（新词 / 复习词）的单词字符串 |
 | `practiceData.index` | 当前词下标；恢复时夹在 `0..words-1` |
 | `practiceData.excludeWords` / `allWrongWords` / `isTypingWrongWord` | 已排除词、本轮错词、是否处于错词重输状态 |
-| `practiceData.wrongTimesMap` / `ratingMap` | 单词 → 错误次数 / 单词 → FSRS 评级（1–4），结算时用于算卡片 |
-| `practiceData.wordsStr` / `wrongWordsStr` | 当前节点词表与错词表（字符串） |
-| `practiceData.question` | 自测题缓存；`cache_to_compact` 固定写 `null`，恢复后重新生成 |
-| `statStoreData` | `PracticeState` 快照：阶段（`stage`）、计时、新词/复习/输入计数、错词、暂停状态与时间片段 |
-| `sessionSnapshot.flowId` | 流程 id（`system/free/review/shuffle/identifyOnly/dictationOnly/listenOnly`） |
-| `sessionSnapshot.cursor` | 流程游标：`nodeIndex`、`stepIndex`、`inWrongWordClear`、`loop`（`{startIndex,endIndex,subStepIndex}` 或 `null`）、`endActionIndex` |
-| `sessionSnapshot.nodeWorkingWordKeys` | 当前节点的工作词表（单词字符串） |
+| `practiceData.wrongTimesMap` / `wrongTimes` / `ratingMap` | 单词 → 错误次数 / 总错误数 / FSRS 评级（1–4），结算时用于算卡片 |
+| `practiceData.wordsStr` / `wrongWordsStr`；`question` | 当前节点词表与错词表（字符串）；自测题缓存由 `cache_to_compact` 固定写 `null`、恢复后重新生成 |
+| `statStoreData` | `PracticeState` 快照：`stage`、计时（`startDate` / `spend` / `segments`）、新词 / 复习 / 输入计数、`wrong`、暂停状态 |
+| `sessionSnapshot.flowId` | 流程 id（内置流程 id 或 `flows.json` 里的自建流程 id） |
+| `sessionSnapshot.cursor` | 流程游标 `PracticeFlowCursor`：`nodeIndex`、`stepIndex`、`inWrongWordClear`、`loop`、`endActionIndex` |
+| `sessionSnapshot.nodeWorkingWordKeys` | 当前节点工作词表的单词字符串 |
 
-### 5.2 写入与删除时机
+**写入与删除时机**（`App::save_practice_now` → `store.save_practice`）：开一轮练习立即保存；单词推进、键入错误、自测操作等进度变化排 500 ms 防抖保存；本次 tick 确实累计时长且跨过 30 秒整数倍时再排一次（`should_schedule_periodic_save`）；`Ctrl+C` 与退出程序立即保存；结算 `finish_session` 删除文件。写入失败弹 `保存练习进度失败: …`，不中断练习。
 
-| 触发 | 动作 |
+**恢复条件**（`App::try_resume_saved_practice` → `restore_practice_from_cache`，首页 `Enter` 触发，启动时不自动恢复）。任一步不满足就静默放弃、**不删文件**：
+
+1. 读到 `version == 2` 的缓存（否则走 2.3 的提示与忽略），且当前学习词典存在、已有词表；
+2. `cache_from_compact` 能按当前词典的 `words` 用单词字符串精确匹配还原任务词表（匹配不到的词被丢弃，任务词表全空则放弃），且 `practiceData`、`statStoreData`、`sessionSnapshot` 三者齐备；
+3. 流程游标合法（`Navigator::restore_snapshot`），且断点里的 flow 模式与本次要跑的模式一致。
+
+恢复成功后进入练习页并 Toast「已继续上次练习」。因此换过词库后旧缓存通常无法恢复；版本不符的缓存不被移动，下次保存时被覆盖。
+
+## 6. `practice-article.json`（`ArticleCacheEnvelope`，版本 1）
+
+文章跟打的断点缓存，与单词练习缓存**分文件**：混在一起会让「清空练习进度」误删另一轮的进度。
+
+| 字段 | 说明 |
 | --- | --- |
-| 开始一轮练习 `begin_session_with_task` | 立即保存（新缓存） |
-| 单词推进、键入错误、自测操作、随机默写等改变进度 | 安排 500 ms 防抖保存（`pending_practice_save`），由 `on_tick` 到期落盘 |
-| 本次 tick 确实累计了时长且跨过 30 秒整数倍 | 再安排一次防抖保存（暂停时不会重复调度） |
-| `Ctrl+C` | 立即保存，随后离开练习 |
-| `Ctrl+Enter`（重学本组） | 新会话建立后立即保存缓存 |
-| 退出程序（事件循环结束/确认退出） | `save_all`：若仍有未结算会话则立即保存 |
-| 结算 `finish_session` | 删除 `practice-word.json`（不动文章跟打缓存；结算弹层出现后不再有单词断点） |
-| 结算后回主页 | 不删文件（两个缓存已由各自的结算路径处理） |
-| 设置页「清空当前练习进度」 | 删除两份断点缓存 |
-| 设置页「清除所有数据」 | 删除缓存，并把 `dict.json` 与 `setting.json` 一起恢复默认（见第 9 节） |
-| 启动参数 `--reset-practice` | 启动时删除两份缓存并 Toast「已清空练习进度」 |
+| `practiceData.articleId` | 文章 id |
+| `practiceData.sentenceIndex` | 当前句下标（段落展开后的扁平全局下标） |
+| `practiceData.finished` / `wrongSentences` / `total` / `spend` | 已完成句数 / 出错句数 / 总句数 / 累计用时（毫秒） |
+| `statStoreData` | 与上游同名的占位字段；TUI 写 `None`，用时记在 `practiceData.spend` |
 
-删除即 `fs::remove_file`；删除后 `practice_exists()` 为 false。文件写入失败会弹 Error Toast（`保存练习进度失败: ...`），不会中断练习。
+- 与上游结构不同：上游 `practiceData` 是「段落 / 句 / 词」三级游标，TUI 在 `gen_sections` 后按扁平句子推进，只存一个 `sentenceIndex`；备份里的映射见第 10 节。
+- 保存：每完成一句排 500 ms 防抖，另有 30 秒整点兜底；离开文章页（`Esc` / `Ctrl+C`）与退出程序立即保存。整篇练完时**删除**文件，否则下次会「恢复」一篇已练完的文章。
+- 恢复：启动时只读取（`App::refresh_article_resume`）用于列表标记「上次第 N 句」，不直接进跟打页；选中该文章按 `Enter` 才从记录的句子续打。文章 id 在当前书目里找不到就忽略；资源变短时下标按当前句数夹取，0 句的文章不显示标记。
+- 损坏 / 版本不符：同 2.3，损坏提示「文章练习缓存损坏，已丢弃」，不阻断启动。
 
-### 5.3 恢复流程
+## 7. `flows.json`（`FlowStore`，无版本号）
 
-主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）时，`App::try_resume_saved_practice` → `restore_practice_from_cache` 依次检查，任一步不满足就静默放弃恢复（**不删文件**，等下一次保存覆盖）。启动时**不**走这条路径，只停在主页：
+自建练习流程的存档，对应上游 localStorage 的 `PracticeFlowV2`，结构为 `{ "activeId": "<id 或空串>", "flows": { "<id>": { "name", "config", "createdAt", "updatedAt" } } }`。
 
-1. `load_practice` 读到 `version == 2` 的值（否则走 5.4 的提示与忽略逻辑）；
-2. 当前学习词典存在，且已有词表；
-3. `cache_from_compact` 能用当前词典的 `words` 还原出任务词表——按单词字符串**精确匹配**，匹配不到的词被丢弃；任务词表全空则放弃；
-4. 缓存同时包含 `practiceData`、`statStoreData`、`sessionSnapshot`；
-5. `PracticeFlowCursor` 校验通过：`flowId` 必须是已知内置流程，节点/步骤下标存在，错词清空索引与循环区间合法（`Navigator::restore_snapshot`）。校验失败会回滚并放弃；
-6. 恢复成功后进入练习页、重置键入并 Toast「已继续上次练习」；计时若未暂停从当前时刻继续。
+- **没有信封、没有版本号**：上游用 localStorage，本来就没有版本概念；`config.version` 是流程配置自身的版本，与 `CURRENT_FLOW_VERSION`（当前 6）一致。
+- `config` 是 `src/domain/flow/mod.rs` 的 `PracticeFlowConfig`：`id` / `version` / `mode` / `label` / `nodes`；节点为 `id` / `label` / `source` / `steps`；步骤为 `templateId` / `wordAdvance` / `onEnd` / `shuffleOnEnter`。`wordAdvance` 为 `wordLoop` 时带 `groupSize` 与 `subSteps`（`{ templateId }` 对象数组，不是裸 id 数组）。字段名逐字对齐上游，因此可与上游 localStorage 内容互换。
+- `activeId` 为空表示走内置流程（`FlowStore::active` 返回 `None`）。写入用 pretty JSON + 原子写，启停 / 新建 / 删除 / 编辑流程后立即 `App::save_flow_store`，失败弹 `保存流程失败: …`。
+- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`，启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。
 
-因此**切换词库后旧缓存通常无法恢复**（任务词不在新词库中）；缓存词表与 flow 都匹配时才能回到同一词、同一阶段。
+## 8. 资源词库与文章格式
 
-### 5.4 版本不支持与损坏
+### 8.1 `<assets>/list/word.json`
 
-- 只有 `version == 2` 被接受，其余（包括 Web 的 v1）一律视为不支持：`load_practice` 返回 `LoadStatus::UnsupportedVersion { found, expected: 2 }`，启动弹 Warning「存档版本不受支持（…），已忽略；下次保存会覆盖」并忽略缓存；文件**不会**被移动或删除，下一次保存练习缓存时被覆盖。TUI 不提供 v1→v2 升级（上游 Web 有，见 `checkAndUpgradePracticeWordCache`）。
-- `val` 为 `null` 的信封被当作「没有缓存」（`Loaded(null)`），不算损坏。
-- JSON 解析失败时文件被隔离为 `practice-word.json.corrupt-<时间戳>.json`，启动提示「练习缓存损坏，已丢弃」，随后按无缓存启动。
+顶层是词库目录数组（`src/domain/catalog.rs` 的 `DictResource`）：
 
-### 5.4bis. 同一次运行内的「继续」
-
-启动不再自动恢复；主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）会**接着上次那一轮**练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`：
-
-```ts
-function systemPractice() {
-  const currentMode = settingStore.wordPracticeMode
-  const isFree = currentMode === WordPracticeMode.Free
-  startPractice(isFree ? WordPracticeMode.System : currentMode, isFree)
-}
-```
-
-- `resetCache` 只有在**自由模式**下为 `true`——自由练习明确要开一轮新的，不接上次的断点。
-- 其余模式 `resetCache=false`，主页把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。
-- 续练要求**模式一致**：断点里的 flow 模式与当前模式不同就不恢复（`try_resume_saved_practice`），否则流程阶段对不上。
-- 统计的落盘时机随之改变：上游的 `flushStatToStore` 只在**结算**与**重置缓存**两处调用，中途退出后继续练时统计留在缓存里不落盘。TUI 同此。
-
-因此主页的标题与按钮文案也跟着变（对齐上游的 `isSaveData`）：
-
-| 状态 | 标题 | 主按钮 |
-| --- | --- | --- |
-| 没有断点缓存 | 今日任务 | Enter 开始学习 → |
-| 有断点缓存 | 上次任务 | Enter 继续学习 → |
-
-## 5ter. `practice-article.json`（`ArticleCacheEnvelope`，版本 1）
-
-文章跟打的断点缓存，对应上游 IndexedDB 的 `PracticeSaveArticle` 键（版本 1）。
-
-```json
-{
-  "val": {
-    "practiceData": {
-      "articleId": 11,
-      "sentenceIndex": 3,
-      "finished": 3,
-      "wrongSentences": 0,
-      "total": 12,
-      "spend": 45000
-    },
-    "statStoreData": null
-  },
-  "version": 1,
-  "updated_at": "..."
-}
-```
-
-- **与单词练习缓存分文件存**：两者的进度互不相干，混在一个文件里会让「清空练习进度」误删文章的跟打进度。
-- `practiceData` 的字段名与上游不同：上游记「段落 / 句 / 词」三级游标（`sectionIndex` / `sentenceIndex` / `wordIndex`），TUI 的文章在 `gen_sections` 后把段落展开成扁平句子列表，跟打也按扁平下标推进，因此只存一个 `sentenceIndex`。`statStoreData` 保留字段名以对齐上游信封，但 TUI 不用它（用时记在 `practiceData.spend`）。
-- **与 Web 备份的映射**：本地格式不变；`tw export-web` 会把它包装成网页版能安全读取的 `PracticeSaveArticle`（三级游标归零、`statStoreData` 非空、真实断点放在 `tuiPracticeData`），`tw import-web` 优先读这个扩展字段还原。网页版自己产生的缓存没有文章 id，仍不映射；细节见第 8 节。
-- **保存时机**：每完成一句排一次 500ms 延迟保存（防抖），另有 30 秒整点兜底，防止进程被直接杀掉时丢掉整段进度；退出文章页（`Esc` / `Ctrl+C`）与退出程序时立即保存。`Ctrl+,` 暂停计时只停止累加 `spend`，不改变保存时机。
-- **恢复时机**：启动时只读取（`refresh_article_resume`）用于列表标记，**不**进入跟打页；进入文章页后，缓存对应的文章行标出「上次第 N 句」，选中它按 `Enter` 才从记录的句子续打并带上用时。选别的文章从头开始；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接忽略，不硬套。`sentenceIndex` 是保存时那篇文章的下标：资源更新后文章变短时，列表标记按当前句数 clamp 到最后一句（与续打时的下标夹取规则一致），文章 0 句时不显示标记。
-- **整篇练完**时缓存被删除——否则下次进文章页会「恢复」一篇已经练完的文章。
-- 损坏时隔离为 `practice-article.json.corrupt-<时间戳>.json`，提示「文章练习缓存损坏，已丢弃」，不阻断启动。
-
-## 5bis. `flows.json`（`FlowStore`，无版本号）
-
-自建练习流程的存档，对应上游浏览器 localStorage 的 `PracticeFlowV2` 键。结构与上游一致：
-
-```json
-{
-  "activeId": "custom-1",
-  "flows": {
-    "custom-1": {
-      "name": "我的流程",
-      "config": { "id": "custom-1", "version": 6, "mode": 7, "label": "...", "nodes": [] },
-      "createdAt": 1735689600000,
-      "updatedAt": 1735689600000
-    }
-  }
-}
-```
-
-- **没有版本号**：上游用 localStorage 存这份数据，本来就没有版本概念；`config.version` 是流程配置自身的版本（与上游 `CURRENT_FLOW_VERSION` 一致，当前 6）。
-- 流程配置里的字段名与上游 `PracticeFlowConfig` 逐字一致（`templateId`、`wordAdvance`、`groupSize`、`subSteps`、`onEnd`、`shuffleOnEnter`），因此 `flows.json` 与上游的 localStorage 内容可以互换。
-- `subSteps` 是 `{ templateId }` 对象数组（上游 `PracticeLoopSubStep`），不是裸的模板 id 数组。
-- 损坏时文件被隔离为 `flows.json.corrupt-<时间戳>.json`，启动提示「流程存档已损坏，已隔离并恢复默认值」，随后按空集合启动。
-
-## 6. 资源词库格式
-
-### 6.1 `<assets>/list/word.json`（`DictResource`）
-
-顶层是数组，元素为词库目录项（`src/domain/catalog.rs` 的 `DictResource`）：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | 字符串或数字 | 词库身份；空 id 的项会被跳过 |
-| `enName` | 字符串 | 上游路由名，可用作 `--dict` 取值；也接受 `en_name` 别名 |
-| `name` / `description` | 字符串 | 展示名与简介 |
-| `url` | 字符串 | 词条文件名，拼接为 `dicts/<language>/word/<url>` |
-| `length` | 整数 | 声明（名义）词数；装载成 `Dict` 后只作「词表未加载」时的兜底分母，加载词表后以实际词条数为准（`Dict::effective_length`），见本节末段与 3.3 |
-| `category` / `tags` / `language` / `translateLanguage` | 字符串 / 数组 | 展示与语言元数据；`language` 为空时按 `en` |
-| `type` | 字符串，可选 | 只处理 `"word"` 或缺省的项，其它类型（如 article）被过滤 |
-| `version` / `cover` / 其它 | — | 不参与 TUI 逻辑；未知字段被忽略 |
-
-内置文件当前只有一本：`id = 1`、`enName = "cet4"`、`url = "CET4_T.json"`、`length = 2607`。
-
-`length` 只是名义词数：用户在词条页编辑 / 删除 / 排序后，`App::persist_words` 除了重写词条文件，还会调用 `Catalog::sync_user_catalog_length` 把**用户目录**里同 id 条目的 `length` 改成真实词条数（内置资源目录只读，一个字节都不改）。界面上的词数一律以词条为准：已拥有的词库不看登记值（`App::dict_word_count` / `App::resource_word_count`），登记值只用于从没打开过、词条文件还没读过的词库。
-
-### 6.2 `<assets>/dicts/en/word/*.json`（`Word`）
-
-顶层是词条数组。TUI 只读取下表字段（`src/domain/types.rs` 的 `Word`）：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | 数字/字符串/缺省 | 上游词条 id；读取时一律转成字符串 |
-| `word` | 字符串 | 单词本体；`word.trim()` 为空时该词条被过滤 |
-| `phonetic0` / `phonetic1` | 字符串 | 英式 / 美式音标（`Word::phonetic(uk)` 中 `uk = true` 取 `phonetic0`） |
-| `trans` | 数组 | 释义：`{ "pos": "v.", "cn": "取消" }`，可选 `frequency` |
-| `sentences` / `phrases` | 数组 | 例句 / 短语：`{ "c": "英文", "cn": "中文" }` |
-| `synos` | 数组 | 同义词：`{ "pos", "cn", "ws": ["..."] }` |
-| `relWords` | 对象 | 相关词：`{ "root": "cancel", "rels": [{ "pos", "words": [{ "c", "cn" }] }] }` |
-| `etymology` | 数组 | 词源：`{ "t": "标题", "d": "描述" }` |
-| `custom` | 布尔 | 资源文件中通常缺省（`false`） |
-
-未建模字段（如 `inflections`、`e2e`、`examsSrc`、`langType`）会被静默忽略。所有数组字段在缺省时按空数组处理；整个文件没有可用词条时加载失败：`词库文件没有可用单词: <path>`。
-
-仓库内置 CET-4 资源为 `assets/dicts/en/word/CET4_T.json`：2607 词、4,487,640 字节（约 4.5 MB），首个词是 `cancel`（`tests/real_assets.rs` 固定了这两个事实）。文章资源是另一套只读资源：书目 `assets/list/article.json` + 文章 `assets/dicts/en/article/*.json`，由文章背诵页按需读取（见 [app.md](app.md) 6.3、[ui.md](ui.md) 8.5），书目登记的 `length` 会被文章文件里的实际篇数校准（见 [domain.md](domain.md)），两边对不上时以文件为准。
-
-### 6.3 目录合并与文件优先级
-
-- `Catalog::load` 按 `[assets, home]` 顺序读取两个 `list/word.json`：先内置、后用户；**同一个 `id` 的用户词库目录项会替换内置项**（位置保留在首次出现处）。
-- 单词文件查找按相对路径 `dicts/<language>/word/<url>` 先查 `<home>`、再查 `<assets>`。因此导入一个与内置词库**同文件名**的文件（如 `CET4_T.json`）会遮蔽内置文件，即使两者 id 不同。
-
-## 7. `import-dict` 行为
-
-`tw import-dict FILE` 只接受**词条数组 JSON**（与 `dicts/en/word/*.json` 同格式），不支持词库目录对象、ZIP、Excel。执行步骤：
-
-1. 读取并解析 `<FILE>` 为 `Vec<Word>`，用 `Word::is_usable` 过滤空词条；至少要有 1 个可用词；
-2. 文件名必须以 `.json` 结尾；
-3. 加载词库目录（需要可用的 `assets/`）；
-4. 把源文件**原样写入** `<home>/dicts/en/word/<文件名>`（内容按读到的原文原样落盘、不改写，写入走原子写，崩溃不会留下半个词库文件）；
-5. 生成目录项：`id = enName = name = 文件名去掉 .json`、`description = "导入词库（N 词）"`、`url = 文件名`、`length = N`、`category = "自定义"`、`tags = ["导入"]`、`language = "en"`、`translateLanguage = "zh_CN"`、`type = "word"`、`version = 1`、`custom = true`；
-6. 写入 `<home>/list/word.json`（pretty JSON + 原子写；按解析后的 id 判重：同 id 替换旧目录项，否则追加），打印「已导入词库: <name>（N 词）」并提示 `tw --dict <id>` 切换；**不会自动切换**当前词库。
-
-行为要点与冲突规则：
-
-- **判重规则**：`Catalog::import_dict` 把每个已有目录项反序列化为 `DictResource` 后比较归一化 id（`Value::String` 与 `Value::Number` 都转成字符串），因此字符串 id 也能正确匹配；重复导入同一文件名只替换原目录项，不会累积重复条目。
-- 导入后立即出现在词库页（`d`）和 `tw --dict` 的可选值中；切换时 `Bootstrapped::select_dict` 会加载词表，并按 id/enName 找到旧书保留 `lastLearnIndex`/`perDayStudyNumber`/`complete`/`statistics`——重复导入同一文件名不会丢进度。
-- **`custom = true` 不能少**：导入的词条文件在数据目录里、不是随包分发的内置资源，落盘前的 `shake_common_dict` 会按这个标记决定要不要清词表（见 3.3）。标记丢了，换个词库或改一个词再重启，整本词典的词就都没了。
-- 命令**不是事务性的**：先复制词条文件、后写用户目录。若目录写入失败，词条文件已存在于 `<home>/dicts/en/word/` 但未注册，可直接重跑命令修复。
-- 用户 `list/word.json` 损坏会让词库目录加载失败，TUI/`tw task`/`import-dict` 启动即报错（`解析词库目录失败: <path>`），需要手工修复或删除该文件（删除后只剩内置词库）。
-
-常见错误：
-
-| 情形 | 错误文本 |
+| 字段 | 说明 |
 | --- | --- |
-| 文件读不出 | `读取词库失败: <path>` |
-| 不是词条数组 JSON | `解析词库失败（需要词条数组 JSON）: <path>` |
-| 没有可用词条 | `词库中没有可用单词: <path>` |
-| 文件名不是 `.json` | `词库文件需要是 .json 结尾: <文件名>` |
-| 复制失败 | `复制词库失败: <源> → <目标>` |
-| 没有资源目录/目录为空 | `找不到词库资源目录…` / `词库目录为空，请检查 …` |
+| `id` | 词库身份，字符串或数字，读取时归一化成字符串；空 id 的项被跳过 |
+| `enName` | 上游路由名，可作 `--dict` 取值；也接受 `en_name` 别名 |
+| `name` / `description` | 展示名与简介 |
+| `url` | 词条文件名，拼成 `dicts/<language>/word/<url>` |
+| `length` | 登记（名义）词数；词表加载后以实际词条数为准（`Dict::effective_length`） |
+| `category` / `tags` / `language` / `translateLanguage` | 展示与语言元数据；`language` 为空按 `en` |
+| `type` | 只处理 `"word"` 或缺省项，其它类型被过滤 |
+| `custom` | 用户自建 / 导入标记（从 `extra` 读取，`DictResource::is_custom`） |
+| `version` / `cover` / 其它 | 不参与 TUI 逻辑，未知字段忽略 |
 
-## 8. 与 Web 端数据互通
+内置文件只有一本：`id = 1`、`enName = "cet4"`、`url = "CET4_T.json"`、`length = 2607`。
 
-TUI **不读写浏览器 IndexedDB**；互通方式是用 `tw import-web` / `tw export-web`（或手工）搬运 JSON，没有图形界面的导入导出入口。好在两边使用同名字段与同构信封：
+### 8.2 `<assets>/dicts/en/word/*.json`
 
-| TUI 文件 | Web 端存储 | key | 版本 |
-| --- | --- | --- | --- |
-| `dict.json` | IndexedDB 中的 JSON 字符串 | `typing-word-dict` | 4 |
-| `setting.json` | IndexedDB 中的 JSON 字符串 | `typing-word-setting` | 23 |
-| `practice-word.json` | IndexedDB（早期为 localStorage，自动迁移） | `PracticeSaveWord` | 2 |
-| `practice-article.json` | IndexedDB（缓存） | `PracticeSaveArticle` | 1 |
+顶层是词条数组，`src/domain/types.rs` 的 `Word` 只读取：`id`（数字 / 字符串 / 缺省，统一转字符串）、`word`（本体，`trim` 为空即被过滤）、`phonetic0` / `phonetic1`（英式 / 美式音标）、`trans`（`{ pos, cn }`）、`sentences` / `phrases`（`{ c, cn }`）、`synos`（`{ pos, cn, ws }`）、`relWords`（`{ root, rels }`）、`etymology`（`{ t, d }`）、`custom`。缺省数组按空处理，`inflections`、`e2e` 等未建模字段静默忽略。
 
-Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": {...}, "setting": {...}, "PracticeSaveWord": {...}, "PracticeSaveArticle": {...} }}`，其中每个子对象本身就是 `{version, val, updated_at?}` 信封——与 TUI 的单文件信封同构。手工迁移步骤：
+仓库内置 CET-4 为 `assets/dicts/en/word/CET4_T.json`：2607 词、约 4.5 MB，首词 `cancel`（`tests/real_assets.rs` 固定）。词条文件存在但没有可用单词不算错误（新建的自建词典一开始就是空的）；文件缺失才报 `找不到词库文件`。
 
-1. 在 Web 端导出备份 ZIP，解压取出 `data.json`；或从浏览器开发者工具读取 IndexedDB 的 `typing-word-dict` / `typing-word-setting`（值是 JSON 字符串）。
-2. 关闭 TUI，备份 `<home>`。
-3. 写入文件：`dict.json` = `data.val.dict`；`setting.json` = `data.val.setting`；如需恢复断点，`practice-word.json` = `data.val.PracticeSaveWord`（`updated_at` 可缺省）；若备份来自 `tw export-web`，`practice-article.json` = `data.val.PracticeSaveArticle`。网页版自己产生的 `PracticeSaveArticle` 只有三级游标、没有文章 id，不要手工写入。
-4. 启动 TUI，用 `tw doctor` 核对路径、词库数量与存档文件大小，再进设置页确认主题等字段。
-5. Web 备份里当前学习词典若在 TUI 资源中不存在（例如 Web 端自建、TUI 没有对应词库目录项），启动会回退到词库资源（`ensure_study_dict` 的兜底顺序：原 id → `cet4` → 第一本词库）；`studyIndex` 指向某本系统词典（`system: true`）时按内置词典原样保留，不回退。
+### 8.3 目录合并与文件优先级
 
-`tw import-web` 的落盘规则：
+- `Catalog::load` 按 `[assets, home]` 读两个 `list/word.json`：先内置后用户，**同一个 `id` 的用户项替换内置项**（位置保留在首次出现处）；合并后为空报 `词库目录为空`，用户目录解析失败报 `解析词库目录失败: <path>`。
+- 词条文件按相对路径先查 `<home>`、再查 `<assets>`：导入一个与内置文件**同名**的词库（如 `CET4_T.json`）会遮蔽内置文件；写入路径（`Catalog::dict_write_file`）永远落在 `<home>`，内置资源一个字节都不改。
+- 界面上的词数一律以词条为准；目录登记的 `length` 只对「词条文件还没读过」的词库生效。词条编辑 / 删除 / 排序后 `App::persist_words` 会调 `Catalog::sync_user_catalog_length` 把用户目录的 `length` 改成真实词条数。
 
-- **版本**：顶层备份版本高于 5 → 整体拒绝；`dict`(4) / `setting`(23) / `PracticeSaveArticle`(1) 信封版本高于支持值时**跳过该项**；`PracticeSaveWord` 必须等于 2（低版本 TUI 也读不懂），否则跳过并保留本地断点。
-- **结构**：`dict` / `setting` / `PracticeSaveWord` 落盘前先按目标类型做一次宽容反序列化（`SaveEnvelope<BaseState>` / `SaveEnvelope<SettingState>` / `SaveEnvelope<Option<PracticeCacheCompact>>`）。缺字段由 `serde(default)` 补默认、未知字段忽略；缺 `val` / 缺 `version` / 字段类型对不上则**拒绝该项**、原文件不动并打印原因。校验的是即将写入的原文，写入时仍原样落盘，因此未建模字段不会丢——不会出现「导入成功、下次启动却被判损坏」。
-- **备份与回滚**：覆盖已有文件前先复制为 `<文件名>.bak-<YYYYMMDD-HHMMSS>.json`（同一秒重名自动加 `-2`、`-3`）；多个文件写入途中失败时，已写入的文件用 `.bak` 回滚，错误信息给出备份路径。`.bak` 不会自动清理。
+### 8.4 文章资源
 
-迁移风险：
+书目在 `<assets>/list/article.json`（`src/domain/article.rs` 的 `ArticleBook`：`enName` / `name` / `description` / `url` / `category` / `tags` / 登记 `length`），正文在 `<assets>/dicts/en/article/<url>`（`Article` 数组：`id`、`title`、`titleTranslate`、`text`、`textTranslate`、`audioSrc`；`sections` 是运行时由 `gen_sections` 生成的断句结果，不落盘）。书目登记的篇数一律被 `load_books` 用实际篇数覆盖，文件读不到时记为未知（界面显示「篇数未知」）而不是拿登记值充数。当前只有一本书《新概念英语1》（`NCE_1.json`，5 篇）。
 
-| 风险 | 说明 |
-| --- | --- |
-| Web 版本更新 | setting v>23 与 dict v>4 都会触发只读保护（本次不写回）；练习缓存 v!=2 会被忽略（见 2.5）。迁移前确认 TUI 支持的版本 |
-| TUI 独有字段 | `tuiBigWord` 只存在于 TUI 的 `SettingState`；Web 端加载设置时只保留它自己认识的字段（`checkAndUpgradeSaveSetting` 的 `checkRiskKey`），因此经 Web 往返后该字段会丢失、回到默认值 |
-| 未建模的词条字段 | 写回系统词典（收藏/错词/已掌握）时，`Word` 未建模的字段（如 `inflections`）会被丢弃；词典/设置层级的未知字段则通过 `extra` 保留 |
-| Web 自定义词库 | Web 备份中 `custom: true` 的词库保留词表，TUI 能作为当前学习词典读取；但词库页的列表是「三本内置词典 + 词库目录条目」，不在词库目录里的自定义词库不会出现，切走后无法再切回（把词条 JSON 放进 `<home>/dicts/en/word/` 并登记 `<home>/list/word.json` 后才会出现） |
-| FSRS 间隔 | 卡片字段（`due/stability/difficulty/...`）两边兼容；TUI 自实现的 FSRS-6 已逐条对齐上游 ts-fsrs（黄金样本见 `tests/fsrs_parity.rs`），同一张卡在两端得到相同的下次复习时间 |
-| 练习缓存 | TUI 恢复还要求 `sessionSnapshot`；Web 旧缓存若缺这个字段则只迁移词表与统计、无法恢复断点 |
-| 文章与音频 | `PracticeSaveArticle` 分两种：TUI `export-web` 的备份带 `tuiPracticeData`，句子进度与用时可以往返（前提是网页版没有在文章页推进句子——推进会重写缓存并丢掉扩展）；网页版自己产生的只有「段落 / 句 / 词」游标、没有文章 id，TUI 无法对应到具体文章，导入时丢弃。备份 ZIP 里的 `mp3/` 在 TUI 中没有对应实现 |
+## 9. `tw import-dict`
 
-## 9. 备份、恢复与重置
+只接受**词条数组 JSON**（与 8.2 同格式），不支持词库目录对象、ZIP、Excel。步骤（`Catalog::import_dict`）：
 
-- **完整备份**：先退出所有 tw 实例，再复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`、`.tw.lock`、`themes/`、导入的 `dicts/` 与 `list/word.json`；`.tw.lock` 只是锁文件，内容是上次持锁进程的 PID，复制或删除都无害）。只拷 `dict.json` 会丢设置、断点与导入词库。
-- **恢复**：先退出所有实例 → 用备份覆盖 `<home>` → 启动；建议先跑 `tw doctor` 确认路径与词库数量，再打开设置页检查主题是否加载。
-- **只重置练习**：`tw --reset-practice`（启动时删除缓存）或设置页「清空当前练习进度」（确认弹层后删除）。两者都只删 `practice-word.json` 与 `practice-article.json` 两个断点缓存，不影响 `dict.json` 里的统计、FSRS 卡片和收藏/错词/已掌握。
-- **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json` 与 `practice-article.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json` + `practice-article.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
-- **彻底重置**：关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢）；下次启动会重建目录并按默认值运行。
-- **删除/隔离坏档**：启动 Toast 会给出隔离后的文件名（`*.corrupt-<时间戳>.json`）；确认不需要后可删除隔离文件与坏档本身。版本过高时**不要**为了启动而降级程序或手改 `version`，优先备份后升级程序。
-- **导入覆盖的备份**：`tw import-web` 覆盖前留下的 `<文件名>.bak-<时间戳>.json` 不会被自动清理；确认导入结果无误后可删除。需要退回时先退出所有实例，再用备份文件覆盖同名存档（`dict.json` / `setting.json` / `practice-word.json` / `practice-article.json`）即可。
-- **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` / `practice-article.json` 版本不符 → 忽略并在下次保存时覆盖。四类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
+1. 解析为 `Vec<Word>` 并用 `Word::is_usable` 过滤，至少要有一个可用词；文件名必须以 `.json` 结尾；
+2. 加载词库目录（需要可用的 `assets/`），把源文件**原样**写入 `<home>/dicts/en/word/<文件名>`（走原子写，不会留下半个文件；源与目标同路径也安全）；
+3. 生成目录项：`id = enName = name = 文件名去 .json`、`description = 导入词库（N 词）`、`url = 文件名`、`length = N`、`category = 自定义`、`tags = [导入]`、`language = en`、`type = word`、`custom = true`；
+4. 写 `<home>/list/word.json`（pretty JSON + 原子写；按归一化 id 判重，同 id 替换、否则追加），打印导入结果并提示 `tw --dict <id>`；**不会自动切换**当前词库。
 
-`tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**全部存档文件的大小**（`dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`，不存在则标注）、自定义主题目录与全部主题、主题加载告警。`tw doctor` 与 `tw export-web` 都是只读入口、不取数据目录锁，别的实例（TUI、`tw task`、导入命令）正在运行时仍可用它们排障与导出；但每份文件各自完整、彼此可能不是同一时刻的状态，要一致的快照请先退出所有实例——备份与用备份覆盖存档之前同样应先退出所有实例。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
+要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`复制词库失败: <源> → <目标>`。
 
-```text
-存档：
-  - dict.json: 48213 bytes
-  - setting.json: 不存在
-  - practice-word.json: 1204 bytes
-  - practice-article.json: 386 bytes
-  - flows.json: 不存在
-```
+## 10. 与 Web 数据互通
 
-## 10. 安全与隐私
+TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`（`src/backup.rs`）或手工搬 JSON；两边使用同构信封与同名字段，文件与网页版 IndexedDB key 的对应关系见 2.1。
 
-- **纯本地**：依赖树中没有 HTTP/WebSocket 客户端（见 `Cargo.toml`），程序不发起网络请求；无账号、无云同步、无遥测。上游 Web 端的 umami 统计代码没有被移植。
-- **明文存储**：存档是可读 JSON，没有加密；笔记、进度、收藏等对同机有文件读权限的用户可见，取决于操作系统权限。
-- **手工编辑注意**：先关闭程序并备份；保持 `{ "val": ..., "version": ... }` 信封、UTF-8 编码、合法 JSON（不能有注释/尾逗号）；改坏会导致下次启动解析失败并隔离为 `*.corrupt-*.json`（数据还在隔离文件里）；运行中编辑会被退出时的内存状态覆盖。
-- **并发写入**：同一个 `<home>` 的写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）在启动时对 `<home>/.tw.lock` 取独占锁，第二个实例会在进入 TUI 之前报错退出，因此不会再出现「两个实例退出时互相整份覆盖存档」。锁随进程正常退出或崩溃自动释放，锁文件本身常驻不删（删除正被持锁的文件会制造「两把锁」竞态）。只读入口 `tw doctor` / `tw export-web` 不取锁，TUI 运行时也能排障与导出，但它们读到的多份文件不保证是同一时刻的状态（见 2.2）。**仍然存在的限制**：把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜；手工编辑存档前也先退出所有实例，运行中的实例退出时会用内存状态覆盖改动。
+网页版导出的备份是 `BackupData` v5（`backup::WEB_BACKUP_VERSION`）：`{"version": 5, "val": { "dict": {…}, "setting": {…}, "PracticeSaveWord": {…}, "PracticeSaveArticle": {…} }}`，每个子对象本身就是 `{version, val, updated_at?}` 信封。
+
+**`tw import-web FILE`**（写入口，取锁）：
+
+- 顶层 `version > 5` 整体拒绝；缺 `version` / 缺 `val` 对象报错退出。
+- `dict` / `setting`：信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`PracticeSaveWord` 必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。
+- 校验策略是「校验即将落盘的原文」（`validate_envelope`），通过后**原样写入**（`FileStore::write_envelope_raw`），因此未建模字段不会丢，也不会出现「导入成功、下次启动被判损坏」。
+- 覆盖前先把旧文件复制成 `<文件名>.bak-<时间戳>.json`（同一秒重名加 `-2`、`-3`）；多个文件写入途中失败时按备份回滚，错误信息给出备份路径。`.bak` 不自动清理。
+- 文章断点按来源分流：带 `tuiPracticeData` 扩展（TUI 导出）或本身就是 TUI 原生 `practiceData` 的，规范化写入 `practice-article.json`；空占位（`{}` / `null`）不动本地；网页版自身的三级游标没有文章 id，无法映射，报「已丢弃」。
+
+**`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，缺失或不可解析的用空信封 `{"val": {}, "version": N}` 占位，拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。
+
+**手工迁移**：先在网页版导出备份取 `data.json`（或从开发者工具读 IndexedDB 的两个 key），退出所有 tw 实例并备份 `<home>`，然后 `dict.json = data.val.dict`、`setting.json = data.val.setting`，需要断点时 `practice-word.json = data.val.PracticeSaveWord`（`updated_at` 可缺省）；文章断点不要手工拼。启动后用 `tw doctor` 核对路径与存档大小，再进设置页确认主题等字段。当前学习词典在资源里不存在时，启动按「原 id → `cet4` → 第一本词库」回退（`ensure_study_dict`）；`studyIndex` 指向系统词典时原样保留。
+
+**迁移风险**：网页版版本更新时 setting v>23、dict v>4 触发只读保护，练习缓存版本不符被忽略；TUI 独有的 `tuiBigWord` 经网页版往返会丢失并回到默认值；写回系统词典时 `Word` 未建模字段（如 `inflections`）被丢弃，词典 / 设置层级的未知字段经 `extra` 保留；网页版的自定义词库若不在词库目录里，切走后无法再切回（需放进 `<home>/dicts/en/word/` 并登记 `<home>/list/word.json`）；备份里的 `mp3/` 在 TUI 中没有对应实现。
+
+## 11. 备份、恢复与重置
+
+- **完整备份**：退出所有 tw 实例后复制整个 `<home>`（5 份存档 + `.tw.lock` + `themes/` + 导入的 `dicts/` 与 `list/word.json`；`.tw.lock` 只是 PID 记录，复制或删除都无害）。只拷 `dict.json` 会丢设置、断点与导入词库。
+- **恢复**：退出所有实例 → 用备份覆盖 `<home>` → 启动；先 `tw doctor` 核对路径与存档大小，再检查主题与设置。
+- **只重置练习**：`tw --reset-practice`（启动时删除两份断点缓存）或设置页「清空当前练习进度」（先把本轮统计落盘再做清理）。两者都只删 `practice-word.json` 与 `practice-article.json`，不动 `dict.json` 里的统计、FSRS 卡片与三本系统词典。
+- **重置学习记录**：设置页「清除所有数据」确认后 `boot.base` / `boot.settings` 回到默认值、删除两份缓存并立即落盘，再按全新安装重新选一本学习词典；任一存档版本过高（本次只读）时拒绝执行并提示，避免假成功（`flows.json` 不在清除范围）。**彻底重置**则关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢），下次启动重建目录。
+- **清理与退回**：隔离文件 `*.corrupt-<时间戳>.json` 与导入产生的 `*.bak-<时间戳>.json` 都不自动清理，确认无用后手工删除；需要退回导入前的状态时退出所有实例，用 `.bak` 覆盖同名存档即可。版本降级不会破坏原文件（过高只读、缓存版本不符忽略并覆盖），但新版本保存后格式会升级，降级前先备份。
+
+`tw doctor` 是排障入口：打印版本行、数据目录、资源目录、词库清单（含词条文件路径与词数）、5 份存档的大小（不存在则标注）、自定义主题目录与全部主题及加载告警。它不解析存档内容，版本过高 / 损坏只会在启动 Toast 里出现；`tw doctor` 与 `tw export-web` 不取锁，但在别的实例运行时读到的多份文件不保证同一时刻，需要一致快照就先退出所有实例。
+
+## 12. 安全与隐私
+
+- **默认离线**：程序不主动联网；只有开启有道发音（`ttsSource = youdao`）时才下载音频，播放走外部播放器（`src/audio/player.rs`）。无账号、无云同步、无遥测。
+- **明文存储**：存档是可读 JSON，没有加密；笔记、进度、收藏对同机有文件读权限的用户可见，取决于操作系统权限。
+- **手工编辑与并发**：先退出程序并备份，保持信封结构、UTF-8 编码、合法 JSON（不能有注释 / 尾逗号），改坏会在下次启动被隔离为 `*.corrupt-*.json`；运行时编辑会被退出时的内存状态覆盖。写入口互斥靠数据目录锁（1.3），但把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜。
 
 ## 相关文档
 
 - [文档索引](README.md)
-- [设置项参考](settings.md)
-- [主题系统](themes.md)
-- [应用状态机](app.md)（保存函数与触发时机）
-- [领域算法](domain.md)（FSRS 卡片与统计的计算）
+- [使用手册](usage.md)（命令行、界面与排障）
+- [设置项参考](settings.md)（`setting.json` 各字段的含义与默认值）
+- [主题系统](themes.md)（`<home>/themes/*.json` 格式）
+- [总体架构](architecture.md)（`src/store/` 与 `src/fs.rs` 在分层中的位置）

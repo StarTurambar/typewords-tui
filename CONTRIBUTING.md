@@ -5,18 +5,16 @@
 ## 开始之前
 
 1. 阅读 [文档索引](docs/README.md)，按你的目标选择文档。
-2. 开发环境、构建/测试命令、代码风格与发布流程见 [开发指南](docs/development.md)。
-3. 想改动某个模块，先看 [总体架构](docs/architecture.md) 与对应模块文档（[领域逻辑](docs/domain.md) / [应用状态机](docs/app.md) / [渲染层](docs/ui.md) / [存档](docs/persistence.md)）。
+2. 开发环境、构建 / 测试命令、代码风格与发布流程见 [开发指南](docs/development.md)。
+3. 想改动某个模块，先看 [总体架构](docs/architecture.md) 的分层、生命周期与子系统契约；数据格式见 [存档与数据格式](docs/persistence.md)。
 
 ## 提交前检查
 
-```bash
-cargo fmt --all --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-```
+    cargo fmt --all --check
+    cargo clippy --all-targets --locked -- -D warnings
+    cargo test --locked
 
-全部通过后再提交。修 bug 请附带能复现的测试；新增交互/设置项/流程时，同步更新对应文档（见 [开发指南 · 文档维护](docs/development.md#10-文档维护)）。
+全部通过后再提交。修 bug 请附带能复现的测试；新增交互 / 设置项 / 流程时，同步更新对应文档（见 [开发指南 · 文档维护](docs/development.md#10-文档维护)）。
 
 ## 提交信息
 
@@ -24,8 +22,7 @@ cargo test --locked
 
 ## 文档贡献
 
-- 文档以源码为准；发现文档与代码不一致，欢迎直接提 PR 修正（先改文档，若确认是代码缺陷再改代码）。
-- 新增文档后，在 [docs/README.md](docs/README.md) 登记；`cargo test` 会校验 README 与 docs/ 的相对链接以及文档索引完整性（见 `tests/docs.rs`）。
+- 文档以源码为准；发现文档与代码不一致，欢迎直接提 PR 修正（先改文档，若确认是代码缺陷再改代码）。新增文档后在 [docs/README.md](docs/README.md) 登记——`cargo test` 会校验相对链接、索引完整性、文档版本与源码路径（见 `tests/docs.rs`）。
 - 修改界面后按 [开发指南 · 截图与视觉检查](docs/development.md#6-截图与视觉检查) 重新生成截图。
 
 ## 许可证

@@ -3,9 +3,9 @@
 [![CI](https://github.com/StarTurambar/typewords-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/StarTurambar/typewords-tui/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/StarTurambar/typewords-tui)](https://github.com/StarTurambar/typewords-tui/releases)
 
-用 Rust + [ratatui](https://ratatui.rs/) 实现的 TypeWords 终端客户端：在终端里完成「选词库 → 智能学习 → 结算 → 统计」闭环，进度保存在本地 JSON，重启进程可继续上次练习。
+用 Rust + [ratatui](https://ratatui.rs/) 实现的 TypeWords 终端客户端：在终端里完成「选词库 → 学习 / 复习 → 结算 → 统计」闭环，进度保存在本地 JSON，重启进程可继续上次练习。
 
-这是从 [TypeWords](https://github.com/zyronon/TypeWords) 拆分出来的独立项目，只包含终端客户端（Rust），不包含 Web / Tauri 桌面端。它与上游共享词库资源格式和存档字段命名，但**不共享代码**，也**不读写浏览器的 IndexedDB**；运行时不需要 Node.js 或 WebView，默认也不联网（唯一例外是设置里切到「有道发音」时下载 mp3）。
+这是从 [TypeWords](https://github.com/zyronon/TypeWords) 拆分出来的独立项目，只包含终端客户端（Rust），不包含 Web / Tauri 桌面端。它与上游共享词库资源格式和存档字段命名，但**不共享代码**，也**不读写浏览器的 IndexedDB**；运行时不需要 Node.js 或 WebView。默认离线，唯一例外是设置里主动切到「有道发音」后下载 mp3。
 
 ![主页](docs/screenshots/home-120x40-dark.png)
 
@@ -13,164 +13,120 @@
 
 ## 功能概览
 
-- **单词练习主线**：跟写（7 词一组，组内拼写巩固）、听写、默写、自测、复习、随机复习、自由练习共 7 个内置流程；阶段间自动处理错词巩固。
-- **FSRS 调度**：与上游 ts-fsrs 5.4.1 逐条对齐（公式、学习步进、fuzz 区间与随机种子），同一张卡在两端得到相同的下次复习时间；由黄金样本测试锁定。
-- **练习内操作**：跳组、重学本组、上一组 / 下一组、默写本组、简洁模式、收藏到指定词典、单词笔记（`Ctrl+O` 编辑）。
-- **单词测试模式**：4 选 1 答题，答错的正确答案自动进入错词本。
-- **词条管理**：搜索、编辑、增删、排序、批量标记；可新建 / 复制自定义词典。
-- **文章背诵**：内置《新概念英语1》，整篇文章同页展示、逐句跟打并对照中文译文；标点不用输入，词间空格可打可不打，打错的字符标红在原位。
+- **10 种练习模式**：学习、自由练习、自测、默写、听写、随机复习、复习、随机单词测试、单词测试、自定义流程；其中 7 个模式有内置流程。
+- **单词练习主线**：跟写（7 词一组，组内拼写巩固）、听写、默写、自测；阶段间自动处理错词巩固，支持跳组、上一组 / 下一组、重学本组、默写本组。
+- **FSRS 调度**：与上游 ts-fsrs 5.4.1 逐条对齐（公式、学习步进、fuzz 区间与随机源），同一张卡在两端得到相同的下次复习时间，黄金样本测试锁定。
+- **单词测试**：4 选 1 答题，答错自动进入错词本；「随机单词测试」直接从整本词典抽题。
+- **文章背诵**：内置《新概念英语1》，整篇同页展示、逐句跟打并对照中文译文；标点不用输入、词间空格可省，错误标在原位，支持断点续学。
 - **自定义练习流程**：基于内置流程新建副本，编辑步骤顺序、乱序与组内巩固；启用后把练习模式切到「自定义流程」即按新编排练习。
-- **三本内置词典**：收藏、错词（自动收录）、已掌握；它们在词库页可见，可设为当前学习词典或打开词条页查看 / 编辑，已掌握的单词在后续练习中自动排除。
-- **词库与进度管理**：内置 CET-4（2607 词），支持切换词库、每日词数调整、学习进度展示、跳过阶段；跟写阶段按 7 词一组推进。
-- **统计**：结算弹层（含错词 Top10 与本周记录）、主页今日/累计概览、统计页月历、按日明细与按词典视图。
+- **词条与词典管理**：搜索、编辑、增删、排序、批量标记，可新建 / 复制自定义词典；三本内置词典（收藏 / 错词 / 已掌握）可设为当前学习词典或打开词条页，已掌握词在后续练习中自动排除。
 - **可配置快捷键**：42 个动作可在设置页改绑，存于 `shortcutKeyMap`，与上游同构。
-- **音频**：键音与对错提示音用终端响铃，发音与朗读用系统 TTS（Windows / macOS / Linux），可选切换到有道发音接口。
-- **设置与主题**：设置页覆盖练习模式、每日词数、复习比例、重复次数、FSRS 阈值、音频与快捷键等；内置深色/浅色/高对比 + 午夜墨/纸墨/克莱因蓝共 6 套主题，支持 `<home>/themes/*.json` 自定义主题。
-- **终端交互**：响应式外壳（宽屏侧栏 / 窄屏顶栏）、可点击的导航/按钮/列表、滚轮滚动；60 × 20 起可用。
-- **断点续练**：练习游标与统计快照写入本地 JSON，重启恢复到同一词、同一阶段；退出练习页回主页再按 `Enter` 也会接着练。文章跟打同样支持断点续学（句子进度与用时接得上）。
-- **工具命令**：`tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`，便于排障、脚本化预览、导入词库与网页版备份互通。
+- **音频**：键音与对错提示音用终端响铃；单词发音、文章朗读用系统 TTS（Windows / macOS / Linux），可选切换到有道发音。
+- **主题**：6 套内置（深色 / 浅色 / 高对比 / 午夜墨 / 纸墨 / 克莱因蓝）+ `<home>/themes/*.json` 自定义主题。
+- **终端交互**：响应式外壳（宽屏侧栏 / 窄屏顶栏）、可点击的导航 / 按钮 / 列表、滚轮滚动；60 × 20 起可用。
+- **断点续练**：单词游标与文章句进度写入本地 JSON，重启后按 `Enter` 继续；退出练习页回主页再按 `Enter` 也接着练。
+- **工具命令**：`tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`，覆盖排障、脚本化预览、词库导入与网页版备份互通。
 
-v1 明确**不包含**：云同步（Supabase）、在线查词 / 翻译、多语言界面、xlsx 导入导出。完整清单、行为差异与补齐顺序见 **[与上游对照](docs/upstream-parity.md)**。
+非目标：Supabase 云同步、在线查词 / 翻译、多语言界面、xlsx 与 ZIP / mp3 打包备份、跨设备冲突合并。完整差异见 [与上游对照](docs/upstream-parity.md)。
 
 ## 快速开始
 
 ### 下载发布包（推荐）
 
-从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.zip`，解压后目录结构：
-
-```text
-typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc/
-  tw.exe
-  assets/
-    list/word.json
-    dicts/en/word/*.json
-  docs/                # 本套文档（含截图）
-  README.md
-  LICENSE
-```
-
-在终端里运行 `tw.exe` 即可，程序会自动使用与 `tw.exe` 同级的 `assets/`。
+从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.zip`，解压后包含 `tw.exe`、`assets/`（词库与文章资源，必须与 exe 同级）、`docs/`、`README.md` 与 `LICENSE`。在终端里运行 `tw.exe` 即可；建议先运行 `tw.exe doctor` 确认路径与词库。
 
 ### 从源码构建
 
 需要 Rust **1.90+**（stable）。仓库自带 `assets/`，开发运行无需额外准备：
 
-```bash
-git clone https://github.com/StarTurambar/typewords-tui.git
-cd typewords-tui
-cargo run --locked          # 开发运行
-cargo build --release --locked   # 产物：target/release/tw（Windows 为 tw.exe）
-```
+    git clone https://github.com/StarTurambar/typewords-tui.git
+    cd typewords-tui
+    cargo run --locked                  # 开发运行
+    cargo build --release --locked      # 产物：target/release/tw（Windows 为 tw.exe）
 
 ### 第一次运行
 
-```bash
-tw doctor   # 检查路径、词库、存档与主题
-tw          # 进入界面：Enter 开始学习，f 自由练习，? 查看帮助
-tw task     # 只预览今日任务，不进入界面
-```
+    tw doctor   # 检查路径、词库、存档与主题
+    tw          # 进入界面：Enter 开始学习，f 自由练习，? 查看帮助
+    tw task     # 只预览今日任务，不进入界面
 
-终端建议使用 **Windows Terminal**；最小尺寸 60 × 20；深色/浅色主题需要真彩色终端（不支持时可换「高对比」主题）。终端兼容性、组合键问题与鼠标说明见 [使用手册](docs/usage.md)。
+终端建议使用 **Windows Terminal**；最小尺寸 60 × 20；深色 / 浅色主题需要真彩色终端（不支持时可换「高对比」主题）。终端兼容性、组合键问题与鼠标说明见 [使用手册](docs/usage.md)。
 
 ## 常用命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `tw` | 启动界面 |
-| `tw doctor` | 打印解析到的数据目录、资源目录、词库、存档与主题状态 |
+| `tw doctor` | 打印数据目录、资源目录、词库、5 份存档与主题状态；只读 |
 | `tw task` | 预览今日任务（新词 / 到期复习 / 随机补足） |
-| `tw import-dict FILE` | 把词库 JSON 导入数据目录并注册 |
-| `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） |
+| `tw import-dict FILE` | 把词条数组 JSON 导入数据目录并登记 |
+| `tw import-web FILE` | 导入网页版导出的备份 JSON（BackupData v5） |
 | `tw export-web [--out FILE]` | 导出成网页版能导入的备份 JSON |
 | `tw --assets DIR` | 指定只读资源目录（需含 `list/word.json`） |
-| `tw --home DIR` | 指定数据目录（等价于环境变量 `TYPEWORDS_HOME`） |
-| `tw --dict ID` | 启动后直接进入指定词库（id 或 enName，如 `cet4`；内置词典用 `wordCollect` / `wordWrong` / `wordKnown`） |
+| `tw --home DIR` | 指定数据目录（等价 `TYPEWORDS_HOME`） |
+| `tw --dict ID` | 启动后直接进入指定词库；内置词典用 `wordCollect` / `wordWrong` / `wordKnown` |
 | `tw --mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` |
-| `tw --theme NAME` | 覆盖主题：`dark/light/high-contrast/midnight/paper/ikb/auto` 或自定义主题文件名 |
+| `tw --theme NAME` | 覆盖主题：`dark/light/high-contrast/midnight/paper/ikb/auto` 或自定义文件名 |
 | `tw --seed N` | 固定随机种子（复现问题用） |
-| `tw --reset-practice` | 启动前清空练习缓存 |
+| `tw --reset-practice` | 启动前清空单词 / 文章断点缓存 |
 
-完整的参数说明、目录查找顺序与示例见 [使用手册 · 命令行参考](docs/usage.md#命令行参考)。
+完整参数、目录查找顺序与示例见 [使用手册 · 命令行参考](docs/usage.md#命令行参考)。
 
 ## 界面与操作速查
 
-十二个页面：**单词**（主页 dashboard）、**练习**、**单词测试**、**词条管理**、**文章**、**文章跟打**、**流程**、**词库**、**统计**、**设置**、**快捷键**、**帮助**，以及结算 / 输入 / 确认 / 模式 / 跳组 / 收藏目标 / 词条编辑七种弹层。宽屏（≥ 100 列）用左侧栏导航，窄屏用顶栏标签；数字 `1`~`6` 可直接切页（练习中与弹层打开时除外）。
+12 个页面：主页、练习、单词测试、词条管理、文章、文章跟打、流程、词库、统计、设置、快捷键、帮助；另有结算 / 输入 / 确认 / 模式 / 跳组 / 收藏目标 / 词条编辑 7 种弹层。宽屏（≥ 100 列）用左侧栏导航，窄屏用顶栏标签；数字 `1`~`6` 可直接切页（练习中与弹层打开时除外）。
 
 | 场景 | 按键 |
 | --- | --- |
 | 主页 | `Enter` 开始 / 继续学习、`f` 自由练习、`d` 词库、`s` 设置、`t` 统计、`m` 选择练习模式、`a` 文章、`Ctrl+F` 练习流程、`+`/`-` 每日词数 ±5、`?` 帮助、`q` 退出（需确认） |
-| 所有标签页方向键 | `↑`/`↓`（`j`/`k`）在当前栏移动选中；`←`/`→` 执行页面横向操作（主页同一行带内左右、文章页换栏、统计页选日期），宽屏内容区左边缘再 `←` 进侧栏、导航栏 `→` 回内容区；窄屏内容区最顶部 `↑` 进顶栏、顶栏 `↓` 回内容区；`Tab`/`Shift+Tab` 随时换栏；进入任何标签页默认选中内容区（主页是「开始 / 继续学习」，底栏显示选中项，当前选中项整块强调色高亮，页面行 / 日历日期也一样）；`Enter` 触发、`Esc` 在主页取消选中 / 在其它页面返回；到边停、不回绕 |
-| 练习页 | 字母/空格/退格输入；`空格` 确认/继续；`Esc` 显示完整单词；`Tab` 跳过当前词；`Enter` 收藏；反引号标记已掌握；`Ctrl+Z` 翻译、`Ctrl+I` 默写遮罩、`Ctrl+,` 暂停计时、`Ctrl+P` 朗读当前词、`Ctrl+L` 词表侧栏、`Ctrl+E` 例句/词源、`Ctrl+Enter` 重学本组、`Alt+←`/`Alt+→` 上下组、`Ctrl+C` 保存并返回；自测用 `1`/`2`/`3`，选择题用 `Alt+1`~`Alt+4` |
-| 词库 / 统计 / 设置 / 帮助 | 共用上面的两栏焦点键；`Enter` 激活（词库页设为当前词典、统计页切换视图、帮助页返回），`Esc`/`q` 返回；词库页 `w` 打开词条页、`n` 新建词典、`+`/`-` 调每日词数；设置页 `Space` 与 `Enter` 同效，统计页 `,`/`.` 翻月、`PgUp`/`PgDn` 翻页 |
-| 弹层 | 确认：`←`/`→`（或 `↑`/`↓`、`j`/`k`、`Tab`）选按钮后 `Enter`/空格执行，`y` 直接确认、`n`/`Esc` 取消；结算：方向键选按钮后 `Enter`/空格执行（单词为继续 / 重学 / 主页，文章为返回列表 / 重打本篇 / 主页），`r`/`q` 是固定快捷键；输入：`Enter` 保存、`Esc` 取消 |
+| 所有标签页 | `↑`/`↓`（`j`/`k`）在当前栏移动；`←`/`→` 执行页面横向操作；宽屏内容区左边缘再 `←` 进侧栏；`Tab`/`Shift+Tab` 换栏；进入页面默认选中内容区；`Enter` 触发、`Esc` 返回；到边停、不回绕 |
+| 练习页 | 字母 / 空格 / 退格输入；`空格` 确认 / 继续；`Esc` 显示完整单词；`Tab` 跳过当前词；`Enter` 收藏；反引号标记已掌握；`Ctrl+Z` 翻译、`Ctrl+I` 默写遮罩、`Ctrl+,` 暂停计时、`Ctrl+P` 朗读、`Ctrl+L` 词表、`Ctrl+E` 例句 / 词源、`Ctrl+Enter` 重学本组、`Alt+←`/`Alt+→` 上下组、`Ctrl+C` 保存并返回；自测用 `1`/`2`/`3`，选择题用 `Alt+1`~`Alt+4` |
+| 弹层 | 确认：方向键 / `Tab` 选按钮后 `Enter` / 空格执行，`y` 确认、`n`/`Esc` 取消；结算：方向键选按钮后 `Enter` / 空格执行，`r` / `q` 是固定快捷键；输入：`Enter` 保存、`Esc` 取消 |
 
 - **鼠标**：侧栏、按钮、列表、弹层可点击，滚轮滚动；程序开启鼠标捕获，按住 **Shift 拖拽**可选择文本。
 - **主题**：设置页切换，或启动时 `--theme`；自定义主题放到 `<home>/themes/*.json`，格式见 [主题系统](docs/themes.md)。
 
-完整按键表（含 ASCII 别名与组合键注意事项）见 [使用手册 · 按键参考](docs/usage.md#按键参考)；各页面布局与鼠标细节见 [使用手册 · 界面导览](docs/usage.md#界面导览)。
+完整按键表见 [快捷键](docs/shortcuts.md)；各页面布局与鼠标细节见 [使用手册 · 界面导览](docs/usage.md#界面导览)。
 
 ## 数据位置
 
 默认数据目录：Windows 为 `%LOCALAPPDATA%\typewords-tui`，其他平台由 `dirs` 决定；可用 `--home` 或 `TYPEWORDS_HOME` 覆盖。
 
-```text
-<home>/
-  dict.json           # 词典 + FSRS 卡片 + 收藏/错词/已掌握（对应 Web 存档 v4）
-  setting.json        # 设置（对应 Web 存档 v23）
-  practice-word.json  # 断点练习缓存（对应 Web 存档 v2）
-  practice-article.json  # 文章跟打断点缓存（对应 Web 存档 v1）
-  themes/*.json       # 自定义主题（启动时加载）
-  dicts/、list/        # 通过 import-dict 导入的词库
-```
+    <home>/
+      dict.json              # 词典 + FSRS 卡片 + 收藏/错词/已掌握 + 统计（v4）
+      setting.json           # 设置（v23）
+      practice-word.json     # 单词断点缓存（v2）
+      practice-article.json  # 文章跟打断点缓存（v1）
+      flows.json             # 自建练习流程（无版本号）
+      themes/*.json          # 自定义主题（启动时加载）
+      dicts/、list/          # 通过 import-dict 导入的词库
+      .tw.lock               # 数据目录独占锁（写入口常驻）
 
-写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename，并用 `<home>/.tw.lock` 保证同一个数据目录只跑一个写实例；解析失败的存档会被隔离为 `*.corrupt-<时间戳>.json`。版本高于程序支持的 `dict.json` 与 `setting.json` 都只读不覆盖；练习缓存版本不受支持时忽略（见 [存档与数据格式](docs/persistence.md)）。备份、迁移与字段含义见同一文档。
+写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename；同一数据目录同时只允许一个写实例。解析失败的存档会隔离为 `*.corrupt-<时间戳>.json`；版本高于程序支持的 `dict.json` 与 `setting.json` 只读不覆盖。备份、迁移与字段含义见 [存档与数据格式](docs/persistence.md)。
 
 ## 文档
 
-完整文档在 [`docs/`](docs/README.md)，按读者和主题组织：
+完整文档在 [docs/](docs/README.md)：
 
 | 文档 | 内容 |
 | --- | --- |
-| [使用手册](docs/usage.md) | 安装、终端要求、CLI、界面导览、练习流程、按键、鼠标、FAQ 与排障 |
+| [使用手册](docs/usage.md) | 安装、终端要求、CLI、界面导览、10 种模式、按键、鼠标、FAQ 与排障 |
 | [设置项参考](docs/settings.md) | 设置页 32 行的默认值、取值范围、作用；FSRS 参数与无 UI 的透传字段 |
-| [主题系统](docs/themes.md) | 13 个颜色 token、内置主题、自定义主题格式与校验规则 |
-| [存档与数据格式](docs/persistence.md) | 数据目录、三份存档与资源 JSON、版本策略、与 Web 数据互通 |
-| [总体架构](docs/architecture.md) | 技术栈、分层与依赖约束、启动/事件循环、数据流、设计决策、技术债 |
-| [领域逻辑](docs/domain.md) | 数据模型、今日任务、FSRS、计时、键入状态机、7 个流程、会话与统计 |
-| [应用状态机](docs/app.md) | App 状态、输入路由、Action 管线、屏幕/弹层状态机、保存时机 |
-| [渲染层](docs/ui.md) | 渲染管线、响应式外壳、各页面、点阵大字、鼠标命中 |
-| [开发指南](docs/development.md) | 构建/测试/静态检查、测试体系、调试、截图、词库同步、CI 与发布 |
-| [与上游对照](docs/upstream-parity.md) | 与 Web/桌面端的功能矩阵、行为差异、数据互通、路线图 |
+| [快捷键](docs/shortcuts.md) | 42 个动作、默认绑定、改绑、TUI 专有键、与上游差异 |
+| [主题系统](docs/themes.md) | 13 个颜色 token、6 套内置主题、自定义主题格式与校验规则 |
+| [存档与数据格式](docs/persistence.md) | 数据目录、5 份存档与资源 JSON、版本策略、与 Web 数据互通 |
+| [总体架构](docs/architecture.md) | 分层与依赖约束、生命周期、状态 / 输入、子系统契约、扩展指南、技术债 |
+| [开发指南](docs/development.md) | 构建 / 测试 / 静态检查、测试体系、调试、截图、词库同步、CI 与发布 |
+| [与上游对照](docs/upstream-parity.md) | 与 Web / 桌面端的功能矩阵、行为差异、数据互通、同步方法 |
 
 ## 与上游 TypeWords 的关系
 
-- 上游项目：[zyronon/TypeWords](https://github.com/zyronon/TypeWords)，Nuxt + Vue 的 Web / Tauri 桌面端。
-- 本仓库是**独立进程的终端客户端**：与上游共享词库资源格式和存档字段命名，但不共享代码，也不读写浏览器 IndexedDB。
-- `assets/` 中的词库与文章来自上游仓库的 `public/list/`、`public/dicts/en/word/` 与 `public/dicts/en/article/`；维护者可用 `node scripts/sync-assets.mjs --source <TypeWords 仓库路径>` 更新。
-- 当前功能覆盖范围、与上游的具体差异、仍未对齐的部分，见 **[与上游对照](docs/upstream-parity.md)**。
+- 上游项目 [zyronon/TypeWords](https://github.com/zyronon/TypeWords) 是 Nuxt + Vue 的 Web / Tauri 桌面端；本仓库是**独立进程的终端客户端**，与上游共享词库资源格式和存档字段命名，但不共享代码，也不读写浏览器 IndexedDB。
+- `assets/` 的词库与文章来自上游 `public/`，维护者可用 `node scripts/sync-assets.mjs --source <TypeWords 仓库路径>` 更新。
+- 当前功能覆盖范围与差异见 **[与上游对照](docs/upstream-parity.md)**。
 
-## 开发
+## 开发与贡献
 
-```bash
-cargo fmt --all --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-```
+提交前跑 `cargo fmt --all --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`（CI 同样覆盖 fmt / clippy / Ubuntu + Windows）。测试体系、截图工具、词库同步与发布检查清单见 [开发指南](docs/development.md)；参与开发前也请读 [贡献指南](CONTRIBUTING.md)，文档纠错可直接提 PR。
 
-CI 覆盖 fmt / clippy / Ubuntu + Windows 测试；推送 `v*` tag 触发 Windows 发布包。详细的测试体系、截图工具、词库同步与发布检查清单见 [开发指南](docs/development.md)。
-
-## 排障
-
-| 现象 | 处理 |
-| --- | --- |
-| 启动报「找不到词库资源目录」 | 确认 `assets/` 与可执行文件同级，或用 `--assets` 指向含 `list/word.json` 的目录 |
-| 中文/边框错位 | 换用 Windows Terminal，确认字体支持中文与制表符 |
-| 提示「存档已损坏，已隔离」 | 坏文件已重命名为 `*.corrupt-*.json`，可删除或用 `tw doctor` 排查 |
-| 提示「存档版本过高」 | `dict.json` / `setting.json` 来自更新版本时本次只读、不会覆盖；请备份并升级程序 |
-
-更多现象、原因与处理见 [使用手册 · 常见问题与排障](docs/usage.md#常见问题与排障)。
-
-## 贡献与许可证
-
-- 参与开发前请读 [开发指南](docs/development.md)；文档纠错直接提 PR 即可。
-- 本项目遵循 [GPL-3.0](LICENSE)。词库数据来自上游 TypeWords 仓库，遵循同一许可证。
+本项目遵循 [GPL-3.0](LICENSE)。词库数据来自上游 TypeWords 仓库，遵循同一许可证。

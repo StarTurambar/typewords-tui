@@ -144,3 +144,87 @@ fn docs_index_lists_every_document() {
         missing.join("\n")
     );
 }
+
+/// 从 Cargo.toml 的 [package] 段读取 version。
+fn package_version(root: &Path) -> String {
+    let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml 应存在");
+    let mut in_package = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if in_package && line.starts_with('[') {
+            break;
+        }
+        if in_package && let Some(value) = line.strip_prefix("version = ") {
+            return value.trim().trim_matches('"').to_string();
+        }
+    }
+    panic!("Cargo.toml 的 [package] 段应有 version");
+}
+
+/// 文档里的「对应版本」必须与 Cargo.toml 一致，避免发版后文档仍写旧版本。
+#[test]
+fn docs_version_matches_cargo_version() {
+    let root = repo_root();
+    let version = package_version(&root);
+    let index = fs::read_to_string(root.join("docs/README.md")).expect("docs/README.md 应存在");
+    let expected = format!("typewords-tui {version}");
+    assert!(
+        index.contains(&expected),
+        "docs/README.md 的「对应版本」应包含 {expected}（Cargo.toml 当前版本）"
+    );
+}
+
+/// 收集文档中提到的 src/...rs 路径（只取 ASCII 路径片段）。
+fn source_paths(content: &str) -> Vec<String> {
+    let bytes = content.as_bytes();
+    let mut paths = Vec::new();
+    let mut cursor = 0;
+    while cursor + 4 <= bytes.len() {
+        if &bytes[cursor..cursor + 4] == b"src/" {
+            let start = cursor;
+            let mut end = cursor + 4;
+            while end < bytes.len() {
+                let byte = bytes[end];
+                if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'/' | b'.' | b'-') {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            let candidate = &content[start..end];
+            if candidate.ends_with(".rs") {
+                paths.push(candidate.to_string());
+            }
+            cursor = end;
+        } else {
+            cursor += 1;
+        }
+    }
+    paths
+}
+
+/// 文档引用的源码文件必须存在：重命名模块后，旧路径会在这里立刻暴露。
+#[test]
+fn referenced_source_paths_exist() {
+    let root = repo_root();
+    let mut broken = Vec::new();
+    for document in markdown_files(&root) {
+        let content = fs::read_to_string(&document).unwrap_or_default();
+        for path in source_paths(&content) {
+            if !root.join(&path).is_file() {
+                let from = document.strip_prefix(&root).unwrap_or(document.as_path());
+                broken.push(format!("{}: {path}", from.display()));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "以下文档引用的源码路径不存在（共 {} 条）：\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}

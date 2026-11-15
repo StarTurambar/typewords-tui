@@ -1,446 +1,231 @@
-# 与上游 TypeWords 的差异与路线图
+# 与上游 TypeWords 的差异
 
-typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游的词库资源、存档字段命名和「单词练习闭环」，重新实现一套终端客户端。判断「还缺什么」时不能只看页面数量：音频、动画、WebView 这类能力在终端里无法对等实现，而跳组、笔记这类能力只是这一版没有接线。
+本文对照上游 [TypeWords](https://github.com/zyronon/TypeWords) 的 Web / Tauri 桌面端，给出两端定位、功能矩阵、行为差异、数据互通与上游同步方法。结论只以源码为事实来源（TUI 的 `src/**`、`tests/**` 与上游的 `app/**`）；文中「上游路径」指上游仓库内的路径。
 
-本文对照上游 TypeWords 的 Web / Tauri 桌面端，给出两端定位、逐项功能矩阵、行为差异、数据互通方式、分优先级路线图，以及维护者随上游升级更新对照结论的方法。项目本身的定位与功能概览见 [根 README](../README.md)。结论只以源码（TUI 的 `src/**`、`tests/**` 与上游的 `app/**`）为事实来源；文中「上游路径」均指上游仓库内的路径，不用本地解包目录的路径。
-
-> 适用范围：评估两端定位差异、功能覆盖、数据互通与补齐顺序；用户操作见使用手册，模块细节见对应的模块文档。对应版本：typewords-tui 0.3.1。
-
-## 1. 基线与对照方法
+## 1. 基线与判定
 
 ### 1.1 两端定位
 
-上游 TypeWords 是 Nuxt 4 + Vue 3 + Pinia + UnoCSS + vue-i18n 的 Web 应用，`app/` 下共 15 个页面、约 210 个文件、约 3.5 万行；同一份前端产物装进 Tauri v2 壳即为 Windows 桌面端（`package.json` 的 `desktop:*` 脚本、`docs/DESKTOP.md`）。数据存在浏览器 IndexedDB（`idb-keyval`），练习调度用 `ts-fsrs`，声音、在线查词、翻译、云同步都依赖网络能力。
+| 维度 | 上游 TypeWords（Web / Tauri） | typewords-tui |
+| --- | --- | --- |
+| 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 64 个 Rust 文件、约 2.8 万行，12 个屏幕 + 7 类弹层 |
+| 产物与环境 | `nuxt generate` 静态站；桌面端是 Tauri 安装包（WebView2 载入同一份前端），运行在浏览器或桌面窗口 | 单个 `tw` 二进制 + 只读 `assets/`，运行在终端（最小 60 × 20），无 WebView、无 Node 运行时 |
+| 数据与网络 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1)；在线查词、百度翻译、有道发音、Supabase 同步、umami 埋点 | 数据目录 5 份 JSON：`dict.json`(4)、`setting.json`(23)、`practice-word.json`(2)、`practice-article.json`(1)、`flows.json`（无版本）；默认离线，唯一联网能力是可选的有道发音（系统 `curl` 下载 mp3，外部播放器播放） |
+| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 27 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 的 Windows zip（exe + assets + docs + LICENSE + SHA256） |
 
-本仓库是独立进程的终端客户端：Rust 2024 + ratatui 0.30 + crossterm 事件层，FSRS-6 算法由 `src/domain/fsrs.rs` 自实现（逐条移植上游 ts-fsrs），`src/` 下 58 个文件、约 2.1 万行；界面为 12 个屏幕（主页 / 练习 / 单词测试 / 词条管理 / 文章 / 文章跟打 / 流程 / 词库 / 统计 / 设置 / 快捷键 / 帮助）加 7 类弹层（结算 / 输入 / 确认 / 模式 / 跳组 / 收藏目标 / 词条编辑），数据是本地 JSON，默认不联网、无 WebView。
-
-### 1.2 对照基线记录
+### 1.2 对照基线
 
 | 项 | 记录 |
 | --- | --- |
-| 上游仓库 | `zyronon/TypeWords` |
-| 对照快照 | 上游 `feature/tui` 分支（2026-10）解包快照 |
-| 记录的上游提交 | origin/master `6da7641`、upstream/dev `bf50eae`（拆分时记录；解包内容不含 `.git`，本仓库无法复核哈希） |
-| 上游 TUI 子目录 | 上游仓库内含 `tui/` 子目录，本仓库是从中拆出的独立仓库：`6520fb6`、`7cbfb22` 继承自上游 TUI 历史，`a7f1ea4` 起为独立历史 |
-| 数据版本 | dict 4、setting 23、练习缓存 2、内置流程 6；Web 备份格式 5、文章缓存 1 |
-| 词库资源 | 快照 `public/list/word.json` 仅登记 CET-4（2607 词），`public/dicts/en/word/CET4_T.json` 约 4.5 MB |
-| 本文更新时间 | 2026-10-18 |
+| 上游仓库与快照 | `zyronon/TypeWords`（GPL-3.0，词库数据同许可证；TUI 沿用），本仓库对照的是其 `feature/tui` 分支（2026-10）的解包快照 |
+| 上游提交与仓库关系 | 记录 origin/master `6da7641`、upstream/dev `bf50eae`（拆分时记录；解包内容不含 `.git`，本仓库无法复核哈希）。上游内含 `tui/` 子目录，本仓库从中拆出：`6520fb6`、`7cbfb22` 继承上游 TUI 历史，`a7f1ea4` 起为独立历史 |
+| 数据与流程版本 | dict 4 / setting 23 / 练习缓存 2 / 文章缓存 1；内置流程 `CURRENT_FLOW_VERSION` = 6；Web 备份格式 5 |
 
-### 1.3 状态判定与对照方法
+### 1.3 状态判定
 
-先读完全部上游页面与 `app/core`（stores / hooks / composables / utils），再逐项在 TUI 源码中找实现与调用点；README 与上游文档只作线索，遇到不一致以源码和测试为准。状态定义：
+做法是先读上游页面与 `app/core`（stores / hooks / composables / utils），再逐项在 TUI 源码里找实现与调用点；README 与上游文档只作线索，不一致时以源码和测试为准。状态分六档：**已对齐**（有等价实现，差异不影响用户可见行为）、**部分**（主链路存在但缺子能力或入口受限）、**行为不同**（同名功能实现语义不同）、**缺失**（上游有、TUI 没有）、**TUI 独有**（上游没有的新能力）、**不适用**（终端形态下没有对等意义）。
 
-| 状态 | 含义 |
-| --- | --- |
-| 已对齐 | TUI 有等价实现，差异不影响用户可见行为 |
-| 部分 | 主链路存在，但缺子能力、入口受限或只覆盖一部分场景 |
-| 行为不同 | 两端都有同名功能，但实现语义或交互不同 |
-| 缺失 | 上游有、TUI 没有对应实现 |
-| TUI 独有 | 上游没有对应实现，TUI 新增的能力 |
-| 不适用 | 终端或独立进程形态下没有对等意义 |
+## 2. 功能矩阵
 
-## 2. 总体定位对比
+「上游」列是能力载体（页面 / 组件 / hooks / 运行时文件），「TUI 现状」是实现位置与差异。
 
-| 维度 | 上游 TypeWords（Web / Tauri 桌面） | typewords-tui 0.3.1 |
+| 分组 | 功能 | 上游（页面 / 文件） | TUI 现状 | 状态 |
+| --- | --- | --- | --- | --- |
+| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分：当前词库、今日任务、统计、我的词典、推荐齐全；无月历、任务词表预览、改进度入口 |
+| 外观 | 侧栏一级导航 | `layouts/default.vue` | `src/ui/shell.rs` | 部分：单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6；无反馈、文档、资源分享 |
+| 外观 | 主题 | CSS 变量 + `hooks/theme.ts` | 13 token、6 套内置 + 自定义 JSON | 行为不同：自定义主题是 TUI 独有；`auto` 等同深色，不跟随系统 |
+| 词库 | 词库目录、切换与每日词数 | `(words)/dict-list.vue`、`components/word/PracticeSettingDialog.vue` | `src/ui/dict_picker.rs`；设置页「复习 → 每日词数」+ 主页 / 词库页 `+` `-` | 部分：三本内置词典 + 本地目录，可设为当前并打开词条页；无搜索、分类分组、封面、在线目录；每日词数步进 5、设置页可精确输入，无滑块与预计完成天数 |
+| 词库 | 修改学习进度 / 跳组 | `ChangeLastPracticeIndexDialog.vue`、`GroupList.vue` | 状态行「第 N 组」可点击 → 跳组弹层 | 已对齐 |
+| 词库 | 词条增删改查、批量、排序、自定义词典与收藏 | `(words)/dict.vue`、`BaseTable.vue`、`WordItem.vue`、`WordCollectPopover.vue` | 词条管理页；词库页 `n` 新建、`c` 复制；`Shift+Enter` 选收藏目标词典 | 已对齐：见 [使用手册 · 词条管理](usage.md#词条管理) |
+| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx / json）、`/import` | `tw import-dict`（词条数组 JSON） | 部分：仅 CLI、仅 JSON，没有导出与 xlsx |
+| 练习 | 7 个内置流程 | `practice-flow-config.ts`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐：节点、步骤、7 词小组、错词清空一致，`tests/flow_parity.rs` 覆盖 |
+| 练习 | 练习模式切换入口 | `words.vue` 的模式下拉 | `m` 打开 10 项模式选择弹层（主页「模式」标签也可点开） | 已对齐：写入 `wordPracticeMode`，`--mode` 仍可启动覆盖 |
+| 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（存 localStorage） | 流程页：新建副本 / 编辑步骤 / 启用，存 `flows.json` | 部分：可调步骤顺序、乱序、组内巩固；不能增删节点、不能改节点词表来源 |
+| 练习 | 单词测试 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | `src/ui/word_test.rs`（`1`~`4` 选择、`Space` 下一题） | 已对齐：4 选 1、答错入错词本、结算 |
+| 练习 | 随机复习范围 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同：TUI 无「已学 10 词」门槛，进度为 0 时取整本词库 |
+| 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐：含错词 Top10 与本周记录；无分享入口 |
+| 练习 | 学完判定 / 总复习 | `words.vue` 的 `getCurrentStudyWord`、`updateCompletedDictProgress` | `domain/study_task.rs`、`domain/session.rs` | 行为不同：TUI 按词表实际词数判完、最后一个词仍作新词学完并置 `complete`；上游 `isEnd = length - 1` 会提前转复习 |
+| 练习 | 练习内导航（跳阶段 / 上下词 / 重学 / 上下组）与自测选择题 | `usePracticeWordNavigator`、`createRepeatTask` / `createNextTask`、`WordIdentifyPanel.vue` | `domain/flow/navigator.rs` + 键位与结算弹层按钮；`src/domain/question.rs` | 已对齐：键位有别名差异，语义与题目生成一致 |
+| 调度 | 评级阈值、学习步进与到期筛选 | `core/hooks/fsrs.ts`、`core/hooks/dict.ts`、`study-task.ts` | `src/domain/scheduler.rs`、`src/domain/fsrs.rs`、`src/domain/study_task.rs` | 部分：评级 0 / 3 / 6 分档、步进读设置、无到期随机填充一致；上游顺手删除已掌握词的 FSRS 记录，TUI 只忽略不删 |
+| 统计 | 主页统计、本周记录、月历与按日明细、统计口径 | `(words)/words.vue`、`base/Calendar.vue`、`Statistics.vue` | `src/ui/home.rs`、`src/ui/insights.rs`、统计页（月历 + 选中日明细 + `v` 按词典视图）、`src/domain/statistics.rs` | 已对齐：跨天拆分、sessionRole、正确率算法一致 |
+| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 32 行） | 部分：覆盖练习手感与 FSRS 阈值；见 3.3 与 [设置项参考](settings.md) |
+| 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑 / 清除 / 恢复默认 | 已对齐：存 `shortcutKeyMap`，见 [快捷键](shortcuts.md) |
+| 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 可配置键位 + 终端鼠标（点击、滚轮） | 行为不同：终端鼠标没有悬停与拖拽，复制要 `Shift+拖拽` |
+| 断点 | 本地缓存、续练与 v1 升级 | `PracticeSaveWord` v2、`PracticeSaveArticle` v1、`checkAndUpgradePracticeWordCache` | `practice-word.json` v2、`practice-article.json` v1、`try_resume_saved_practice` | 部分：单词缓存同构、主页「上次任务」提示已对齐；v1 缓存不迁移，被下一次保存覆盖；文章断点见 4.3 |
+| 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失：默认离线 |
+| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts` | `src/domain/article.rs` + `src/ui/articles.rs` | 部分：断句、句子与译文对齐、整篇跟打已实现；缺逐句音频时间轴、课后题与查词 |
+| 音频 | 发音与键盘音效 | `hooks/sound.ts`、`base/Audio.vue` | `src/audio/` | 部分：响铃 + 系统 TTS + 可选有道 mp3；无音量 / 音色选择与逐句音频 |
+| 查词 | 练习中查词与在线翻译 | `WordLookupPopover.vue`、`libs/translate/*` | 无 | 缺失：离线设计目标 |
+| 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑；词条编辑弹层含笔记字段 | 已对齐 |
+| 多语言 | 界面语言切换 | `i18n/locales/*.json`（14 种） | 中文硬编码（`src/domain/i18n.rs`） | 缺失：键名对齐上游，但没有语言包 |
+| 云同步 | Supabase 同步 | `utils/supabase.ts` | 无 | 缺失：上游设置页已标为「过时功能」 |
+| 备份 | 备份导入导出 | `hooks/export.ts`（ZIP 与 JSON） | `tw import-web` / `tw export-web`（JSON） | 部分：同一套 `BackupData` v5；不支持 ZIP 与 mp3 |
+
+## 3. 行为差异
+
+### 3.1 FSRS
+
+评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：同一张卡在 TUI 与 Web 上算出的下次复习时间相同。
+
+| 维度 | 上游（ts-fsrs） | TUI（`src/domain/fsrs.rs`） |
 | --- | --- | --- |
-| 技术栈 | Nuxt 4.2、Vue 3.5、Pinia 3、UnoCSS 66、vue-i18n 11、ts-fsrs 5.2、idb-keyval、Tauri v2 | Rust 2024（rust-version 1.90）、ratatui 0.30.2、crossterm、serde / chrono / clap（FSRS-6 自实现） |
-| 产物 | `nuxt generate` 静态站（`.output/public`）；桌面端为 Tauri 安装包，WebView2 加载同一份前端 | 单个 `tw.exe` + 只读 `assets/` 目录；无运行时、无 Node、无 WebView2 |
-| 运行环境 | 浏览器（含移动端）或 Windows 桌面窗口 | 终端（Windows Terminal 等），最小 60 × 20 |
-| 代码共享 | 与 TUI 不共享代码 | 不复制上游 TS/Vue 实现，只沿用资源格式、字段命名与行为约定 |
-| 词库资源 | `public/list/word.json` + `public/dicts/<lang>/word/*.json`（另有 article 目录） | 同布局的 `assets/`（当前仅 CET-4），可 `--assets` 替换、`tw import-dict` 扩展 |
-| 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 4 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 / 1 |
-| 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 默认无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测；「有道发音」可选，用系统 `curl` 下载 mp3 |
-| 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 27 个集成测试文件 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
-| 分发 | 静态站 + Tauri NSIS 安装包 | GitHub Release 的 Windows zip（`tw.exe`、`assets/`、`docs/`、README、LICENSE、SHA256） |
-| 许可证 | GPL-3.0（上游仓库内含 LICENSE，词库数据同许可证） | GPL-3.0（见仓库 LICENSE，词库数据沿用上游许可证） |
-
-上游 15 个页面与 TUI 的对应关系（页面清单来自 `app/pages`）：
-
-| 上游页面（`app/pages/`） | 作用 | TUI 对应 |
-| --- | --- | --- |
-| `index.vue` | 营销落地页（打字 demo、下载入口） | 无（不适用） |
-| `(words)/words.vue` | 单词学习主页：当前词库、今日任务、统计、词典、推荐 | 主页 `src/ui/home.rs` |
-| `(words)/dict-list.vue` | 词库目录：搜索、分类标签、在线资源 | 词库页 `src/ui/dict_picker.rs`（三本内置词典 + 本地目录，无搜索/分组） |
-| `(words)/dict.vue` | 单词管理：增删改、批量、导入导出、复制词库 | 无 |
-| `(words)/practice-words/[id].vue` | 单词练习页 | 练习页 `src/ui/practice.rs` |
-| `(words)/words-test/[id].vue` | 单词测试（4 选 1） | 无 |
-| `(articles)/articles.vue` | 文章学习主页 | 文章页 `src/ui/articles.rs`（书本 + 文章列表，合并上游的两级页面） |
-| `(articles)/book-list.vue` | 书籍目录 | 无（与文章页合并） |
-| `(articles)/book/[id].vue` | 书籍详情与文章列表、音频 | 无（与文章页合并；音频用系统 TTS 替代） |
-| `(articles)/practice-articles/[id].vue` | 文章跟打/默写页 | 文章跟打页 `src/ui/articles.rs` |
-| `setting.vue` | 设置（10 个 tab） | 设置页 `src/ui/settings.rs`（7 分区 32 行） |
-| `help.vue` | 常见问题（FAQ） | 帮助页 `src/ui/help.rs`（快捷键与鼠标说明） |
-| `doc.vue` | 英语学习资源分享 | 无 |
-| `about.vue` | 关于 | 无 |
-| `feedback.vue` | 反馈 | 无 |
-
-界面截图见 [主页](screenshots/home-120x40-dark.png)、[练习](screenshots/practice-120x40-dark.png)、[设置](screenshots/settings-120x40-dark.png)；主题差异见 [高对比主题](screenshots/home-120x40-high-contrast.png)。
-
-## 3. 功能矩阵
-
-表内「上游」列是能力载体（页面 / 组件 / hooks / 运行时文件），「TUI 现状」是当前实现位置。
-
-| 分组 | 功能 | 上游（页面/文件） | TUI 现状 | 状态 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| 主页 | 学习主页 dashboard | `(words)/words.vue` | `src/ui/home.rs` | 部分 | 当前词库、今日任务、统计、我的词典、推荐齐全；无月历、任务词表预览、改学习进度入口、「上次任务」标题 |
-| 外观 | 侧栏一级导航 | `app/layouts/default.vue`（单词 / 文章 / 反馈 / 文档 / 帮助 / 设置） | `src/ui/shell.rs` | 部分 | 单词 / 文章 / 词库 / 统计 / 帮助 / 设置六项，数字键 1~6 连续；无反馈、文档、资源分享（与学习无关，且上游页面本身无对应实现） |
-| 主页 | 营销落地页 | `index.vue` | 无 | 不适用 | 终端客户端不需要网站首页 |
-| 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
-| 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 列表 = 三本内置词典（收藏 / 错词 / 已掌握）+ 本地目录，可设为当前词典并打开词条页；无搜索、分类分组、封面、在线目录 |
-| 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页「复习 → 每日词数」+ 主页/词库页 `+`/`-` | 部分 | 主页/词库页步进 5 词，设置页可输入 1 ~ 词库词数的精确值（显示值按词库词数夹取）；仍无滑块、预计完成天数，复习比例在单独一行而非同一弹窗 |
-| 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线；装载时按词表实际词数校正词数与进度（对齐 `words.vue` init 的 `length = dict.words.length` 与 `lastLearnIndex > length` 分支） |
-| 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 词条管理页（搜索 / 编辑 / 增删 / 排序 / 批量标记） | 已对齐 | 见 [使用手册 · 词条管理](usage.md#词条管理) |
-| 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 词库页 `n` 新建、`c` 复制 | 已对齐 | 自建词典落在数据目录，会自动出现在词库页 |
-| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx/json）、`/import` 入口 | `tw import-dict`（词条数组 JSON） | 部分 | 仅 CLI、仅 JSON；xlsx 需要新依赖，本版不做 |
-| 词库 | 收藏到指定词典 | `WordCollectPopover.vue`、`useWordCollectPicker.ts` | `Shift+Enter` 弹层选择目标词典 | 已对齐 | 目标是「收藏」+ 用户自建词典 |
-| 词库 | 批量标记 | `components/word/WordMarkPickList.vue` | 词条管理页勾选后 `1`/`2`/`3` | 已对齐 | 认识 / 已掌握 / 不认识 |
-| 练习 | 7 个内置流程 | `practice-flow-config.ts` 的 `BUILTIN_FLOWS`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐 | 节点、步骤、7 词小组、错词清空与上游一致，`tests/flow_parity.rs` 覆盖 |
-| 练习 | 练习模式切换入口 | `words.vue` 的模式下拉（学习/复习/随机/单词测试/随机单词测试） | `m` 键或主页「模式」提示打开选择弹层，十种模式 | 已对齐 | TUI 独有下拉菜单；`--mode` 仍可覆盖 |
-| 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（用户流程存 localStorage） | 流程页：新建副本 / 编辑步骤 / 启用 | 部分 | 结构与上游同构（存 `flows.json`）；不支持节点的增删与步骤参数编辑 |
-| 练习 | 单词测试模式 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | 独立答题页（`src/ui/word_test.rs`） | 已对齐 | 4 选 1、答错入错词本、结算 |
-| 练习 | 随机复习范围/数量设置 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同 | TUI 无「已学 10 词」门槛；学习进度为 0 时取整本词库 |
-| 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐 | 含错词 Top10 与本周记录（当前词典口径）；无分享入口 |
-| 练习 | 学完判定 / 总复习阶段 | `words.vue` 的 `getCurrentStudyWord`（`isEnd`）与 `updateCompletedDictProgress` | `src/domain/study_task.rs`、`src/domain/session.rs` | 行为不同 | 学完判定按词表实际词数；`is_end` 取「剩余已无可学新词」，最后一个词仍作为新词学完并置 `complete`。上游按 `lastLearnIndex >= length - 1` 提前转入复习，最后一个词学不到、`complete` 可能永远不置位 |
-| 练习 | 重学 / 下一组 | 结算弹层按钮、`createRepeatTask` / `createNextTask` | 结算弹层 + 练习中 `Ctrl+Enter` / `Alt+←` / `Alt+→` | 已对齐 | 练习中可随时重学本组、上下组 |
-| 练习 | 跳阶段 / 上一词 / 下一词 / 跳过 | `usePracticeWordNavigator` + 快捷键 | `domain/flow/navigator.rs` + 键位 | 已对齐 | 键位有差异，语义一致（见 4.2） |
-| 练习 | 自测选择题 | `components/word/WordIdentifyPanel.vue`、`utils/word-test.ts` | `src/domain/question.rs` | 已对齐 | 4 选 1、相似度排序、随机扰动 |
-| 调度 | 评级阈值 | `core/hooks/fsrs.ts` 的 `getGradeByWrongTimes` | `src/domain/scheduler.rs` | 已对齐 | 默认 0 / 3 / 6 次错误分档 |
-| 调度 | 学习步进 | ts-fsrs 的 `learning_steps` / `relearning_steps` | 读设置，同上游 | 已对齐 | 详见 4.1 |
-| 调度 | 复习间隔 | ts-fsrs（FSRS-6，21 权重） | `src/domain/fsrs.rs` 逐条移植 ts-fsrs | 已对齐 | 同一张卡的下次复习时间相同；黄金样本见 `tests/fsrs_parity.rs` |
-| 调度 | 到期复习筛选 | `core/hooks/dict.ts` 的 `getCurrentStudyWord` | `src/domain/study_task.rs` | 部分 | 都按本地自然日；上游会顺手删除已掌握词的 FSRS 记录，TUI 只忽略不删 |
-| 调度 | 词典进度推进 / 学完判定 | `usePracticeWordSession.ts` 的 `updateCompletedDictProgress`、`core/hooks/dict.ts` 的 `isEnd` | `domain/session.rs` 的 `advance_dict_progress`、`domain/study_task.rs` | 行为不同 | 上游在 `settle` 与 `createNextTask` 各推进一次 `lastLearnIndex`（「继续」后整组词被跳过）、`isEnd = length - 1`（只剩最后一个词时永远学不完）；TUI 只在结算推进一次、`create_next_task` 只复核完成度，`is_end` 到词表末尾才成立（见 [领域逻辑](domain.md) 第 5 与 12.5 节） |
-| 调度 | 高级 FSRS 参数 | `components/setting/FsrsSetting.vue` | 仅留存率有 UI | 部分 | `maximum_interval`/`w`/`enable_fuzz` 改文件后生效但无 UI；fuzz 为 ±5% 近似实现（见 4.3） |
-| 调度 | 无到期时随机填充复习 | `study-task.ts` 的 `addRandomReviewWhenNoDue` | `src/domain/study_task.rs` | 已对齐 | 数量、排除集合、随机来源一致 |
-| 统计 | 主页三项统计与本周记录 | `(words)/words.vue` | `src/ui/home.rs`、`src/ui/insights.rs` | 已对齐 | 今日时长 / 学习天数 / 累计时长 + 周一至周日 |
-| 统计 | 日历与按日记录钻取 | `base/Calendar.vue`、`words.vue` 学习记录弹窗 | 统计页有月历 + 选中日按词典明细 | 已对齐 | 日历以周一为首；有记录的日子打点；`v` 可切到按词典视图 |
-| 统计 | 独立统计页 | 无（Web 无对应页面） | `src/ui/stats.rs` | TUI 独有 | TUI 新增页面，见第 6 节 |
-| 统计 | 统计口径 | `Statistics.vue`、`flushStatToStore` | `src/domain/statistics.rs` | 已对齐 | 跨天拆分、sessionRole、正确率算法一致；聚合时按 role 去重计数（见 4.5） |
-| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 32 行） | 部分 | 覆盖练习手感与 FSRS 阈值；详见 4.3 与设置项参考 |
-| 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`config/env.ts` 的 `DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑/清除/恢复默认 | 已对齐 | 存于 `shortcutKeyMap`，与上游同构；详见 [快捷键](shortcuts.md) |
-| 设置 | 练习内快捷设置 | `components/setting/SettingDialog.vue` | 无 | 缺失 | 只能回到全局设置页 |
-| 设置 | 字号设置 | `components/setting/WordSetting.vue`（滑杆） | 无 | 不适用 | 终端字号由终端与字体决定 |
-| 外观 | 主题 | CSS 变量 + `hooks/theme.ts`（light / dark / auto） | 13 token、6 套内置 + 自定义 JSON | 行为不同 | TUI 独有自定义主题；`auto` 等同深色，不跟随系统 |
-| 外观 | 响应式布局 | CSS 断点 + 移动端顶部导航 | 终端宽窄外壳（100 / 120 列阈值，60×20 下限） | 行为不同 | 见第 6 节与 [渲染层](ui.md) |
-| 外观 | 动画 / 过渡 | SCSS 动画、Vue Transition、Shepherd Tour | 无 | 缺失 | 终端字符渲染无法对等（见第 9 节） |
-| 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 可配置键位 + 终端鼠标（点击/滚轮） | 已对齐 | 见 4.2 与 4.6 |
-| 交互 | 拖拽 / 悬停 | 列表拖拽排序、hover 显示单词 | 无拖拽、无 hover | 缺失 | 终端鼠标没有悬停语义 |
-| 交互 | 文本选择与复制 | 浏览器原生选择 | 鼠标捕获下用 `Shift+拖拽` | 行为不同 | 见 [使用手册](usage.md) 的鼠标一节 |
-| 断点 | 本地练习缓存 | `PracticeSaveWord` v2 | `practice-word.json` v2 | 已对齐 | 同构 compact 结构（含 `sessionSnapshot`） |
-| 断点 | 同一次运行内续练 | `words.vue` 的 `systemPractice()` 传 `practiceData` | `try_resume_saved_practice` | 已对齐 | 非自由模式按 Enter 接着上次的断点；自由练习与换模式时重开一轮 |
-| 断点 | 主页的断点提示 | `isSaveData ? '上次任务' : '今日任务'` | `home.rs` 的标题与按钮文案 | 已对齐 | 有缓存时标题变「上次任务」、按钮变「继续学习」 |
-| 断点 | 文章跟打缓存 | `PracticeSaveArticle` v1 | `practice-article.json` v1 | 部分 | TUI 本地断点完整；TUI 导出的备份用 `tuiPracticeData` 扩展往返保留句子进度与用时；网页版自己产生的游标没有文章 id，导入时丢弃 |
-| 断点 | v1 缓存升级 | `checkAndUpgradePracticeWordCache` | 仅接受 v2 | 部分 | v1 缓存直接忽略，文件在下一次保存时覆盖 |
-| 断点 | 跨设备恢复与冲突 | `useDataSyncPersistence.ts`（Supabase） | 无 | 缺失 | 无网络与远端比较 |
-| 文章 | 文章背诵 | `(articles)/*` 4 个页面、`hooks/article.ts`、`practice-sentences/*` | 书本 / 文章列表 + 整篇单页逐句跟打 | 部分 | 断句与分词规则一致；无逐句音频时间轴（用系统 TTS 朗读）、无课后题与查词 |
-| 音频 | 发音与键盘音效 | `hooks/sound.ts`、`base/Audio.vue`、`components/article/ArticleAudio.vue` | `src/audio/` | 部分 | 不打包音频资源：键音 / 对错音用终端响铃，单词自动发音（换词 / 单词测试切题）+ `Ctrl+P`、文章朗读走系统 TTS，可选有道 mp3；无音量 / 声色选择与逐句音频时间轴 |
-| 查词 | 练习中查词与在线翻译 | `WordLookupPopover.vue`、`libs/translate/*`、`public.word/query` | 无 | 缺失 | 离线设计目标 |
-| 笔记 | 单词笔记 | `TypeWord.vue` 编辑区、`(words)/dict.vue` 笔记字段 | 练习页显示 + `Ctrl+O` 编辑，存 `noteData` | 已对齐 | 词库页的笔记字段仍只有练习页这一处入口 |
-| 多语言 | 界面语言切换 | `i18n/locales/*.json`（14 种） | 中文硬编码（`src/domain/i18n.rs`） | 缺失 | 键名对齐上游但无语言包 |
-| 云同步 | Supabase 同步 | `utils/supabase.ts`、`useDataSyncPersistence.ts` | 无 | 缺失 | 上游设置页已把该功能标为「过时功能」 |
-| 备份 | 备份导入导出 | `hooks/export.ts`（ZIP：`data.json` + mp3；JSON） | `tw import-web` / `tw export-web`（JSON） | 部分 | 走同一套 `BackupData` v5 格式；不支持 ZIP 与 mp3 打包 |
-| 帮助 | 帮助 / 关于 / 文档 / 反馈 | `help.vue`、`about.vue`、`doc.vue`、`feedback.vue` | `src/ui/help.rs` | 部分 | TUI 帮助页是快捷键 + 鼠标说明，无 FAQ / 关于 / 资源页 |
-
-## 4. 行为差异深入
-
-### 4.1 FSRS
-
-**已对齐。** 评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：同一张卡在 TUI 与 Web 上算出的下次复习时间相同。
-
-| 维度 | 上游（ts-fsrs 5.4.1） | TUI（`src/domain/fsrs.rs`） |
-| --- | --- | --- |
-| 评级阈值 | `getGradeByWrongTimes`，默认 0/3/6 | 同左（`Scheduler::grade_by_wrong_times`） |
-| 新词 Again | 进入学习步骤 1（1 分钟） | 同左 |
-| 新词 Hard | 学习步骤的中间值（默认 6 分钟） | 同左 |
-| 新词 Good | 学习步骤 2（10 分钟） | 同左 |
-| 新词 Easy | 按 FSRS 计算后毕业 | 同左 |
-| 学习步进 | `learning_steps` / `relearning_steps` 可配 | 同左（读设置） |
-| 复习卡 Again | 进入重学步骤（默认 10 分钟） | 同左 |
-| 复习卡 Hard/Good/Easy | FSRS 间隔（≥ 1 天，且 hard < good < easy） | 同左 |
-| `maximum_interval` | 生效 | 生效 |
-| 21 个权重 `w` | 生效 | 生效（按上游 `CLAMP_PARAMETERS` 夹取） |
-| `enable_fuzz` | 生效（分段区间 ±15% / ±10% / ±5%） | 同左（区间与随机源一致） |
-| `enable_short_term` | 生效（切换 Basic / LongTerm 调度器） | 同左 |
-| 随机种子 | 卡片状态派生（`{时间戳}_{reps}_{难度×稳定性}`） | 同左（移植上游 Alea PRNG） |
-| 到期判断 | `dayjs(due).isSameOrBefore(now, 'day')` | `due` 换算本地日期后 `<= today` |
+| 评级阈值 | `getGradeByWrongTimes`，默认 0 / 3 / 6 | 同左（`Scheduler::grade_by_wrong_times`） |
+| 学习与重学步进 | `learning_steps` / `relearning_steps`，`enable_short_term` 切换调度器 | 同左，读设置 |
+| 复习间隔、fuzz 与到期判断 | FSRS-6（21 个权重 `w`）+ `maximum_interval`；`enable_fuzz` 分段 ±15% / ±10% / ±5%；`dayjs(due).isSameOrBefore(now, 'day')` | 同左，权重按上游 `CLAMP_PARAMETERS` 夹取、随机源移植上游 Alea；`due` 换算本地日期后 `<= today` |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 
-一致性由 `tests/fsrs_parity.rs` 锁定：比对样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 在上游仓库里用 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度六类路径。
+一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。仍存在的差异只有「已掌握词不删卡片」——两端卡片集合可能不同，但调度结果一致。
 
-**仍存在的差异**：已掌握词在 TUI 里只被排除、不从 `fsrsData` 删除（上游会删），因此两端存档里的卡片集合可能不同——但卡片本身的调度结果一致。
+### 3.2 键位
 
-### 4.2 键位
-
-上游 42 个动作全部可在设置里改键（`DefaultShortcutKeyMap`）；TUI 同样把键位做成数据（`src/domain/shortcut.rs` 的 `ShortcutMap`，存于 `shortcutKeyMap`），可在设置页改绑。默认键位与上游逐条一致，只有下列差异。同名动作的对照：
+42 个动作全部数据化（`src/domain/shortcut.rs` 的 `ShortcutMap`，存于 `shortcutKeyMap`），默认绑定与上游 `DefaultShortcutKeyMap` 逐条一致，可在设置页改绑。差异只有下表几条：
 
 | 动作 | 上游默认键 | TUI | 差异 |
 | --- | --- | --- | --- |
-| 输入 / 确认 / 删除 | 字母、空格、退格 | 同左 | 已对齐 |
-| 显示单词 | `Escape` | `Esc` | 已对齐（遮罩时计一次错误） |
-| 跳过单词 | `Tab` | `Tab` | 已对齐 |
-| 收藏 | `Enter` | `Enter` | 已对齐（上游用实心 / 空心星标显示状态；TUI 用「★ 已收藏」徽标 + 收藏按钮星标 + Toast） |
-| 收藏到指定词典 | `Shift+Enter` | 同左 | 已对齐（提示区分「已收藏到」与「已从…取消收藏」） |
-| 标记已掌握 | 反引号 | 反引号 | 已对齐 |
-| 上/下一个词 | `Ctrl+←` / `Ctrl+→` | 同左，另有 `Ctrl+N` 为「下一个词」别名 | 已对齐（TUI 增补别名） |
-| 跳到下一阶段 | `Shift+→` | 同左，另有 `Ctrl+J` 别名 | 已对齐（TUI 增补别名） |
-| 上一章 / 下一章 | `Alt+←` / `Alt+→` | 同左（按学习组重放） | 已对齐（TUI 的「章」= 一个学习组） |
-| 重复本章（重学） | `Ctrl+Enter` | 同左（重学本组） | 已对齐 |
-| 默写本章 | `Alt+Enter` | 同左（本组改默写模式） | 已对齐 |
-| 播放单词发音 | `Ctrl+P` | `Ctrl+P` 播放单词发音；练习页 / 单词测试页换题时按 `wordSound` 自动朗读 | 已对齐（发音走系统 TTS） |
-| 切换翻译 | `Ctrl+Z` | 同左 | 已对齐 |
-| 切换默写遮罩 | `Ctrl+I` | 同左 | 已对齐 |
-| 工具栏 / 词表侧栏 | `Ctrl+B` / `Ctrl+L` | 同左 | 已对齐 |
-| 随机默写 | `Ctrl+R` | 同左 | 已对齐 |
-| 切主题 / 简洁模式 / 编辑文章 | `Ctrl+Q` / `Ctrl+M` / `Ctrl+E` | `Ctrl+Q` / `Ctrl+G` / 显示隐藏例句与词源 | 主题与简洁模式已对齐；`Ctrl+M` 在终端等同回车，简洁模式改用 `Ctrl+G`；文章编辑尚未实现 |
-| 自测三键 | `1` / `2` / `3` | 同左 | 已对齐 |
-| 自测选择题 | `Alt+1`~ `Alt+4` | 同左 | 已对齐 |
-| 播放例句 1~9 | `Ctrl+1`~ `Ctrl+9` | 无 | 缺失 |
-| 单词测试下一题 | `Space` | 无 | 缺失（无测试模式） |
+| 简洁模式 | `Ctrl+M` | `Ctrl+G` | 终端里 `Ctrl+M` 等同回车 |
+| 编辑文章、播放例句 1~9 | `Ctrl+E`、`Ctrl+1`~`Ctrl+9` | 无（`Ctrl+E` 改为显示 / 隐藏例句与词源） | 缺失：TUI 不能编辑文章，也没有逐句音频 |
+| 上一个词 / 下一个词、跳下一阶段 | `Ctrl+←` `Ctrl+→`、`Shift+→` | 同左，另有 `Ctrl+N` / `Ctrl+J` 别名 | 终端兼容别名（不落盘） |
+| 单词测试下一题 | `Space` | `Space`（`1`~`4` 选答案） | 已对齐 |
 
-TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页面、`m` 循环练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键` 等组合键，TUI 因此提供了 ASCII 别名并允许直接拼写代替选择题；完整键表见 [使用手册](usage.md) 与 [快捷键](shortcuts.md)。
+TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页面、`m` 选练习模式、`f` 自由练习、`+` / `-` 调整每日词数、`q` 退出、`?` 帮助。部分终端会吞掉 `Alt+数字`、`Ctrl+方向键`，因此 TUI 提供 ASCII 别名并允许用拼写代替选择题；完整键表见 [使用手册 · 按键参考](usage.md#按键参考) 与 [快捷键](shortcuts.md)。
 
-**文章跟打页的键位**：两端都让跟打页吃同一张键位表。上游 `(articles)/practice-articles/[id].vue` 监听 `ShortcutKey.PreviousChapter` / `RepeatChapter` / `ToggleShowTranslate` / `ToggleTheme` / `PlayWordPronunciation` / `ShowWord` 等；TUI 的跟打页认 `PlayWordPronunciation`（朗读当前句）、`ToggleShowTranslate`（切换当前句译文）、`ToggleTheme` 三个，另有共用的 `Ctrl+,` / `Ctrl+C` / `?`。差异：上游的 `ShowWord` 是「按下高亮当前跟打位置、松手恢复」（`TypingArticle.showSentence` / `hideSentence` 改 `hoverIndex`），TUI 的跟打页把整篇正文一直显示、没有这层高亮，`Esc` 因此让给页面级返回，不再绑定 `ShowWord`；上游跟打的「上一章 / 下一章 / 重学本章」在 TUI 由文章结算弹层（「返回列表 / 重打本篇 / 主页」）承担。
+**文章跟打页**：两端都复用同一张键位表。上游监听 `PreviousChapter` / `RepeatChapter` / `ToggleShowTranslate` / `ToggleTheme` / `PlayWordPronunciation` / `ShowWord`；TUI 认 `PlayWordPronunciation`（朗读当前句）、`ToggleShowTranslate`（切换当前句译文）、`ToggleTheme`，另有共用的 `Ctrl+,`（暂停）、`Ctrl+C`（保存返回）、`?`、`Esc`（返回）。差异：上游 `ShowWord` 是「按下高亮当前跟打位置、松手恢复」，TUI 把整篇正文常显、没有这层高亮，`Esc` 让给页面返回；上游的「上一章 / 下一章 / 重学本章」由 TUI 的文章结算弹层（返回列表 / 重打本篇 / 主页）承担。
 
-### 4.3 设置建模范围
+### 3.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段，设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：40 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 18 个上游顶层字段落入 `extra`，读写时原样保留。设置页覆盖 29 个 `SettingState` 配置项，另加「每日词数」一行（写 `dict.json` 的词典元数据）与 2 个动作项（清空练习进度、清除所有数据），共 32 行。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段、设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：41 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 17 个上游字段落入 `extra` 原样保留。设置页 32 行 = 7 个分区、29 个 `SettingState` 配置项 + 每日词数（写 `dict.json` 的词典元数据）+ 2 个动作项。
 
 | 类别 | 项 |
 | --- | --- |
-| 有 UI 且生效 | 练习模式、主题、音标、大字单词、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、重复次数(自定义)、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据 |
-| 有 UI、写词典元数据 | 每日词数（`dict.json` 的 `perDayStudyNumber`） |
-| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch` |
+| 有 UI 且生效 | 练习模式、主题、音标、大字、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据 |
+| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`enable_short_term`、`learning_steps`、`relearning_steps` 建模但也不生效（学习步进固定 1 / 6 / 10 分钟） |
 | 无 UI 但生效 | `maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`（手工编辑 `setting.json` 后 `Scheduler` 会读取） |
-| 建模但不生效 | `enable_short_term`、`learning_steps`、`relearning_steps`（学习步进固定 1/6/10 分钟） |
-| 上游有、TUI 完全没有 | 声音（音量/语速/键音/TTS 声色）、字号、快捷键表、练习内设置弹层、文章音效、`practiceSentence`、`autoPlayFirstSentence`、侧栏折叠、移动端导航等 |
+| 上游有、TUI 完全没有 | 声音音量与语速、键音包、TTS 声色、字号、练习内设置弹层、文章音效、`practiceSentence`、`autoPlayFirstSentence`、侧栏折叠、移动端导航 |
 
-完整的逐项说明、取值与手工编辑方法见 [设置项参考](settings.md)；字段透传规则见 [存档与数据格式](persistence.md)。上游设置页的 Supabase、更新日志、关于等 tab 在 TUI 中没有对应功能。
+逐项取值与默认值见 [设置项参考](settings.md)，透传规则见 [存档与数据格式](persistence.md)。
 
-### 4.4 断点缓存
+### 3.4 断点缓存
 
-两端都用 v2 的 compact 结构：`taskWordsStr`、`practiceData`（词表以字符串存）、`statStoreData`、`sessionSnapshot`（`flowId` + `cursor` + `nodeWorkingWordKeys`）。差异：
+- 两端都用 v2 的 compact 结构：`taskWordsStr`、`practiceData`（词表以字符串存）、`statStoreData`、`sessionSnapshot`（`flowId` + `cursor` + `nodeWorkingWordKeys`）。上游保留 v1→v2 升级路径（`resolveLegacyPracticeWordCursor` 按旧 stage 反推游标），TUI 只接受 `version == 2`，其余视为不支持并忽略缓存、不移动文件；TUI 要求四块内容齐全才恢复，上游允许只有 `taskWordsStr` 的「未开始」缓存。
+- 保存时机：上游在页面隐藏 / 可见、远程数据更新时保存或重载，TUI 在推进 / 后退 / 跳过 / 错误后 500 ms 防抖保存、每 30 秒保存、`Ctrl+C` / `Ctrl+Enter` 与退出时保存。两端刷新或重启都先回主页，断点只在显式操作（主页 `Enter`、文章列表选中该文章）时使用。
 
-- 上游保留 v1→v2 升级路径（`resolveLegacyPracticeWordCursor` 按旧 stage 反推游标）；TUI 只接受 `version == 2`，其余视为不支持并忽略缓存，不移动文件，下一次保存覆盖。
-- TUI 要求 `taskWords` + `practiceData` + `statStoreData` + `sessionSnapshot` 齐全才恢复；上游允许只有 `taskWordsStr` 的「未开始」缓存。
-- 上游在浏览器隐藏/可见、远程数据更新、组件卸载时都会保存或重载；TUI 在推进/后退/跳过/错误后 500 ms 防抖保存、每 30 秒保存、`Ctrl+C`/`Ctrl+Enter` 与退出时保存，没有跨设备重载。
-- TUI 启动固定回主页，断点只在显式操作（主页 `Enter`、文章列表选中该文章）时使用；上游 Web 刷新后同样先回主页（`isSaveData` 只影响主页文案），这一点两端一致。
+### 3.5 统计口径
 
-### 4.5 统计口径
+结算写入算法与上游 `flushStatToStore` 对齐：按时间片段的自然日拆分，跨天时给多条记录标 `sessionRole`（`single` / `start` / `middle` / `end`），`tests/end_to_end.rs` 覆盖写入；正确率两端都是 `(total - wrong) / total`，`wrong` 取本轮去重后的错词数。TUI 统计页聚合全部单词词典的 `statistics`（`domain/statistics.rs` 的 `daily_totals`），`middle` / `end` 记录只计时长、计数只归开始日；上游没有跨词典累计视图，也没有独立统计页，其日历 / 日记录弹窗能看到每条记录的词典名，TUI 无法按词典拆分。TUI 主页「本周记录」按全部词典聚合，上游结算弹层只看当前词典。
 
-- 结算写入统计的算法与上游 `flushStatToStore` 对齐：按时间片段的自然日拆分，跨天时给多条记录标 `sessionRole`（`single` / `start` / `middle` / `end`），`tests/end_to_end.rs` 覆盖写入。
-- 正确率两端都是 `(total - wrong) / total`，`wrong` 取本轮去重后的错词数。
-- TUI 统计页聚合所有单词词典的 `statistics`（`domain/statistics.rs` 的 `daily_totals`），展示累计 + 今日增量 + 最近 14 天；聚合时 `middle`/`end` 记录只计时长，计数只归开始日，避免跨天会话重复累计。上游没有跨词典累计视图，因此不存在该问题；上游没有独立统计页，日历/日记录弹窗能看到每条记录的词典名，TUI 无法按词典拆分。
-- TUI 主页本周记录按全部词典聚合；上游结算弹层的「本周记录」只看当前词典。
-- TUI 结算弹层缺少上游的错词 Top10 与每周记录（数据其实都在 `wrongTimesMap` 与词典状态里，只是没渲染）。
+### 3.6 交互与计时
 
-### 4.6 交互与计时
+- 上游有 CSS 动画、Vue 过渡、hover 显示单词、拖拽与 Shepherd 引导；TUI 全部没有，终端鼠标只有点击与滚轮，没有悬停、拖拽和右键菜单。音频上，上游可播放键盘音效、对错音与单词发音（受设置开关控制），TUI 用终端响铃代替键音 / 对错音，单词与文章朗读走系统 TTS（Windows `System.Speech`、macOS `say`、Linux `espeak-ng`，可选有道 mp3）；默写阶段不自动朗读以免念出答案，听写阶段仍同时显示音标与释义。
+- 计时与事件循环：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（TUI 用 `Ctrl+,`，上游没有）不会被自动恢复。上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念；上游 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。TUI 是 100 ms 轮询 + 批量读事件（一次最多 64 个），上游是浏览器事件驱动：键盘手感影响可忽略，但 TUI 没有帧动画。
 
-- 上游有 CSS 动画、Vue 过渡、hover 显示单词、拖拽、Shepherd 引导；TUI 全部没有。终端鼠标只有点击与滚轮，没有悬停、拖拽和右键菜单。
-- 上游可播放键盘音效、正确/错误音效与单词发音（受设置开关控制）；TUI 用终端响铃代替键音/对错音，单词发音（含换词自动朗读与单词测试切题朗读）与文章朗读走系统 TTS（可选有道 mp3）；默写阶段不自动朗读以免念出答案，听写阶段仍同时显示音标与释义。
-- 计时：两端都有「无操作 3 分钟自动暂停」，且都在检测到键入活动时自动恢复并提示「已恢复计时」；手动暂停（TUI 用 `Ctrl+,`，上游没有手动暂停）不会被自动恢复。差异是上游还有「切走标签页即暂停」的可见性场景，终端没有对应概念。上游的设置项 `waitTimeForChangeWord` 在自动下一词时作为延迟，TUI 同义。
-- TUI 事件循环是 100 ms 轮询 + 批量读事件；上游是浏览器事件驱动。对键盘手感影响可忽略，但 TUI 没有帧动画。
+### 3.7 数据存储
 
-### 4.7 数据存储
+上游用 `idb-keyval` 把 4 类数据存进 IndexedDB，Pinia `$subscribe` 防抖 1 秒自动保存并叠加 Supabase 推送 / 拉取与冲突检测。TUI 用 JSON 文件：同目录临时文件 + fsync + rename 原子写，解析失败重命名为 `*.corrupt-<时间戳>.json` 并回退默认值，版本过高时只读不覆盖（详见 [存档与数据格式](persistence.md)）。TUI 保存时会清空非系统、非自定义词典的词表（`BaseState::shake_common_dict`，对应上游 `shakeCommonDict`），因此 `dict.json` 不会把 4.5 MB 的 CET-4 词表写进去，官方词库在启动时按 `url` 从 `assets/` 重新加载；上游的保存是「整份 store 状态」，TUI 是「显式调用 + 延迟保存」。
 
-上游用 `idb-keyval` 把 4 类数据存进 IndexedDB，老版本 localStorage 会自动迁移；Pinia `$subscribe` 防抖 1 秒自动保存，并叠加 Supabase 推送/拉取与冲突检测，解析失败时用 hash 快照兜底。TUI 用 4 个 JSON 文件：同目录临时文件 + fsync + rename 原子写，解析失败重命名为 `*.corrupt-<时间戳>.json` 并回退默认值，版本过高时 `dict.json` 与 `setting.json` 都只读不覆盖，练习缓存版本不受支持时忽略（详见 [存档与数据格式](persistence.md)）。
+重置数据两端都只有整体入口：上游「设置 → 数据 → 清除所有数据」把 base store 与 setting store 一起 `setState(getDefault*())` 并清空练习缓存；TUI 设置页「其他 → 清除所有数据」走 `App::clear_all_data`，同样是 `BaseState::default()` + `SettingState::default()` + 删除两份练习缓存，文案沿用上游。差异只在位置与后续动作：上游清完让用户重新选词典（`studyIndex = -1`），TUI 按全新安装的路径自动选一本（有 `cet4` 用它）。TUI 额外的「清空当前练习进度」只删断点缓存，对应上游切词典 / 改练习设置时的 `resetCacheData` 副作用，上游没有把它做成按钮。
 
-TUI 在保存时会清空非系统/非自定义词典的词表（`BaseState::shake_common_dict`，对应上游 `shakeCommonDict`），因此 `dict.json` 不会把 4.5 MB 的 CET-4 词表写进去；官方词库在启动时按 `url` 从 `assets/` 重新加载。上游的保存是「整份 store 状态」，TUI 是「显式调用 + 延迟保存」。
+## 4. 数据互通
 
-重置数据两端都只有整体入口：上游「设置 → 数据 → 清除所有数据」（`PopConfirm` + `dataSyncPersistence.clear()`）把 base store 与 setting store 一起 `setState(getDefault*())` 并清空 practice 缓存；TUI 的设置页「其他 → 清除所有数据」走 `App::clear_all_data`，同样是 `BaseState::default()` + `SettingState::default()` + 删除 `practice-word.json`，文案沿用上游的「该操作将会清除所有数据，确认继续？」与「清除成功」。差异只在位置（上游在「数据」tab，TUI 在设置页「其他」分区）与后续动作：上游清完让用户重新选词典（`studyIndex = -1`），TUI 按全新安装的路径自动选一本（有 `cet4` 用它）。上游没有「只清学习记录」或「只清统计」的入口，TUI 同样没有；TUI 额外的「清空当前练习进度」只删断点缓存，对应上游切词典 / 改练习设置时的 `resetCacheData` 副作用，上游没有把它做成按钮。
+### 4.1 互通边界
 
-## 5. 数据互通
-
-### 5.1 互通边界
-
-两端共享「同名字段 + 同构信封」（`{val, version, updated_at?}`）；Web 把信封序列化成 JSON 字符串存进 IndexedDB，TUI 直接存成文件。TUI 不读写浏览器 IndexedDB，也没有导入/导出 UI，可搬运的只有 JSON 文本：
+两端共享「同名字段 + 同构信封」（`{val, version, updated_at?}`）；Web 把信封序列化成 JSON 字符串存进 IndexedDB，TUI 直接存成文件。TUI 不读写浏览器 IndexedDB，可搬运的只有 JSON 文本：
 
 | TUI 文件 | Web 存储 key | 版本 | 备注 |
 | --- | --- | --- | --- |
 | `dict.json` | `typing-word-dict` | 4 | 字段同名；系统词典与当前词库进度可搬运 |
-| `setting.json` | `typing-word-setting` | 23 | TUI 建模 28 个字段，其余透传 |
+| `setting.json` | `typing-word-setting` | 23 | TUI 建模 43 个字段，其余透传 |
 | `practice-word.json` | `PracticeSaveWord` | 2 | compact v2；TUI 额外要求 `sessionSnapshot` |
-| `practice-article.json` | `PracticeSaveArticle` | 1 | 部分：TUI 导出的备份可往返（真实断点在 `tuiPracticeData`）；网页版自己产生的游标只有段落/句/词三级下标、没有文章 id，不映射；音频无对应实现 |
+| `practice-article.json` | `PracticeSaveArticle` | 1 | 部分：TUI 导出的备份可往返（真实断点在 `tuiPracticeData`）；网页版游标只有段落 / 句 / 词三级下标、没有文章 id，不映射 |
+| `flows.json` | 无 | — | TUI 独有，自定义流程不进 Web 备份 |
 
-### 5.2 Web 备份结构与迁移方向
+### 4.2 Web 备份结构与迁移
 
-Web 端「设置 → 数据管理 → 导出」会生成 ZIP（`data.json` + `mp3/`）或 JSON，`data.json` 是导出格式 v5：
+Web 端「设置 → 数据管理 → 导出」生成 JSON（或含 `mp3/` 的 ZIP），`data.json` 的导出格式是 v5：
 
 ```text
-Web 备份 data.json                       TUI 数据目录
-{ version: 5, val: {                     <home>/
-  dict:            <信封 version 4>  ->    dict.json
-  setting:         <信封 version 23> ->    setting.json
-  PracticeSaveWord:<信封 version 2>  ->    practice-word.json
-  PracticeSaveArticle: <信封 v1>         → practice-article.json（仅 TUI 来源；Web 游标不映射）
-  type-words-app-version: 4              (丢弃)
-} }                                      themes/*.json（仅 TUI）
+Web 备份 data.json                        TUI 数据目录
+{ version: 5, val: {                      <home>/
+  dict:                <信封 v4>     ->    dict.json
+  setting:             <信封 v23>    ->    setting.json
+  PracticeSaveWord:    <信封 v2>     ->    practice-word.json
+  PracticeSaveArticle: <信封 v1>     ->    practice-article.json（仅 TUI 来源可往返）
+} }                                       themes/*.json、flows.json（TUI 独有；app version 丢弃）
 ```
 
-手工迁移步骤：Web 导出 / 从 IndexedDB 取出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入四个文件（保留各自信封；文章项仅限 TUI 导出的备份）→ `tw doctor` 核对 → 启动检查设置与断点。
+`tw import-web <data.json>` 直接读网页版导出的备份：逐项校验版本与结构，覆盖前留 `.bak` 备份（解析失败则回滚并保留原文件），`dict` / `setting` / `PracticeSaveWord` 原样落盘，文章断点按来源分流；`tw export-web [--out FILE]` 把当前数据目录导出成网页版能导入的 JSON（缺省写标准输出）。手工迁移则按「Web 导出 JSON → 关闭 TUI 并备份 `<home>` → 按上表写入各文件（保留各自信封）→ `tw doctor` 核对 → 启动检查设置与断点」执行。
 
-现在这两步都有命令了：`tw import-web <data.json>` 直接读网页版导出的备份（逐项校验版本与结构，覆盖前留 `.bak` 备份；`dict` / `setting` / `PracticeSaveWord` 原样落盘，文章断点按来源分流），`tw export-web` 把当前数据目录导出成网页版能导入的 JSON。字段级细节与逐条风险见 [存档与数据格式](persistence.md) 的「与 Web 数据互通」一节。
-
-### 5.3 字段语义差异与风险
+### 4.3 字段语义差异与风险
 
 | 差异 | 影响 |
 | --- | --- |
-| `tuiBigWord` | Web 没有该字段；上游 `checkAndUpgradeSaveSetting` 只保留自己认识的字段，经 Web 加载后再保存会丢失，TUI 再读时回到默认值（true） |
-| 设置未知字段 | TUI 通过 `extra` 原样保留；Web 端会把不认识的字段丢掉。TUI → Web → TUI 往返会丢失 TUI 补充字段 |
-| FSRS 卡片 | `due` 用 ISO 时间字符串、其余字段同名；但学习卡在 TUI 的 `stability` / `difficulty` 可能为 0，Web 继续调度这种卡片的行为未实测 |
-| FSRS 参数 | 参数结构相同、可互拷，但两端调度实现不同，「同一张卡」的后续间隔不可复现 |
-| 笔记 `noteData` | 两端同名字段；TUI 只透传，Web 可编辑 |
-| 文章数据 | 系统「文章收藏」词典的词条会原样保留（`serde_json::Value`）；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游只清非 custom/non-system 更激进）。TUI 不读取存档里的文章正文：跟打用的正文来自资源目录的 `assets/dicts/en/article/*.json`（书目 `assets/list/article.json`） |
-| 练习缓存 | Web 旧缓存若没有 `sessionSnapshot`，TUI 只能恢复词表与统计、无法恢复游标 |
+| `tuiBigWord` 与未知字段 | Web 没有 `tuiBigWord`；上游 `checkAndUpgradeSaveSetting` 与 Web 端都只保留自己认识的字段，经 Web 加载再保存会丢失 TUI 补充字段，TUI 再读时回到默认值 |
+| FSRS 卡片与参数 | `due` 用 ISO 时间字符串、其余字段同名；学习卡在 TUI 的 `stability` / `difficulty` 可能为 0，参数结构可互拷但两端调度实现不同，「同一张卡」的后续间隔不可复现 |
+| 文章数据 | 系统「文章收藏」的词条会原样保留；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游更激进）。TUI 不读存档里的文章正文：跟打用的正文来自 `assets/dicts/en/article/*.json` |
 
-### 5.4 未来互通建议
-
-- **Web 导出适配器（已完成）**：`tw import-web <data.json>` 解析 `BackupData` v5、按版本与结构校验后拆成四个文件（覆盖前留 `.bak` 备份，解析不了的载荷拒绝写入并保持原文件），文章断点按来源分流；`tw export-web` 生成可被 Web 导入的 JSON。仍不支持的丢弃项是 app version 与 mp3。
-- **版本与结构先行**：导入前检查 `dict.version` / `setting.version` / `PracticeSaveWord.version`，高于 TUI 支持的版本时跳过该项并提示升级；同时按目标存档类型做一次反序列化校验，读不懂的载荷不落盘。
-- **卡片归一化**：对学习卡重新计算 `stability` / `difficulty` 或在导入时标记「需要重新学习」，避免跨端调度异常。
-- **明确「不映射」清单**：网页版自己产生的文章游标（没有文章 id）、mp3、Supabase 快照、快捷键/字体/主题等平台相关字段不应伪装成可互通。
-
-## 6. TUI 独有
+## 5. TUI 独有
 
 | 能力 | 实现位置 | 说明与限制 |
 | --- | --- | --- |
-| 自定义主题 | `src/theme/` | 13 个颜色 token、六套内置主题、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
-| 内置词典可设为当前词典 | `src/app/dicts.rs`、`src/ui/dict_picker.rs` | 收藏 / 错词 / 已掌握与词库资源并列在词库页，`Enter` 设为当前学习词典（写 `studyIndex`，重启保持）、`w` 打开词条管理页；上游 `dict-list.vue` 只列资源目录，系统词典仅作「我的词典」卡片展示 |
-| 鼠标 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs` | 侧栏/按钮/列表点击与滚轮滚动；练习页与文章跟打页可点底部动作按钮（另有练习页词表行与「第 N 组」），结算弹层单独提供按钮；终端鼠标捕获后需 Shift+拖拽复制文本 |
-| 标签页键盘焦点导航 | `src/ui/focus.rs`、`src/app/focus.rs`、`src/ui/target.rs` | 所有套外壳页面（主页 / 文章 / 词库 / 统计 / 设置 / 词条 / 流程 / 快捷键 / 帮助）共用两栏焦点：宽屏侧栏竖向（`↑`/`↓` 逐项、含「退出」，`→` 回内容区）、窄屏顶栏横向（`←`/`→` 选标签、`↓` 回内容区）；`Tab`/`Shift+Tab` 固定换栏。主页内容区按视觉行分带；其它页面的内容区就是页面自己的光标（`FocusId::Page`），`↑`/`↓` 移动光标、`←`/`→` 执行页面横向操作（文章换栏、统计选日期），到边停不回绕；宽屏内容区左边缘 `←`、窄屏最顶部 `↑` 进导航栏。焦点存稳定身份，导航栏与主页内容区在窗口缩放后失效时 `Enter` 只清空并提示；进入任何标签页默认选中内容区（主页是「开始 / 继续学习」主按钮，首帧即高亮），底栏显示「选中 X」。上游只有鼠标 / 触屏，键盘没有对应的「选中页面元素」操作 |
-| 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；< 60 × 20 只渲染提示 |
+| 自定义主题 | `src/theme/` | 13 个颜色 token、6 套内置、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
+| 内置词典可设为当前词典 | `src/app/dicts.rs`、`src/ui/dict_picker.rs` | 收藏 / 错词 / 已掌握与资源词库并列，`Enter` 设为当前学习词典（写 `studyIndex`，重启保持）、`w` 打开词条管理页；上游 `dict-list.vue` 只列资源目录 |
+| 终端交互：鼠标与键盘焦点导航 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs`、`src/ui/focus.rs`、`src/app/focus.rs` | 侧栏 / 按钮 / 列表点击与滚轮，练习页与跟打页可点底部动作按钮，鼠标捕获后需 `Shift+拖拽` 复制；套外壳的页面共用两栏焦点（宽屏侧栏竖向 / 窄屏顶栏横向，`Tab` 换栏，内容区按视觉行分带），进入页面默认选中内容区、底栏显示「选中 X」。上游只有鼠标 / 触屏 |
+| 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；小于 60 × 20 只渲染提示 |
 | 点阵大字 | `src/ui/bigtext.rs`、`src/ui/practice.rs` | 5×7 点阵字体，空间足够时按本轮最长单词整体放大 2 倍；非 ASCII 回退普通文本 |
-| 独立统计页 | `src/ui/stats.rs` | 累计 6 卡 + 最近 14 天，Web 无对应页面 |
-| 完全离线 | `Cargo.toml`、`src/paths.rs` | 无 HTTP 客户端、无 WebView、无账号与遥测；数据目录可整体拷贝 |
-| 单二进制分发 | `scripts/package.ps1`、`.github/workflows/release.yml` | `tw.exe` + `assets/` + docs/LICENSE 的 Windows zip 与 SHA256；无运行时依赖 |
-| 命令行工具 | `src/cli.rs` | `tw doctor` 排障、`tw task` 预览任务、`tw import-dict` 导入词库 |
-| 可复现界面 | `examples/shot.rs`、`examples/dump.rs`、`tools/render-snapshot.py` | 页面渲染成 JSON/文本，用于截图与视觉回归（开发用） |
+| 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`；Windows zip 含 exe + assets + docs + LICENSE + SHA256，没有 Node 与 WebView 运行时 |
+| 可复现界面 | `examples/shot.rs`、`examples/dump.rs`、`tools/render-snapshot.py` | 页面渲染成 JSON / 文本，用于截图与视觉回归，见 [开发指南 · 截图与视觉检查](development.md#6-截图与视觉检查) |
 
-## 7. 路线图
+## 6. 仍未对齐与不可对等
 
-### 7.1 现状核实
-
-- **已接线（本轮）**：
-  - 跳组：状态行「第 N 组」可点击，弹层选组跳转；`create_task_from_group` 有了调用点。
-  - 上一组 / 下一组 / 重学本组 / 默写本组：练习中 `Alt+←` / `Alt+→` / `Ctrl+Enter` / `Alt+Enter`。
-  - `Shift+Enter`：弹层选择收藏目标词典。
-  - 简洁模式（`Ctrl+G`）与切主题（`Ctrl+Q`）。
-  - 快捷键表：42 个动作数据化，可在设置页改绑，存于 `shortcutKeyMap`（见 [快捷键](shortcuts.md)）。
-  - FSRS：改为逐条移植上游 ts-fsrs 5.4.1，学习步进、`enable_short_term`、`enable_fuzz`、`maximum_interval` 全部生效，黄金样本见 `tests/fsrs_parity.rs`。
-  - 结算报告：补齐错词 Top10 与本周记录（当前词典口径）。
-  - 计时：空闲自动暂停后，输入即自动恢复。
-- **仍待接线**：
-  - **笔记**：`BaseState.note_data` 只出现在类型定义与默认值，无读取/写入/渲染代码。
-  - **FSRS 高级项 UI**：`maximum_interval`、21 个 `w`、`enable_fuzz` 已生效，但设置页还没有入口。
-  - **练习模式面板**：目前 `m` 键循环 7 种模式，没有上游那样的下拉（含单词测试模式）。
-  - **单词测试模式**：`ShuffleWordsTest` / `ReviewWordsTest` 枚举值仍未接入。
-  - **词条管理屏**：词条增删改查、批量标记、自定义词典都还没有。
-- **可复用的已完成品**：7 个内置流程、跳阶段、自测选择题、错词清空、结算/重学/下一组、缓存恢复、统计写入都有测试覆盖，补齐时优先接线而不是重写。
-
-### 7.2 优先级
-
-| 优先级 | 内容 | 上游参考 | 代码落点 | 状态 |
-| --- | --- | --- | --- | --- |
-| P0 | 跳组 | `GroupList.vue`、`createTaskFromGroup` | 练习页状态行「第 N 组」→ 跳组弹层 | 已完成 |
-| P0 | 练习中重学 / 上下组 / 默写本组 | `createRepeatTask` / `createNextTask` | `Ctrl+Enter` / `Alt+←` `Alt+→` / `Alt+Enter` | 已完成 |
-| P0 | 笔记显示与编辑 | `TypeWord.vue` 笔记区 | 练习页「笔记」卡片 + `Ctrl+O` 编辑弹层 | 已完成 |
-| P0 | 简洁模式 | `toggleConciseMode` | `Ctrl+G`（上游 `Ctrl+M` 在终端等同回车） | 已完成 |
-| P0 | 收藏到指定词典 | `WordCollectPopover.vue` | `Shift+Enter` → 词典选择弹层 | 已完成 |
-| P0 | FSRS 逐条对齐 | `ts-fsrs` 5.4.1 | `src/domain/fsrs.rs`（自实现，含黄金样本比对） | 已完成 |
-| P0 | 可配置键位 | `setting.vue` 快捷键 tab、`shortcutKeyMap` | `src/domain/shortcut.rs` + 快捷键编辑页 | 已完成 |
-| P1 | 词库 / 单词管理屏 | `dict.vue`、`BaseTable.vue`、`WordItem.vue` | `src/ui/words.rs` + `src/domain/wordbook.rs` | 已完成 |
-| P1 | 单词测试模式 | `words-test/[id].vue`、`utils/word-test.ts` | `src/ui/word_test.rs` | 已完成 |
-| P1 | 统计按词典拆分 + 日历 | `app/base/Calendar.vue` | `src/ui/stats.rs`（月历 + 当日明细 + 按词典视图） | 已完成 |
-| P2 | Web 备份 JSON 导入导出 | `hooks/export.ts` | `tw import-web` / `tw export-web` | 已完成 |
-| P2 | 音频（发音 + 键音） | `hooks/sound.ts` | `src/audio/`（响铃 + 系统 TTS + 有道接口） | 已完成（降级实现） |
-| P2 | 文章背诵 | `(articles)/*`、`hooks/article.ts` | `src/domain/article.rs` + `src/ui/articles.rs` | 已完成（无逐句音频时间轴） |
-| P2 | 自定义流程编辑器 | `practice-flow-runtime.ts` | `src/domain/flow/store.rs` + `src/ui/flows.rs` | 已完成（不含节点增删） |
-| P2 | 云同步 | `useDataSyncPersistence.ts` | — | 不做：上游已标「过时功能」 |
-
-### 7.3 仍未对齐的部分
+### 6.1 仍未对齐项
 
 | 项 | 差距 | 原因 |
 | --- | --- | --- |
-| FSRS 高级参数 UI | `maximum_interval`、21 个 `w`、`enable_fuzz` 已在调度器里生效，但设置页还没有编辑入口 | 需要一个 21 项数值的编辑界面，优先级低于其它项 |
-| 词条导入 / 导出 | 只有 `tw import-dict`（词条数组 JSON），没有词库整体导出，也没有 xlsx | xlsx 需要新依赖，与「保持 TUI 轻量」冲突 |
-| 节点与步骤的完整编辑 | 流程页能增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点的词表来源 | 终端里编辑多级结构的交互成本高 |
-| 文章逐句音频对齐 | 没有 LRC 时间轴，无法做卡拉OK式逐句高亮 | 不打包 mp3，改用系统 TTS 整句朗读 |
-| 单词笔记的词库页入口 | 笔记只能在练习页编辑，词库页还没有笔记列 | 词库页只有基础的增删改查 |
-| 词频与近义词的完整展示 | 释义按词频着色，近义词只显示前两条 | 练习页高度有限，完整信息在词条编辑弹层里 |
+| FSRS 高级参数 UI | `maximum_interval`、21 个 `w`、`enable_fuzz` 已在调度器生效，但设置页没有编辑入口 | 需要 21 项数值的编辑界面，优先级低于其它项 |
+| 词库导出与 xlsx | 只有 `tw import-dict`（词条数组 JSON），没有词库整体导出，也不支持 xlsx | xlsx 需要新依赖，与「保持轻量」冲突 |
+| 节点级流程编辑 | 流程页可增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点词表来源 | 终端里编辑多级结构的交互成本高 |
+| 文章逐句音频与课后题 | 没有 LRC 时间轴，无法做逐句高亮；课后题也没有实现 | 不打包 mp3，改用系统 TTS 整句朗读 |
 
+### 6.2 不可对等能力
 
+这些是运行形态决定的边界，不是路线图漏项。
 
-### 7.3 实施过程中的取舍
+| 能力 | 上游实现 | 终端中的边界 |
+| --- | --- | --- |
+| WebView / 桌面壳 / 窗口 | Tauri v2 加载 Nuxt 产物，窗口、菜单、系统下载 | 终端没有窗口系统，单进程事件循环替代宿主 |
+| 动画、过渡、悬停与像素级布局 | CSS / Vue Transition / Shepherd Tour | 字符单元渲染，只能用颜色与字符位置表达 |
+| 音频通道、图片与字体 | 有道音频、`speechSynthesis`、键音 mp3 池；Web 图片与图标库、自定义字体 | 依赖系统 TTS 或外部播放器，不打包音频资源；终端字体由用户终端决定，点阵大字是折中 |
+| 系统集成与移动端 | 文件选择、另存为、剪贴板、外链打开；响应式 Web + 移动端导航；在线词库、翻译、查词、埋点 | 用 CLI 参数、路径与终端快捷键替代（`Shift+拖拽` 才能复制文本）；移动端与在线服务在终端不适用，默认离线（可选的有道发音除外） |
 
-- **键位与终端保留键的冲突**：`Ctrl+M` 在多数终端等同回车、`Ctrl+I` 在 Unix 终端被报成 `Tab`，因此简洁模式改用 `Ctrl+G`，并为「下一个词」「下一阶段」补了 `Ctrl+N` / `Ctrl+J` 别名。
-- **音频的取舍**：不打包任何 mp3，键音与对错音退化为终端响铃，发音与朗读走系统 TTS（Windows `System.Speech` / macOS `say` / Linux `espeak-ng`），有道接口作为可选来源并自动降级。
-- **文章的取舍**：只内置《新概念英语1》5 篇，断句与分词规则与上游一致，但没有逐句音频时间轴。
-- **依赖的取舍**：移除 `fsrs` crate 换取与上游一致的调度算法；xlsx 导入导出与云同步不做。
+## 7. 上游同步维护
 
-主要风险：可配置键位可能与终端保留键冲突；上游数据版本变化会让手工迁移失效，所以每次同步上游都要先核对版本号。
+### 7.1 词库与文章同步
 
-## 8. 上游同步维护
+`node scripts/sync-assets.mjs --source <TypeWords 仓库路径>` 会先删除本地 `assets/`，再复制上游 `public/list/word.json`、`public/list/article.json`、`public/dicts/en/word/` 与 `public/dicts/en/article/`。当前仓库只提交 CET-4（2607 词）与《新概念英语1》（5 篇）；同步后跑 `cargo test`，尤其 `tests/real_assets.rs`。命令细节见 [开发指南](development.md)，资源格式见 [存档与数据格式](persistence.md)。
 
-### 8.1 词库同步
-
-`node scripts/sync-assets.mjs --source <TypeWords 仓库>` 会先删除本地 `assets/`，再复制上游 `public/list/word.json` 与 `public/dicts/en/word/`。当前仓库只提交了 CET-4（`assets/list/word.json` 仅 1 条、`assets/dicts/en/word/CET4_T.json`），且脚本不复制 `dicts/en/article`、`public/sound`、图片和推荐列表——这些都不在 TUI 的使用范围内。同步后要跑一次 `cargo test`，尤其是 `tests/real_assets.rs` 用真实 CET-4 数据校验加载。
-
-### 8.2 上游升级时的比对清单
+### 7.2 上游升级时的比对清单
 
 | 区域 | 上游位置 | 关注点 |
 | --- | --- | --- |
 | 页面清单 | `app/pages/` | 15 个页面的增删；决定功能矩阵是否要新增行 |
-| 数据模型 | `app/core/types/types.ts`、`stores/base.ts`、`stores/setting.ts` | `Word` / `Dict` / `SettingState` 字段增减与默认值 |
-| 存档与备份版本 | `app/core/config/env.ts`、`utils/cache.ts` | dict 4 / setting 23 / practice word 2 / article 1 / export 5 / app version 4 |
-| 内置流程 | `core/composables/practice-words/practice-flow-config.ts` | `CURRENT_FLOW_VERSION`（当前 6）、`BUILTIN_FLOWS` 节点与步骤 |
-| 练习引擎 | `core/composables/practice-words/*`、`usePracticeWordTyping.ts` | 游标、推进器、错词清空、键入状态机 |
-| 调度 | `core/hooks/fsrs.ts`、`stores/setting.ts` 的 `fsrsParameters` | 默认权重、学习步进、评级阈值 |
-| 设置 UI | `app/pages/setting.vue`、`components/setting/*` | 新增/删除设置项与分组 |
-| 文章与音频 | `core/hooks/article.ts`、`components/article/*`、`composables/practice-sentences/*` | 文章模型、句音频、课后题（TUI 未实现，仅用于判定差距） |
-| 桌面适配 | `app/core/utils/desktop.ts`、`src-tauri/`（本次快照未解包） | 仅了解产物差异 |
+| 数据模型与版本 | `app/core/types/types.ts`、`stores/base.ts`、`stores/setting.ts`、`config/env.ts` | `Word` / `Dict` / `SettingState` 字段与默认值；dict 4 / setting 23 / practice word 2 / article 1 / export 5 / app version 4 |
+| 内置流程与练习引擎 | `core/composables/practice-words/*` | `CURRENT_FLOW_VERSION`（当前 6）、`BUILTIN_FLOWS` 的节点与步骤、游标、推进器、错词清空、键入状态机 |
+| 调度与设置 UI | `core/hooks/fsrs.ts`、`stores/setting.ts` 的 `fsrsParameters`、`app/pages/setting.vue` | 默认权重、学习步进、评级阈值、设置项与分组 |
+| 文章与音频 | `core/hooks/article.ts`、`components/article/*`、`composables/practice-sentences/*` | 文章模型、句音频、课后题（用于判定差距） |
 
-### 8.3 基线记录方式
+### 7.3 基线记录与同步流程
 
-每次随上游更新后，修改本文第 1.2 节的表格并补一行变更摘要（新增页面、schema 版本、流程版本）。建议格式：
+每次随上游更新后，改第 1.2 节表格并补一行摘要（上游参考、日期、dict / setting / 缓存版本、流程版本、主要变化）。建议流程：
 
-| 上游参考 | 日期 | dict / setting / cache 版本 | 流程版本 | 主要变化 |
-| --- | --- | --- | --- | --- |
-| feature/tui 快照（master 6da7641 / dev bf50eae） | 2026-10 | 4 / 23 / 2 | 6 | 本拆分的初始对照基线 |
+1. 取一份新的上游快照，记录 commit、日期与页面数；先比对 `env.ts` / `cache.ts` 的版本号与 `practice-flow-config.ts` 的 `CURRENT_FLOW_VERSION`，版本变化优先处理。
+2. 对照页面清单与设置 UI，更新本文第 2、3 节；练习 / 调度行为变化时跑 `tests/flow_parity.rs`、`tests/fsrs_parity.rs`、`tests/end_to_end.rs`。
+3. 数据格式变化先更新 [存档与数据格式](persistence.md)（含迁移与只读保护评估）；最后同步 [根 README](../README.md) 的「与上游 TypeWords 的关系」摘要，避免几处结论打架。
 
-### 8.4 不要直接复制上游代码
+### 7.4 不要直接复制上游代码
 
-- **架构不同**：上游是 Vue 组件 + Pinia + DOM 事件（还依赖隐藏 input 处理移动端输入、CSS 动画与 IndexedDB）；TUI 是 Rust 状态机 + ratatui + 终端事件。逐行翻译会把 DOM/响应式复杂度带进来，却得不到对应收益。
-- **上游代码包含遗留与未完成路径**：登录/注册、Supabase 同步、只有引用而找不到页面的路由（如 `/fsrs`、`/practice-flow-editor`，无法确认完成度），还有大量 i18n 与平台分支；直接搬会把这些也带进 TUI。
-- **许可证与维护**：本项目按 GPL-3.0 分发（词库数据沿用上游许可证）；复制上游代码会形成「上游衍生文件」，后续同步上游改动与许可证声明成本高。TUI 的做法是把行为翻译成 Rust 并写成测试（`tests/flow_parity.rs` 等），上游只作为行为参照。
-- **可验证性**：TUI 的键位、tick、存档格式都由测试固定；复制代码无法得到这些保障。
-
-### 8.5 建议同步流程
-
-1. 取一份新的上游快照，记录 commit、日期与页面数。
-2. 先比对 `env.ts` / `cache.ts` 的版本号与 `practice-flow-config.ts` 的 `CURRENT_FLOW_VERSION`；版本变化优先处理。
-3. 对照页面清单与设置 UI，更新本文第 2、3 节的功能矩阵。
-4. 若练习/调度行为变化，更新第 4 节并跑 `tests/flow_parity.rs` / `tests/end_to_end.rs`。
-5. 若数据格式变化，先更新 [数据文件与互通](persistence.md)，再评估迁移与只读保护。
-6. 最后同步根 README 的「与上游 TypeWords 的关系」摘要与文档索引，避免几处结论打架。
-
-## 9. 不可对等能力
-
-这些不是「路线图漏项」，而是运行形态决定的边界；路线图只保留可在终端内达成且值得做的项。
-
-| 能力 | 上游实现 | 终端中的边界 |
-| --- | --- | --- |
-| WebView / 桌面壳 / 窗口 | Tauri v2 加载 Nuxt 产物，窗口、菜单、系统下载 | 终端没有窗口系统；TUI 用单进程事件循环替代宿主 |
-| 动画、过渡、悬停、像素级布局 | CSS / Vue Transition / Shepherd Tour | 字符单元渲染，没有合成动画与 hover；只能用颜色和字符位置表达 |
-| 音频与 TTS | 有道音频、`speechSynthesis`、键音 mp3 池 | 终端没有统一音频通道，需要额外进程/依赖；与「单二进制、离线」冲突 |
-| 图片、图标、封面、字体 | Web 图片、图标库、自定义字体 | 终端字体由用户终端决定；点阵大字是折中方案 |
-| 系统集成 | 文件选择、另存为、剪贴板、外链打开 | 用 CLI 参数、路径与终端快捷键替代；`Shift+拖拽` 才能复制文本 |
-| 移动端与触控 | 响应式 Web + 移动端导航 | 终端场景不适用 |
-| 在线服务 | 在线词库目录、百度翻译、查词 API、umami 统计 | 默认无网络是设计目标；也避免隐私与可用性问题（可选的有道发音除外） |
-| 云同步 / 备份 UI | Supabase 用户自带后端、ZIP 导入导出、历史快照 | 需要账号、网络与服务端；与本地 JSON 模型冲突，优先级最低 |
-| 多语言界面 | 14 种 locale JSON | 终端字体与宽度处理成本高；当前中文硬编码，键名已与上游对齐 |
+- **架构不同**：上游是 Vue 组件 + Pinia + DOM 事件（还有隐藏 input 处理移动端输入、CSS 动画与 IndexedDB）；TUI 是 Rust 状态机 + ratatui + 终端事件，逐行翻译只会把 DOM / 响应式复杂度带进来。
+- **上游含遗留与未完成路径**：登录 / 注册、Supabase 同步、只有引用找不到页面的路由（如 `/fsrs`、`/practice-flow-editor`）、大量 i18n 与平台分支，直接搬会一并带进 TUI。
+- **许可证与可验证性**：本项目按 GPL-3.0 分发，复制上游代码会形成「上游衍生文件」，后续同步与声明成本更高；TUI 的做法是把行为翻译成 Rust 并写成测试（`tests/flow_parity.rs`、`tests/fsrs_parity.rs` 等），上游只作行为参照。
 
 ## 相关文档
 
-- [文档索引](README.md)
-- [数据文件与互通](persistence.md)（存档格式、版本策略、手工迁移细节）
-- [设置项参考](settings.md)（32 行设置与透传字段的逐项说明）
-- [领域算法](domain.md)（FSRS、流程、会话与统计的实现）
-- [应用状态机](app.md)（键位分发、保存时机与扩展点）
+[文档索引](README.md) · [总体架构](architecture.md) · [开发指南](development.md) · [存档与数据格式](persistence.md)
