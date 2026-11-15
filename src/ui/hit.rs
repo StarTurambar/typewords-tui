@@ -93,7 +93,11 @@ pub fn action_at(app: &App, area: Rect, column: u16, row: u16) -> Option<Action>
         .map(|target| target.action)
 }
 
-pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32) -> Option<Action> {
+/// 滚轮 → 页面自己的滚动 / 光标动作。
+///
+/// 单栏页面只有一种滚动，不必看指针位置；文章页是双栏，指针在哪一栏就滚
+/// 哪一栏（见 `ui::articles::wheel_action`）。
+pub fn wheel_action(app: &App, area: Rect, column: u16, row: u16, delta: i32) -> Option<Action> {
     if modal_open(app) {
         return None;
     }
@@ -105,7 +109,12 @@ pub fn wheel_action(app: &App, _area: Rect, _column: u16, _row: u16, delta: i32)
         Screen::Words => Some(Action::WordsMove(delta)),
         Screen::Shortcuts => Some(Action::ShortcutMove(delta)),
         Screen::Flows => Some(Action::FlowMove(delta)),
-        Screen::Articles => Some(Action::ArticleBookMove(delta)),
+        // 左右两栏的语义不同：左栏换书、右栏选文章。在这里一律按「换书」
+        // 处理会让右侧列表的滚轮把整本书换掉，文章光标也跟着丢。
+        Screen::Articles => {
+            let shell = shell::layout(area, Nav::from_screen(app.screen));
+            super::articles::wheel_action(shell.content, column, row, delta)
+        }
         _ => None,
     }
 }
