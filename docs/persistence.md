@@ -428,7 +428,7 @@ function systemPractice() {
 - `practiceData` 的字段名与上游不同：上游记「段落 / 句 / 词」三级游标（`sectionIndex` / `sentenceIndex` / `wordIndex`），TUI 的文章在 `gen_sections` 后把段落展开成扁平句子列表，跟打也按扁平下标推进，因此只存一个 `sentenceIndex`。`statStoreData` 保留字段名以对齐上游信封，但 TUI 不用它（用时记在 `practiceData.spend`）。
 - **与 Web 备份的映射**：本地格式不变；`tw export-web` 会把它包装成网页版能安全读取的 `PracticeSaveArticle`（三级游标归零、`statStoreData` 非空、真实断点放在 `tuiPracticeData`），`tw import-web` 优先读这个扩展字段还原。网页版自己产生的缓存没有文章 id，仍不映射；细节见第 8 节。
 - **保存时机**：每完成一句排一次 500ms 延迟保存（防抖），另有 30 秒整点兜底，防止进程被直接杀掉时丢掉整段进度；退出文章页（`Esc` / `Ctrl+C`）与退出程序时立即保存。`Ctrl+,` 暂停计时只停止累加 `spend`，不改变保存时机。
-- **恢复时机**：启动时只读取（`refresh_article_resume`）用于列表标记，**不**进入跟打页；进入文章页后，缓存对应的文章行标出「上次第 N 句」，选中它按 `Enter` 才从记录的句子续打并带上用时。选别的文章从头开始；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接忽略，不硬套。
+- **恢复时机**：启动时只读取（`refresh_article_resume`）用于列表标记，**不**进入跟打页；进入文章页后，缓存对应的文章行标出「上次第 N 句」，选中它按 `Enter` 才从记录的句子续打并带上用时。选别的文章从头开始；缓存里的文章 id 在当前书目里找不到时（换了书、资源更新）直接忽略，不硬套。`sentenceIndex` 是保存时那篇文章的下标：资源更新后文章变短时，列表标记按当前句数 clamp 到最后一句（与续打时的下标夹取规则一致），文章 0 句时不显示标记。
 - **整篇练完**时缓存被删除——否则下次进文章页会「恢复」一篇已经练完的文章。
 - 损坏时隔离为 `practice-article.json.corrupt-<时间戳>.json`，提示「文章练习缓存损坏，已丢弃」，不阻断启动。
 

@@ -170,7 +170,7 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                             }),
                     ),
                     Span::styled(format!("  {sentences} 句"), Style::default().fg(theme.dim)),
-                    saved_line(app, article.id, theme),
+                    saved_line(app, article.id, sentences, theme),
                 ]))
             })
             .collect();
@@ -185,7 +185,15 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
 ///
 /// 续打是显式操作：看到标记后选中并按 Enter 才会从断点句子继续，
 /// 而不是启动时自动跳进跟打页。
-fn saved_line(app: &App, article_id: i64, theme: &Theme) -> Span<'static> {
+///
+/// 存档里的 `sentence_index` 是保存时那篇文章的下标，资源更新后文章可能变短，
+/// 旧断点会指到已经不存在的句子。这里用本行已经算出的 `sentences`（当前文章
+/// 的实际句数）校验：超出时 clamp 到最后一句，与 `start_article_practice`
+/// 续打时把下标 clamp 到当前句数内的行为一致——标记上的句子必须按当前句数
+/// 夹取，不能把存档里的旧数字原样搬上屏幕（同书本行「72 篇」那一类
+/// 「显示存档数字、不与实际数据对照」的缺陷）。文章连一句都没有时
+/// 无可续打的内容，不显示标记。
+fn saved_line(app: &App, article_id: i64, sentences: usize, theme: &Theme) -> Span<'static> {
     let Some(cache) = app
         .article_resume
         .as_ref()
@@ -193,8 +201,13 @@ fn saved_line(app: &App, article_id: i64, theme: &Theme) -> Span<'static> {
     else {
         return Span::raw("");
     };
+    // 句数来自当前文章文件；0 句时没有任何可续打的句子。
+    let Some(last) = sentences.checked_sub(1) else {
+        return Span::raw("");
+    };
+    let index = cache.sentence_index.min(last);
     Span::styled(
-        format!("  · 上次第 {} 句", cache.sentence_index + 1),
+        format!("  · 上次第 {} 句", index + 1),
         Style::default().fg(theme.accent_alt),
     )
 }
