@@ -1208,11 +1208,19 @@ impl App {
         } else {
             (((total.saturating_sub(wrong)) as f64 / total as f64) * 100.0).round() as u32
         };
+        // 结算里的「学习进度」按词表实际词数显示，与主页/词库页同一口径：
+        // 目录登记的 `length` 可能大于真实词数（删词 / 换词库文件）。
         let (last_learn_index, length, complete) = self
             .boot
             .base
             .study_dict()
-            .map(|dict| (dict.last_learn_index, dict.length, dict.complete))
+            .map(|dict| {
+                (
+                    dict.last_learn_index,
+                    dict.effective_length(),
+                    dict.complete,
+                )
+            })
             .unwrap_or((0, 0, false));
         // 错词 Top10：按本轮错误次数倒序
         let mut wrong_top: Vec<(String, i64)> = session

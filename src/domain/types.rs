@@ -367,8 +367,33 @@ impl Dict {
         }
     }
 
+    /// 按词表实际词数校准 `length` 与学习进度；返回是否校正过进度。
+    ///
+    /// 词库目录里的 `length` 只是登记值，装载词表后以 `words` 为准重新校准
+    /// （对齐上游 `words.vue` init 的 `length = dict.words.length`）。旧存档里
+    /// 按登记值推进过的 `lastLearnIndex` 会越过真实词数：把它夹回末位并直接
+    /// 标记完成（同一处上游是 `lastLearnIndex > length` 夹回 + `complete = true`），
+    /// 否则这种存档既学不动（没有新词可取）也永远到不了总复习阶段。
+    ///
+    /// 返回 `true` 表示进度被校正过：此时的断点缓存属于校正前的进度，调用方
+    /// 应丢弃它（上游这里调 `resetCacheData()`）。
+    pub fn normalize_progress(&mut self) -> bool {
+        if self.words.is_empty() {
+            return false;
+        }
+        let length = self.words.len();
+        self.length = length;
+        if self.last_learn_index < length {
+            return false;
+        }
+        let repaired = self.last_learn_index != length || !self.complete;
+        self.last_learn_index = length;
+        self.complete = true;
+        repaired
+    }
+
     pub fn progress_percent(&self) -> u32 {
-        let length = self.length.max(self.words.len());
+        let length = self.effective_length();
         if length == 0 {
             return 0;
         }
@@ -986,4 +1011,80 @@ pub struct PracticeCacheCompact {
     pub practice_data: Option<PracticeDataCompact>,
     pub stat_store_data: Option<PracticeState>,
     pub session_snapshot: Option<PracticeSessionSnapshot>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(length: usize, words: usize, last_learn_index: usize) -> Dict {
+        Dict {
+            length,
+            words: (0..words)
+                .map(|index| Word::new(format!("w{index}")))
+                .collect(),
+            last_learn_index,
+            ..Dict::default()
+        }
+    }
+
+    /// 进度百分比按词表实际词数算：登记值偏大时不能把真实进度压下去
+    /// （4/5 学完应显示 80%，而不是按登记 8 词算成 50%）。
+    #[test]
+    fn progress_percent_uses_the_actual_word_count() {
+        let mut sample = dict(8, 5, 4);
+        assert_eq!(sample.progress_percent(), 80);
+        sample.last_learn_index = 5;
+        assert_eq!(sample.progress_percent(), 100);
+    }
+
+    /// 装载校正：登记值偏大时把 length 校准成实际词数，越过末尾的进度夹回并
+    /// 直接标记完成（否则旧存档既学不动也到不了总复习阶段）。
+    #[test]
+    fn normalize_progress_clamps_to_the_actual_word_count_and_marks_complete() {
+        let mut sample = dict(8, 5, 8);
+        assert!(sample.normalize_progress(), "应报告校正过进度");
+        assert_eq!(sample.length, 5, "length 应校准成实际词数");
+        assert_eq!(sample.last_learn_index, 5, "进度应夹回实际词数");
+        assert!(sample.complete, "到词表末尾应标记完成");
+    }
+
+    /// 健康词典（进度没越过实际词数）不被改动，也不丢断点。
+    #[test]
+    fn normalize_progress_keeps_a_healthy_dict_untouched() {
+        let mut sample = dict(8, 5, 3);
+        assert!(!sample.normalize_progress());
+        assert_eq!(sample.length, 5);
+        assert_eq!(sample.last_learn_index, 3);
+        assert!(!sample.complete);
+    }
+
+    /// 进度已经到实际末尾但 `complete` 没置位（登记值偏大时就是这样卡住的）：
+    /// 装载校正要把它补成完成态，否则主页进不了总复习阶段。
+    #[test]
+    fn normalize_progress_completes_a_dict_that_reached_the_end() {
+        let mut sample = dict(8, 5, 5);
+        assert!(sample.normalize_progress());
+        assert_eq!(sample.length, 5);
+        assert_eq!(sample.last_learn_index, 5);
+        assert!(sample.complete);
+    }
+
+    /// 已经是完成态的词典不重复报告校正（避免每次启动都丢断点）。
+    #[test]
+    fn normalize_progress_is_idempotent_on_a_completed_dict() {
+        let mut sample = dict(5, 5, 5);
+        sample.complete = true;
+        assert!(!sample.normalize_progress(), "已完成且长度一致时不需要校正");
+        assert_eq!(sample.last_learn_index, 5);
+        assert!(sample.complete);
+    }
+
+    /// 内置词典（词条为空、length 也可能是 0）不参与校正。
+    #[test]
+    fn normalize_progress_leaves_dicts_without_words_alone() {
+        let mut empty = Dict::default();
+        assert!(!empty.normalize_progress());
+        assert_eq!(empty.length, 0);
+    }
 }

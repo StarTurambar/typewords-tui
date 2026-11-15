@@ -88,7 +88,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 主页 | 首访引导 Tour | `words.vue`、`dict-list.vue`、`components/word/PracticeOnboardingHost.vue` | 无 | 缺失 | TUI 只用 Toast 提示 |
 | 词库 | 词库目录与切换 | `(words)/dict-list.vue` | `src/ui/dict_picker.rs` | 部分 | 列表 = 三本内置词典（收藏 / 错词 / 已掌握）+ 本地目录，可设为当前词典并打开词条页；无搜索、分类分组、封面、在线目录 |
 | 词库 | 每日词数与复习比例调整 | `components/word/PracticeSettingDialog.vue` | 设置页「复习 → 每日词数」+ 主页/词库页 `+`/`-` | 部分 | 主页/词库页步进 5 词，设置页可输入 1 ~ 词库词数的精确值（显示值按词库词数夹取）；仍无滑块、预计完成天数，复习比例在单独一行而非同一弹窗 |
-| 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线 |
+| 词库 | 修改学习进度 / 跳组 | `components/word/ChangeLastPracticeIndexDialog.vue`、`components/word/GroupList.vue` | 状态行「第 N 组」可点击，弹层选组跳转 | 已对齐 | `create_task_from_group` 已接线；装载时按词表实际词数校正词数与进度（对齐 `words.vue` init 的 `length = dict.words.length` 与 `lastLearnIndex > length` 分支） |
 | 词库 | 词条增删改查、批量删除、排序 | `(words)/dict.vue`、`components/BaseTable.vue`、`components/word/WordItem.vue` | 词条管理页（搜索 / 编辑 / 增删 / 排序 / 批量标记） | 已对齐 | 见 [使用手册 · 词条管理](usage.md#词条管理) |
 | 词库 | 自定义词典、词库副本 | `(words)/dict.vue`、`components/word/WordCollectPopover.vue` | 词库页 `n` 新建、`c` 复制 | 已对齐 | 自建词典落在数据目录，会自动出现在词库页 |
 | 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx/json）、`/import` 入口 | `tw import-dict`（词条数组 JSON） | 部分 | 仅 CLI、仅 JSON；xlsx 需要新依赖，本版不做 |
@@ -100,6 +100,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 练习 | 单词测试模式 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | 独立答题页（`src/ui/word_test.rs`） | 已对齐 | 4 选 1、答错入错词本、结算 |
 | 练习 | 随机复习范围/数量设置 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同 | TUI 无「已学 10 词」门槛；学习进度为 0 时取整本词库 |
 | 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐 | 含错词 Top10 与本周记录（当前词典口径）；无分享入口 |
+| 练习 | 学完判定 / 总复习阶段 | `words.vue` 的 `getCurrentStudyWord`（`isEnd`）与 `updateCompletedDictProgress` | `src/domain/study_task.rs`、`src/domain/session.rs` | 行为不同 | 学完判定按词表实际词数；`is_end` 取「剩余已无可学新词」，最后一个词仍作为新词学完并置 `complete`。上游按 `lastLearnIndex >= length - 1` 提前转入复习，最后一个词学不到、`complete` 可能永远不置位 |
 | 练习 | 重学 / 下一组 | 结算弹层按钮、`createRepeatTask` / `createNextTask` | 结算弹层 + 练习中 `Ctrl+Enter` / `Alt+←` / `Alt+→` | 已对齐 | 练习中可随时重学本组、上下组 |
 | 练习 | 跳阶段 / 上一词 / 下一词 / 跳过 | `usePracticeWordNavigator` + 快捷键 | `domain/flow/navigator.rs` + 键位 | 已对齐 | 键位有差异，语义一致（见 4.2） |
 | 练习 | 自测选择题 | `components/word/WordIdentifyPanel.vue`、`utils/word-test.ts` | `src/domain/question.rs` | 已对齐 | 4 选 1、相似度排序、随机扰动 |

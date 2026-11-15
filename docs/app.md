@@ -80,7 +80,7 @@
 
 - `Toast`：`message`、`level: NoticeLevel`（Success/Warning/Error/Info）、`until`（毫秒时间戳）。`App::toast` 取当前时间 + 3200 ms，超过 4 条丢最旧；`current_toast(now)` 从尾部找第一条未过期项。
 - `ConfirmAction`：`Quit`、`ResetPractice`、`ClearAllData`；`ConfirmState` 为 `message` + `action` + `focus: ConfirmFocus`（`Accept` / `Cancel`，默认 `Accept`），文案统一由 `confirm_message(action)` 产出（退出 / 清空练习进度 / 清除所有数据各一条）。方向键（含 `j` / `k` 别名）/ `Tab` 在「确认 / 取消」之间移动选中（到边停、不回绕），`Enter` / 空格执行当前选中的按钮。
-- `SummaryData`：`kind: SummaryKind`（`Word`（默认）/ `Article { article_id, title }`）、`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`、`focus: SummaryButton`（`Continue` / `Relearn` / `Home`，默认 `Continue`）。`Word` 是单词会话（`finish_session`）与单词测试（`finish_word_test`）的口径：`last_learn_index` / `length` / `complete` 来自当前学习词典的总进度，`wrong` 是本轮错词数；`Article` 是文章跟打（`finish_article_practice`）的口径：`last_learn_index` 是完成句数、`length` 是总句数、`wrong` 是错句数（出现过错误的句子数）、`review` 固定 0——**文章结算的指标是句数而不是词数**，没有「新词 / 复习」维度；`article_id` / `title` 供结算文案与「重打本篇」使用。`focus` 是结算按钮焦点：方向键（含 `j` / `k` 别名）/ `Tab` 在三个按钮之间移动（到边停、不回绕），`Enter` / 空格执行当前选中的按钮；每次结算都重新构造 `SummaryData`，焦点自然回到默认的「继续」。
+- `SummaryData`：`kind: SummaryKind`（`Word`（默认）/ `Article { article_id, title }`）、`spend_ms`、`accuracy`（`total == 0` 记 100）、`new_words`、`review`、`wrong`、`last_learn_index`、`length`、`complete`、`focus: SummaryButton`（`Continue` / `Relearn` / `Home`，默认 `Continue`）。`Word` 是单词会话（`finish_session`）与单词测试（`finish_word_test`）的口径：`last_learn_index` / `length` / `complete` 来自当前学习词典的总进度（`length` 取 `effective_length()`，即词表实际词数，不认目录登记的 `length`），`wrong` 是本轮错词数；`Article` 是文章跟打（`finish_article_practice`）的口径：`last_learn_index` 是完成句数、`length` 是总句数、`wrong` 是错句数（出现过错误的句子数）、`review` 固定 0——**文章结算的指标是句数而不是词数**，没有「新词 / 复习」维度；`article_id` / `title` 供结算文案与「重打本篇」使用。`focus` 是结算按钮焦点：方向键（含 `j` / `k` 别名）/ `Tab` 在三个按钮之间移动（到边停、不回绕），`Enter` / 空格执行当前选中的按钮；每次结算都重新构造 `SummaryData`，焦点自然回到默认的「继续」。
 - `EditState`：`target: EditTarget` + `buffer: String`（ASCII 数字，最长 6 位；自由文本项另有限制）。`EditTarget` 有 `PerDay`、`Ratio`、`Repeat`、`RepeatCustom`、`WaitMs`、`SpaceCooldown`、`EasyLimit`、`GoodLimit`、`HardLimit`、`Retention`、`Note`、`WordSoundSpeed`、`DictName` 十三个取值；`PerDay` 对应设置页「复习 → 每日词数」行（`daily_words`），保存时夹在 `1..=词表长度` 并写 `dict.json` 的当前学习词典，`Note` / `DictName` 是自由文本（单词笔记、新建词典的名字）。
 
 ### 2.4 设置表与 `SettingKind`
@@ -115,7 +115,7 @@
 3. 随机种子取 `cli.seed`，缺省 `rng::random_seed()`；构造 `rng::seeded(seed)`；组装 `App`（`screen = Home`、无会话、空 Toast、工具栏显示、词表面板与例句开关的默认值）。
 4. `notices` 逐条转 `Warning` Toast；再次 `ThemeRegistry::resolve`，发生回退时追加 Warning「主题 X 不存在，已回退到深色」。
 5. `--reset-practice` 删除两份断点缓存并提示「已清空练习进度」；否则只调用 `refresh_article_resume()` 把文章断点读进内存（损坏/版本不支持时提示），**不切换页面**（见 3.3）。
-6. `ensure_study_dict()`：当前词典是内置词典（收藏 / 错词 / 已掌握）时直接返回——它们的词条在存档里，为空也是合法状态，不回退到资源词库；否则缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库。失败写 `fatal = "加载词库失败: ..."`。
+6. `ensure_study_dict()`：当前词典是内置词典（收藏 / 错词 / 已掌握）时直接返回——它们的词条在存档里，为空也是合法状态，不回退到资源词库；否则缺词表时按 id 重新加载，找不到就用 `cet4` 或第一本词库。装载词表后（`select_dict` 末尾与 `bootstrap::load` 返回前各一次，幂等）调 `normalize_study_progress`：按词表实际词数校准 `length` 与进度，进度越过实际词数时夹回并补 `complete`，同时丢弃旧断点缓存（对齐上游 `words.vue` init 的 `length = dict.words.length` 与 `resetCacheData()`；内置词典不参与）。失败写 `fatal = "加载词库失败: ..."`。
 7. `refresh_stats()` 与 `refresh_task_preview()` 计算主页缓存，返回 `App`。
 
 ### 3.3 恢复练习缓存与 fatal

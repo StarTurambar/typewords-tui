@@ -178,8 +178,8 @@ article.bookList 中 system == false 的词典                        → articl
 | `id` | 词典身份；资源文件里的数字 id 会在读取时转成字符串（如 `1`） |
 | `enName` | 上游路由名；读取时也接受 `en_name` 别名，两者都可作为 `--dict` 的取值 |
 | `name` / `description` / `url` / `category` / `tags` / `language` / `translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
-| `length` | 词数；有效词数还应参考 `words.len()`（`Dict::effective_length`） |
-| `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值 |
+| `length` | 目录登记词数。学完判定、进度与界面上的「N 词」一律按词表实际词数 `words.len()`（`Dict::effective_length`）；装载词表后 `Dict::normalize_progress` 会把 `length` 校准成实际词数（见 [domain.md](domain.md) 12.5） |
+| `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值，随后按实际词数校正：`lastLearnIndex` 已到/越过实际词数时夹回并置 `complete = true`，同时丢弃旧的单词练习断点（见 [domain.md](domain.md) 12.5） |
 | `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
 | `articles` | 文章数组；TUI 原样透传、不读取 |
 | `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，以及可选的 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole`（`single/start/middle/end`，跨天练习用） |
