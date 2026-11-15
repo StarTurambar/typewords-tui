@@ -13,7 +13,7 @@
 | `src/app/mod.rs` | `App` 结构体，`Screen`/`Toast`/`EditState`/`ConfirmState`/`SummaryData`/`SummaryKind`/`SettingKind`/`SETTING_ROWS`；启动、事件循环、练习会话集成、设置动作、`on_tick`、`run`/`build_for_test` |
 | `src/app/action.rs` | `Action` 枚举与 `App::apply_action`：非练习页、鼠标、弹层与测试共用的状态迁移入口 |
 | `src/app/buttons.rs` | 键入练习页底部的动作按钮：`TypingButton`、两页的按钮表（`PRACTICE_BUTTONS` / `ARTICLE_BUTTONS`）、列数 `columns`、键盘选中 `handle_typing_button_key` 与执行入口 `activate_typing_button` |
-| `src/app/dicts.rs` | 词库页条目：`DictEntry` / `DictEntryKind` 与 `dict_entries` / `dict_entry_at` / `dict_entry_count` / `dict_entry_of_study`。内置词典（`system: true`）与词库资源合成同一条列表，内置在前；光标、详情面板、「设为当前 / 打开词条页」都按条目下标寻址 |
+| `src/app/dicts.rs` | 词库页条目：`DictEntry` / `DictEntryKind` 与 `dict_entries` / `dict_entry_at` / `dict_entry_count` / `dict_entry_of_study`，以及词数的唯一口径 `dict_word_count` / `resource_word_count`（主页磁贴、词库页与推荐列表共用：词条数优先，目录登记值只在存档里没有词条也没有 `length` 时兜底）。内置词典（`system: true`）与词库资源合成同一条列表，内置在前；光标、详情面板、「设为当前 / 打开词条页」都按条目下标寻址 |
 | `src/app/keymap.rs` | 弹层与各屏幕的键位到 `Action` 映射，不直接修改状态；练习页的键位改由 `src/domain/shortcut.rs` 的键位表驱动 |
 | `src/app/mouse.rs` | 鼠标事件 → `ui::hit::action_at`/`wheel_action` → `Action` |
 | `src/app/focus.rs` | 所有套外壳页面的键盘焦点：`FocusDir`、`set_screen`（切屏唯一入口）、`focus_default`（进入页面默认选中内容区）、`move_focus`/`switch_focus_pane`/`activate_focus`/`clear_focus`/`focus_home_default`；保存焦点身份（`FocusId`）与主页内容区上次选择（`last_content_focus`），两栏主轴、视觉分带与几何在 `ui::focus` |
@@ -490,6 +490,7 @@ app.save_all()
 | 函数 | 行为 |
 | --- | --- |
 | `save_dict_now` | `store.save_dict(&boot.base)`；`readonly_dict` 为真（存档版本过高）时直接返回 |
+| `persist_words`（私有） | 词条页保存用：系统词典走 `save_dict_now`；资源词库把词表写回 `home/dicts/<lang>/word/<url>`，再同步用户目录的 `length`，最后 `save_dict_now`（词数、笔记一起落盘） |
 | `save_settings_now` | `store.save_settings(&boot.settings)`；`readonly_settings` 为真（设置存档版本过高）时直接返回 |
 | `save_practice_now` | 无会话时返回；`session.build_cache()` 后把当前 `stat` 写进 `stat_store_data`，`cache_to_compact` 后写 `practice-word.json`，并清除 `pending_practice_save` |
 | `schedule_practice_save` | 只设 `pending_practice_save = now + 500ms`，落盘由 `on_tick` 完成 |
@@ -515,6 +516,7 @@ app.save_all()
 | `finish_article_practice` | 立即保存词典（统计写进当前词典），删除文章断点缓存 |
 | 结算继续 / 重学 | 新会话立即保存练习缓存 |
 | 主页/词库页 `+`/`-`、切换词库、设置页每日词数（`daily_words`，`PerDay`） | 立即保存词典 |
+| 词条页编辑 / 删除 / 排序（`persist_words`） | 立即重写词条文件、同步用户目录 `length`，并保存词典 |
 | 设置页其余项的修改、退出设置页 | 立即保存设置（「每日词数」行改的是词典，见上一行） |
 | 确认退出 / 事件循环结束 | `save_all` |
 | 窗口缩放 | 不保存 |

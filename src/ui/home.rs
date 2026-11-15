@@ -801,7 +801,8 @@ fn render_dicts(
         } else {
             "词库"
         };
-        let count = dict.effective_length();
+        // 与词库页、推荐列表同一个口径：词条数为准，登记值只在没拥有时兜底。
+        let count = app.dict_word_count(dict);
         let inner = Rect::new(
             tile.x + 1,
             tile.y + 1,
@@ -914,7 +915,7 @@ fn render_recommendations(
         }
         let name = fit_text(&resource.name, 18);
         let description = fit_text(&resource.description, 22);
-        let count = format!("{} 词", resource.length);
+        let count = format!("{} 词", app.resource_word_count(resource));
         let name_width = display_width(&name);
         let desc_width = display_width(&description);
         let count_width = display_width(&count);

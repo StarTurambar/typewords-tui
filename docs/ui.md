@@ -137,8 +137,8 @@ ui::render(app, frame)
 ### 5.3 我的词典与推荐
 
 - 「我的词典」：标题行右侧「d 词库」；卡片数量 `max_tiles = (tiles.width / 14).clamp(3, 5)`。当前学习词典如果排在第 `max_tiles` 位之后，会与第一张卡交换，避免被系统词典挤出视野；卡片不足时追加「+ / d 管理」卡。
-- 每张词库卡：名称（bold）、徽标（`内置` / `当前` / `词库`）与「N 词」；词数取 `effective_length()`。
-- 「推荐」：从 `catalog.resources()` 过滤掉当前词典与 `book_list` 已拥有的 id/enName，按行显示 名称（截断 18 列）/ 简介（22 列）/ 词数；行数由区块高度决定；无推荐时显示「暂无推荐 · d 浏览词库」。
+- 每张词库卡：名称（bold）、徽标（`内置` / `当前` / `词库`）与「N 词」；词数取 `App::dict_word_count`——词条数优先，登记值只在存档里既没有词条也没有 `length` 时兜底。
+- 「推荐」：从 `catalog.resources()` 过滤掉当前词典与 `book_list` 已拥有的 id/enName，按行显示 名称（截断 18 列）/ 简介（22 列）/ 词数（`App::resource_word_count`，与词库页同一口径）；行数由区块高度决定；无推荐时显示「暂无推荐 · d 浏览词库」。
 - 词典卡片的排布由 `dict_tile_layout` 统一计算，绘制（`render_dicts`）与命中检测（`layout`）共用它——两边各算一遍必然漂移，「+ / d 管理」卡就会点不到。`ordered_dicts` 负责展示顺序（当前词库优先）。
 - `targets`：主按钮 `StartPractice`、自由按钮 `StartFreePractice`、目标 `AdjustDaily(±5)`、模式标签 `OpenModePicker`、「d 词库」「+ / d 管理」卡「d 更多」→ `Navigate(DictPicker)`；每个 target 都用 `Target::focusable` 带稳定身份 `FocusId::Content(ContentId::…)` 与中文 `label`，键盘焦点与鼠标命中同源。标题右侧文字本身是 `section_header` 画出来的，命中矩形由 layout 预留（`open_dicts`/`open_more`/`manage_tile`）。
 
@@ -275,8 +275,8 @@ ui::render(app, frame)
 
 - 行数据统一来自 `App::dict_entries`：三本内置词典（`DictEntryKind::System`，从 `word.book_list` 里筛 `system: true` 的条目，不假设它们固定占 0~2）在前，其后是 `Catalog::resources()` 的词库资源（`DictEntryKind::Resource`）。`app.dict_cursor` 是**条目下标**，渲染、详情与命中都用它寻址。
 - 内容宽度 `>= DETAIL_MIN_WIDTH(72)` 时左右分栏：列表占 58%，之后 1 列分隔线，右侧详情；否则只画列表。列表从标题下空一行开始；`scroll_offset = cursor.min(total-1).saturating_sub(visible-1)`，保证光标在可视区内。标题右侧是「共 N 个词库 · 内置 3 本」。
-- 行首标记：当前学习词典 `●`（`accent`）、选中 `▶`（`accent_alt`）。资源行：名称后可选显示 id（`name_space >= 18 && inner_width >= 40`），右侧是 6/4 格细进度条、`N 词`、百分比；内置词典行**不画进度条与百分比**，只画 `accent_alt` 的「内置」与 `N 词`（`DictEntry.length` 取实际词条数）。列表被裁切时最右列画 `↑`/`↓`。
-- 详情面板：名称（当前带 `●`）、id · 分类、简介折行、标签、词数、进度条、每日词数说明（当前/已拥有/未拥有三种文案）；内置词典省掉进度条与每日词数，改为用途说明（`constants::system_dict_hint`，按 id 给收藏 / 错词 / 已掌握各一句）与「w 查看词条 · 可批量移除」一行。两种都画底部「Enter 设为当前」按钮（内宽 `>= 12` 且内高 `>= 2` 才画）。
+- 行首标记：当前学习词典 `●`（`accent`）、选中 `▶`（`accent_alt`）。资源行：名称后可选显示 id（`name_space >= 18 && inner_width >= 40`），右侧是 6/4 格细进度条、`N 词`、百分比；内置词典行**不画进度条与百分比**，只画 `accent_alt` 的「内置」与 `N 词`。`DictEntry.length` 由 `App::resource_word_count` 给出：已拥有的词库用词条数，没打开过的才用目录登记值，因此编辑 / 删除词条后这一行与主页磁贴始终是同一个数。列表被裁切时最右列画 `↑`/`↓`。
+- 详情面板：名称（当前带 `●`）、id · 分类、简介折行、标签、词数（与行上的 `N 词` 同一个 `DictEntry.length`）、进度条、每日词数说明（当前/已拥有/未拥有三种文案）；内置词典省掉进度条与每日词数，改为用途说明（`constants::system_dict_hint`，按 id 给收藏 / 错词 / 已掌握各一句）与「w 查看词条 · 可批量移除」一行。两种都画底部「Enter 设为当前」按钮（内宽 `>= 12` 且内高 `>= 2` 才画）。
 - 底栏：有键盘焦点时是「选中 X · ↑↓←→ 移动 · enter 触发 · esc 返回 · w 词条 · tab 换栏」（窄终端从尾部省略，先丢 `tab`、再丢 `w 词条`——`w` 是词库页独有的提示）；没有焦点时回退到 `hints_for(DictPicker)` 的「enter 选择 · w 词条 · +/- 每日词数 · esc 返回」。
 - `targets`：每个可见行一个 target——光标所在行是 `ActivateDict(条目下标)`，其它行是 `SelectDict(条目下标)`（第一次点击选中、再次点击激活）；按钮是 `ActivateDict(dict_cursor)`。键盘焦点在内容区时，光标行由 `ui::focus::page_selection_rect` 解析成整块 `accent` 高亮（与主页一致）；焦点在侧栏时恢复页面自己的 `selection` 底 + 左侧强调条。截图见 [词库页](screenshots/dict-120x40-dark.png)（光标停在当前词库）与 [词库页 · 选中内置词典](screenshots/dict-builtin-120x40-dark.png)（右侧详情为收藏的用途说明与「w 查看词条」）。
 
