@@ -88,8 +88,9 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     // 这里补一句说明，不让它抢 ●。
     let entries = app.flow_entries();
     let active = entries.iter().find(|entry| entry.active);
-    let custom_mode =
-        app.boot.settings.word_practice_mode == crate::domain::types::WordPracticeMode::Custom;
+    let mode = app.boot.settings.word_practice_mode;
+    let custom_mode = mode == crate::domain::types::WordPracticeMode::Custom;
+    let words_test = crate::domain::constants::is_words_test_mode(mode);
     let mut spans = vec![Span::styled(
         " 练习流程 ",
         Style::default()
@@ -99,6 +100,16 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     match active {
         Some(entry) => spans.push(Span::styled(
             format!("  当前：{}", entry.name),
+            Style::default().fg(theme.muted),
+        )),
+        // 单词测试走 4 选 1 答题，任何流程都不会执行（`start_practice_with_mode`
+        // 直接分流到 `start_word_test`）；这里明说，而不是让
+        // `get_flow_id_for_mode` 的 `system` 兜底冒充「当前流程」。
+        None if words_test => spans.push(Span::styled(
+            format!(
+                "  当前：{}（4 选 1 答题，不经过流程编排）",
+                crate::domain::constants::practice_mode_name(mode)
+            ),
             Style::default().fg(theme.muted),
         )),
         None => spans.push(Span::styled(

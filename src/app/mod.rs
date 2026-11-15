@@ -1984,15 +1984,23 @@ impl App {
 
     // ── 自定义练习流程 ─────────────────────────────────────────────────────
 
-    /// 下一轮练习真正会跑的流程 id；`None` 表示当前模式下无法开练。
+    /// 下一轮练习真正会跑的流程 id；`None` 表示当前模式下没有流程会执行。
     ///
     /// 这是流程页 `●` 的唯一事实来源：它和 `start_practice_with_mode` 取
     /// 配置走同一个 `active_flow`，所以「标了 `●` 的流程」与「下一轮实际
-    /// 跑的流程」不可能分叉。练习模式是「自定义流程」但还没有启用的自建
-    /// 流程时返回 `None`——此时开练会被直接拒绝，界面也不该标一个根本
-    /// 启动不了的东西。
+    /// 跑的流程」不可能分叉。两种情况下返回 `None`：
+    ///
+    /// - 练习模式是「自定义流程」但还没有启用的自建流程：此时开练会被直接
+    ///   拒绝，界面也不该标一个根本启动不了的东西；
+    /// - 练习模式是单词测试（4 选 1 答题）：`start_practice_with_mode` 直接
+    ///   分流到 `start_word_test`，压根不加载流程。`get_flow_id_for_mode` 对
+    ///   这两种模式兜底成 `system` 只是为了给会话层的 `&'static str` 收口，
+    ///   不能据此认为下一轮会跑「学习」流程——那会在流程页造一个假的 `●`。
     pub fn effective_flow_id(&self) -> Option<String> {
         let mode = self.boot.settings.word_practice_mode;
+        if crate::domain::constants::is_words_test_mode(mode) {
+            return None;
+        }
         if mode == WordPracticeMode::Custom && self.flow_store.active().is_none() {
             return None;
         }
