@@ -2,7 +2,7 @@
 
 本目录是 [typewords-tui](../README.md) 的完整文档：根 README 负责「这是什么、怎么开始」，这里按主题展开。文档以源码为唯一事实来源；代码行为变更时同步更新对应文档。
 
-> 对应版本：typewords-tui 0.3.2（见 `Cargo.toml`）。
+> 对应版本：typewords-tui 0.3.3（见 `Cargo.toml`）。
 
 ## 我想……
 
