@@ -83,28 +83,38 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
-    // 「当前」与列表的 ● 同一个来源：自建流程启用时是它，否则是当前模式的内置流程。
-    let active = app
-        .flow_entries()
-        .into_iter()
-        .find(|entry| entry.active)
-        .map(|entry| entry.name)
-        .unwrap_or_else(|| "内置流程".to_string());
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " 练习流程 ",
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("  当前：{active}"),
-                Style::default().fg(theme.muted),
-            ),
-        ])),
-        rect,
-    );
+    // 「当前」与列表的 ● 只反映「下一轮练习实际会跑的流程」，因此与顶栏
+    // 「模式」永远一致。已启用、但模式还没切到「自定义流程」的自建流程在
+    // 这里补一句说明，不让它抢 ●。
+    let entries = app.flow_entries();
+    let active = entries.iter().find(|entry| entry.active);
+    let custom_mode =
+        app.boot.settings.word_practice_mode == crate::domain::types::WordPracticeMode::Custom;
+    let mut spans = vec![Span::styled(
+        " 练习流程 ",
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )];
+    match active {
+        Some(entry) => spans.push(Span::styled(
+            format!("  当前：{}", entry.name),
+            Style::default().fg(theme.muted),
+        )),
+        None => spans.push(Span::styled(
+            "  当前：—（自定义流程模式尚未启用自建流程）",
+            Style::default().fg(theme.warn),
+        )),
+    }
+    if let Some(entry) = entries.iter().find(|entry| entry.enabled && !entry.active) {
+        let hint = if custom_mode {
+            format!(" · 「{}」的配置不可用，已回退到内置流程", entry.name)
+        } else {
+            format!(" · 已启用「{}」，切到「自定义流程」后生效", entry.name)
+        };
+        spans.push(Span::styled(hint, Style::default().fg(theme.dim)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), rect);
 }
 
 fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
@@ -138,13 +148,20 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
         } else {
             Style::default().fg(color)
         };
+        // 「已启用」只是 flows.json 里的启用位：模式不是「自定义流程」时它
+        // 不会生效，所以用文字标签说明，不占用只表示「实际生效」的 ●。
+        let label = if entry.enabled && !entry.active {
+            format!("{} （已启用）", entry.name)
+        } else {
+            entry.name.clone()
+        };
         let row = Rect::new(rect.x, y, rect.width, 1);
         if selected {
             widgets::paint_rect(frame, row, theme.selection);
         }
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                fit_text(&format!("{marker} {}", entry.name), rect.width as usize),
+                fit_text(&format!("{marker} {label}"), rect.width as usize),
                 style,
             ))),
             row,

@@ -110,8 +110,17 @@ pub struct FlowEntry {
     pub config: crate::domain::flow::PracticeFlowConfig,
     /// 是否是自建流程
     pub custom: bool,
-    /// 是否是当前选中的流程：内置流程看练习模式，自建流程看启用位
+    /// 是否是「下一轮练习真正会跑的流程」——流程页的 `●` 只看这个字段。
+    ///
+    /// 由 `App::effective_flow_id` 统一判定，内置行与自建行不会同时为
+    /// `true`；「自定义流程」模式下还没启用自建流程时没有任何一行是
+    /// `true`（此时开练会被拒绝）。
     pub active: bool,
+    /// 是否是 `flows.json` 里被启用的自建流程（内置行恒为 `false`）。
+    ///
+    /// 「已启用」不等于「生效」：练习模式不是「自定义流程」时它不会生效，
+    /// 列表只在行尾标「（已启用）」，不占用 `●`。
+    pub enabled: bool,
 }
 
 /// 词条编辑弹层：单词 / 音标 / 释义 / 笔记四个字段。
@@ -1975,37 +1984,56 @@ impl App {
 
     // ── 自定义练习流程 ─────────────────────────────────────────────────────
 
+    /// 下一轮练习真正会跑的流程 id；`None` 表示当前模式下无法开练。
+    ///
+    /// 这是流程页 `●` 的唯一事实来源：它和 `start_practice_with_mode` 取
+    /// 配置走同一个 `active_flow`，所以「标了 `●` 的流程」与「下一轮实际
+    /// 跑的流程」不可能分叉。练习模式是「自定义流程」但还没有启用的自建
+    /// 流程时返回 `None`——此时开练会被直接拒绝，界面也不该标一个根本
+    /// 启动不了的东西。
+    pub fn effective_flow_id(&self) -> Option<String> {
+        let mode = self.boot.settings.word_practice_mode;
+        if mode == WordPracticeMode::Custom && self.flow_store.active().is_none() {
+            return None;
+        }
+        Some(self.active_flow(mode).id)
+    }
+
     /// 流程列表：先列 7 个内置流程，再列自建流程。
     ///
-    /// 内置流程的「正在使用」由 **当前练习模式** 决定：模式与内置 flow 一一
-    /// 对应，所以只有当前模式那一行是 `●`。早期把「当前模式的 flow id」和
-    /// 「按模式取到的配置 id」比较——后者恒等于前者，于是没有自建流程时
-    /// 七行全是 `●`，用户看不出当前用哪条。
-    ///
-    /// 存在已启用的自建流程时内置行不再标 `●`：此时「当前流程」是那条自建
-    /// 流程，它在练习模式选「自定义流程」时生效。
+    /// `active`（也就是列表里的 `●`）只表示「下一轮练习实际会跑的流程」，
+    /// 因此与顶栏「模式」永远一致。自建流程被启用、但练习模式还没切到
+    /// 「自定义流程」时，它只有 `enabled`（界面标「（已启用）」），不再
+    /// 抢 `●`。早期把「已启用」和「将实际使用」混成一个 `active`：启用
+    /// 自建流程后 `●` 立刻跳到自建行、页头「当前」跟着报自建流程名，而
+    /// 下一轮实际跑的仍是当前模式的内置流程。
     pub fn flow_entries(&self) -> Vec<FlowEntry> {
-        let mode = self.boot.settings.word_practice_mode;
-        let active_builtin_id = crate::domain::flow::get_flow_id_for_mode(mode);
-        let custom_active = self.flow_store.active().is_some();
+        let effective = self.effective_flow_id();
         let mut entries: Vec<FlowEntry> = Vec::new();
         for flow_mode in crate::domain::flow::BUILTIN_FLOW_MODES {
             let config = crate::domain::flow::flow_for_mode(flow_mode);
+            let active = effective.as_deref() == Some(config.id.as_str());
             entries.push(FlowEntry {
                 id: config.id.clone(),
                 name: crate::domain::constants::practice_mode_name(flow_mode).to_string(),
-                active: !custom_active && config.id == active_builtin_id,
                 config,
                 custom: false,
+                active,
+                enabled: false,
             });
         }
         for (id, flow) in &self.flow_store.flows {
+            // 正常存档里 `config.id` 与 `flows` 的 key 一致；手工改过的
+            // flows.json 可能对不上，两个都认，避免出现「已启用却一行都没标」。
+            let active = effective.as_deref() == Some(id.as_str())
+                || effective.as_deref() == Some(flow.config.id.as_str());
             entries.push(FlowEntry {
                 id: id.clone(),
                 name: flow.name.clone(),
                 config: flow.config.clone(),
                 custom: true,
-                active: self.flow_store.active_id == *id,
+                active,
+                enabled: self.flow_store.active_id == *id,
             });
         }
         entries
@@ -2041,7 +2069,10 @@ impl App {
         if entry.custom {
             self.flow_store.activate(&entry.id);
             self.save_flow_store();
-            self.toast(NoticeLevel::Success, format!("已启用「{}」", entry.name));
+            // 「启用」不等于「生效」：模式还是内置流程时下一轮不会按它编排，
+            // 提示里必须说清楚，否则用户以为已经把练习切过去了。
+            let message = format!("已启用「{}」{}", entry.name, self.flow_activation_suffix());
+            self.toast(NoticeLevel::Success, message);
             return;
         }
         // 切回内置流程 = 清掉自建流程的启用位，并把该流程对应的模式写回设置。
@@ -2056,6 +2087,18 @@ impl App {
         );
     }
 
+    /// 自建流程启用后是否立刻生效——不生效时补一句怎么切过去。
+    ///
+    /// 只有练习模式是「自定义流程」时 `active_flow` 才会取已启用的自建流程；
+    /// 其余模式下一轮仍跑内置流程，所以提示不能只说「已启用」。
+    fn flow_activation_suffix(&self) -> &'static str {
+        if self.boot.settings.word_practice_mode == WordPracticeMode::Custom {
+            ""
+        } else {
+            "；练习模式切到「自定义流程」后生效"
+        }
+    }
+
     /// 以选中的流程为模板新建一份自建副本。
     fn duplicate_flow(&mut self) {
         let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
@@ -2066,10 +2109,11 @@ impl App {
         let mut config = entry.config.clone();
         config.id = id.clone();
         config.mode = crate::domain::types::WordPracticeMode::Custom;
+        let name = format!("{} 副本", entry.name);
         self.flow_store.upsert(
             &id,
             crate::domain::flow::store::StoredFlow {
-                name: format!("{} 副本", entry.name),
+                name: name.clone(),
                 config,
                 created_at: now,
                 updated_at: now,
@@ -2078,7 +2122,10 @@ impl App {
         self.flow_store.activate(&id);
         self.save_flow_store();
         self.flow_cursor = self.flow_entries().len().saturating_sub(1);
-        self.toast(NoticeLevel::Success, "已新建流程副本");
+        self.toast(
+            NoticeLevel::Success,
+            format!("已新建并启用「{name}」{}", self.flow_activation_suffix()),
+        );
     }
 
     /// 删除选中的自建流程。

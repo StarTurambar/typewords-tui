@@ -309,6 +309,13 @@ ui::render(app, frame)
 - 底部：规则行平时是「 字母、数字照打 · 空格可省略 · 标点不用打 · Backspace 退格」（`dim`；60 列最小终端下可完整显示），本句出现过错误时换成「 红色 = 打错的字符 · Backspace 改正」（`warn`）；下面是 `ui::typing_buttons` 的动作按钮条（`ARTICLE_BUTTONS`：朗读 / 翻译 / 主题 / 暂停 / 帮助 / 返回），**按钮上的键名从键位表取**（与练习页同源，改绑后跟着变），`Ctrl+,` / `Ctrl+C` 取 `ui::TUI_PAUSE_KEY` / `ui::TUI_EXIT_KEY`。提示行是「 方向键选中 · Enter 执行 · 鼠标点击 · Esc 返回列表」。
 - 鼠标 target：`articles::practice_targets` 只注册按钮条的按钮（`Action::TypingButton(index)`），该页独占整屏、没有导航目标。截图见 [文章跟打](screenshots/articlepractice-120x40-dark.png)。
 
+### 8.6 流程页（flows.rs）
+
+- 套外壳（`Nav::Home`）：一行页头、左右两栏（列表 42%，右侧「结构」面板最少 24 列）、一行底栏提示；列表每个可见行注册一个鼠标 target（`FlowMove`），滚轮同样映射为 `FlowMove`。
+- 页头「当前：X」与列表行首的 `●` 同源，都取 `App::flow_entries()` 里唯一 `active` 的那条（由 `App::effective_flow_id` 判定，与顶栏「模式」永远一致）。没有任何 `active` 行时（自定义流程模式还没启用自建流程）页头改画 `warn` 色的「当前：—（自定义流程模式尚未启用自建流程）」。
+- 行首标记优先级：`●`（`good`，下一轮实际生效）＞ `▶`（`accent`，光标所在行）＞ 空格。已启用但未生效的自建流程在名称后追加「（已启用）」，**不占用 `●`**；页头再用 `dim` 追加「已启用「X」，切到「自定义流程」后生效」。模式已经是「自定义流程」却仍没生效，说明该流程配置非法、已回退到内置流程，文案换成「「X」的配置不可用，已回退到内置流程」。
+- 右侧「结构」面板画选中流程的节点 → 步骤（编辑态用 `▶` 指节点、`·` 指步骤，并追加「〔组内巩固〕」「〔乱序〕」后缀），底栏提示随编辑态切换。截图见 [流程页](screenshots/flows-120x40-dark.png)。
+
 ## 9. 通用部件（widgets.rs）
 
 | API | 作用 |

@@ -375,6 +375,8 @@ app.save_all()
 | `continue_after_summary` | `session.create_next_task(..., was_complete)` | `settings.word_practice_mode` |
 | `relearn_after_summary` | `session.create_repeat_task` | `settings.word_practice_mode` |
 
+流程页的 `●` 与「当前」读同一个判定：`App::effective_flow_id()` 返回「下一轮练习真正会跑的流程 id」——练习模式是「自定义流程」时取已启用的自建流程（配置非法则回退内置 `system`），其余模式取 `flow_for_mode(mode)`，「自定义流程」模式下还没启用自建流程时返回 `None`（该模式会被 `start_practice_with_mode` 拒绝）。`flow_entries()` 的 `active` 只由它决定，`enabled` 单独表示 `flows.json` 里的启用位：「已启用」不等于「生效」，所以流程页只在未生效的自建行标「（已启用）」，`●` 始终留给实际生效的那一条。
+
 前三个入口先检查学习词典（否则 Toast `no_assets`）与任务是否为空（否则 `no_words_to_study`），再调用 `begin_session_with_task`：
 
 1. 复制当前词典全部单词到 `all_words` 并用 `rng` 洗牌（自测干扰项与自由练习随机用）。
