@@ -514,6 +514,13 @@ pub fn resolve_flow_config_or_system(config: &PracticeFlowConfig) -> PracticeFlo
     }
 }
 
+/// 按模式取内置流程 id（对齐上游 `getFlowIdForMode` 的 `?? 'system'` 兜底）。
+///
+/// 兜底只保证「总能拿到一个可跑的流程配置」，不代表该模式真的会执行「学习」
+/// 流程：单词测试（`ShuffleWordsTest` / `ReviewWordsTest`）走 4 选 1 答题、
+/// `Custom` 用已启用的自建流程，两者都没有内置 flow。判断「当前模式有没有
+/// 流程会跑」用 `App::effective_flow_id`（单词测试与未启用自建流程的
+/// `Custom` 返回 `None`），不要拿本函数的 `"system"` 当依据。
 pub fn get_flow_id_for_mode(mode: WordPracticeMode) -> &'static str {
     match mode {
         WordPracticeMode::System => "system",
@@ -963,6 +970,28 @@ mod tests {
             assert_eq!(get_flow_id_for_mode(mode), config.id);
             assert!(!ids.contains(&config.id), "内置流程 id 重复: {}", config.id);
             ids.push(config.id);
+        }
+    }
+
+    /// 单词测试与「自定义流程」没有内置流程：`get_flow_id_for_mode` 的
+    /// `system` 只是 `&'static str` 的兜底，保证会话层总能拿到一份配置。
+    ///
+    /// 兜底不等于「该模式会跑「学习」流程」——单词测试在 `start_practice_with_mode`
+    /// 里直接分流到答题页。这里用测试钉住兜底行为：谁要是以为它是纯清理、
+    /// 顺手把返回值改成 `Option`，得先处理会话层与上游对齐结论。
+    #[test]
+    fn modes_without_a_builtin_flow_fall_back_to_system() {
+        for mode in [
+            WordPracticeMode::ShuffleWordsTest,
+            WordPracticeMode::ReviewWordsTest,
+            WordPracticeMode::Custom,
+        ] {
+            assert!(
+                !BUILTIN_FLOW_MODES.contains(&mode),
+                "{mode:?} 不该出现在内置流程列表里"
+            );
+            assert_eq!(get_flow_id_for_mode(mode), "system");
+            assert_eq!(flow_for_mode(mode).id, "system");
         }
     }
 }

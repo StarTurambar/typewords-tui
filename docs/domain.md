@@ -89,7 +89,7 @@
 | | 12 | `Shuffle` | 随机复习 |
 | | 13 | `Complete` | 完成学习 |
 
-说明：内置流程只使用 0–6 七种模式（有内置 flow 的模式由 `flow::BUILTIN_FLOW_MODES` 列出，流程页只列这 7 条）；7–9 在 `get_flow_id_for_mode` 中兜底为 `system`，且 `PRACTICE_MODE_NAMES` 只登记 7 种，其余名称回退为“学习”。`WordPracticeStage` 仅作为 `PracticeState.stage` 的存档字段保留：TUI 从不更新该字段（始终保持默认值 `FollowWriteNewWord`），流程位置由 `PracticeFlowCursor` 表达。名称映射由 `practice_mode_name`（7 种）与 `stage_name`（全部 10 个阶段值）提供，名称到 i18n 键的对应见第 14 节。
+说明：内置流程只使用 0–6 七种模式（有内置 flow 的模式由 `flow::BUILTIN_FLOW_MODES` 列出，流程页只列这 7 条）；7–9（两种单词测试与「自定义流程」）在 `get_flow_id_for_mode` 中兜底为 `system`，这个兜底只为「总能拿到一份可跑的配置」，不代表这些模式会执行「学习」流程——单词测试根本不加载 flow，`Custom` 用已启用的自建流程。`PRACTICE_MODE_NAMES` 登记全部 10 种模式名，`practice_mode_name` 的「学习」兜底只针对未登记的值。`WordPracticeStage` 仅作为 `PracticeState.stage` 的存档字段保留：TUI 从不更新该字段（始终保持默认值 `FollowWriteNewWord`），流程位置由 `PracticeFlowCursor` 表达。名称映射由 `practice_mode_name`（10 种）与 `stage_name`（全部 10 个阶段值）提供，名称到 i18n 键的对应见第 14 节。
 
 ### 2.3 核心结构
 
@@ -442,7 +442,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | ListenOnly 听写 | `listenOnly` / `listen` | `new` + `review` | 各一步 Listen（Increment） |
 | Shuffle 随机复习 | `shuffle` / `random_review` | `practice`（`TaskReview`） | Dictation（Increment，洗牌） |
 
-所有步骤的 `on_end` 都是同一个默认动作：`WrongWordClear { template_id: FollowWrite, word_advance: WordLoop(7, [Spell]) }`，因此错词巩固也按“7 词小组跟写 + 组内拼写”执行。`get_flow_config` 对未知 id 回退 `system`；`flow_for_mode` 用 `get_flow_id_for_mode` 做 7 种模式的映射，其余模式（测试/自定义）回退 `system`。
+所有步骤的 `on_end` 都是同一个默认动作：`WrongWordClear { template_id: FollowWrite, word_advance: WordLoop(7, [Spell]) }`，因此错词巩固也按“7 词小组跟写 + 组内拼写”执行。`get_flow_config` 对未知 id 回退 `system`；`flow_for_mode` 用 `get_flow_id_for_mode` 做 7 种模式的映射，其余模式（两种单词测试 / 自定义流程）回退 `system`——这个回退只保证 `PracticeSession::with_flow` 总能拿到一份可跑配置；单词测试实际上直接分流到 `start_word_test`、不进入流程，所以「当前有没有流程会跑」由 app 层的 `App::effective_flow_id` 判定，而不是本函数。
 
 关键函数：
 

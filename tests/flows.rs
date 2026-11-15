@@ -730,3 +730,76 @@ fn an_enabled_flow_with_a_broken_config_falls_back_to_the_builtin_flow() {
         "页头应说明已经回退：{text}"
     );
 }
+
+/// 单词测试模式不经过流程编排：流程页不能给它标 `●`。
+///
+/// `start_practice_with_mode` 对「单词测试」/「随机单词测试」直接分流到
+/// `start_word_test`，根本不会加载 flow；`get_flow_id_for_mode` 对这两种
+/// 模式兜底成 `system` 只是给会话层的 `&'static str` 收口。早期实现据此
+/// 在流程页把「学习」标成 `●`，让人以为单词测试也按「学习」流程编排。
+#[test]
+fn words_test_modes_do_not_mark_any_flow_as_active() {
+    for mode in [
+        WordPracticeMode::ShuffleWordsTest,
+        WordPracticeMode::ReviewWordsTest,
+    ] {
+        let fixture = common::Fixture::new();
+        let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+
+        // 走用户路径：主页按 m 打开模式弹层，选到单词测试模式。
+        press(&mut app, KeyCode::Char('m'));
+        assert!(app.mode_picker.is_some(), "应打开模式选择弹层");
+        let modes = typewords_tui::domain::constants::PRACTICE_MODES;
+        let target = modes
+            .iter()
+            .position(|item| *item == mode)
+            .expect("目标模式应在模式列表里");
+        let current = modes
+            .iter()
+            .position(|item| *item == app.boot.settings.word_practice_mode)
+            .expect("当前模式应在模式列表里");
+        app.apply_action(app::Action::ModeMove(
+            (target as i32 - current as i32).rem_euclid(modes.len() as i32),
+        ));
+        app.apply_action(app::Action::ModeSelect);
+        assert_eq!(app.boot.settings.word_practice_mode, mode);
+
+        ctrl(&mut app, 'f');
+        assert_eq!(app.screen, app::Screen::Flows);
+
+        assert_eq!(app.effective_flow_id(), None, "{mode:?} 没有会执行的流程");
+        let marked = active_flow_ids(&app);
+        assert!(
+            marked.is_empty(),
+            "{mode:?} 下不该给任何流程标 ●：{marked:?}"
+        );
+
+        let text = render_text(&app, 120, 40);
+        assert!(
+            !text.contains("当前：学习"),
+            "{mode:?} 不能把兜底的 system 流程当成「当前」：{text}"
+        );
+        assert!(
+            text.contains("不经过流程编排"),
+            "页头应说明 {mode:?} 不走流程编排：{text}"
+        );
+        // 最小终端 60 列放不下整句说明（页头超宽时由 ratatui 按列裁剪，
+        // 与页头其它长提示一致），但「4 选 1 答题」这个关键信息必须留在
+        // 可见范围内，别让说明退化成读不懂的残句。
+        let narrow = render_text(&app, 60, 20);
+        let header = narrow
+            .lines()
+            .find(|line| line.contains("练习流程"))
+            .expect("窄屏应渲染流程页页头");
+        assert!(
+            header.contains("4 选 1"),
+            "60 列下页头至少要说明单词测试是 4 选 1 答题：{header:?}"
+        );
+
+        // 行为本身不变：进入 4 选 1 答题页，不创建练习会话。
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, app::Screen::WordTest, "{mode:?} 应进入答题页");
+        assert!(app.session.is_none(), "{mode:?} 不应创建练习会话");
+    }
+}
