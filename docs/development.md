@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **418 个测试**：102 个单元测试 + 316 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **429 个测试**：109 个单元测试 + 320 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -59,16 +59,18 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/domain/typing.rs` | 10 | 五种练习类型的键入分支、大小写、全角标点、重复次数、自动下一词、错误计数 |
 | `src/audio/tts.rs` | 7 | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
 | `src/domain/shortcut.rs` | 7 | 键位往返、默认表覆盖全部动作、与上游默认表一致、冲突拒绝、一键反查多动作、方向键往返 |
+| `src/fs.rs` | 6 | 原子写与数据目录锁：临时名唯一且带 PID、不复用残留的旧固定名临时文件、rename 失败清理临时文件、并发写只留某一次的完整内容；`DirLock` 互斥直到守卫释放并记录 PID |
 | `src/ui/bigtext.rs` | 5 | 字形行数、1×/2× 放大、遮罩空心占位、超长拆行、非 ASCII 回退 |
 | `src/theme/load.rs` | 4 | base 继承、非法文件跳过、保留 id、未知 token 告警 |
 | `src/audio/player.rs` | 3 | 仅整词可发音、缺少播放程序时的报错、脚本参数拼接 |
-| `src/paths.rs` | 3 | 资源目录识别与优先级 |
+| `src/paths.rs` | 4 | 资源目录识别与优先级、`lock_home` 先创建数据目录再取锁 |
 | `src/theme/mod.rs` | 3 | 颜色解析（`#rgb`/`#rrggbb`/ANSI）、主题回退 |
 | `src/ui/focus.rs` | 3 | 视觉分带（同行合并、整卡自成一带）、上下换带取水平中心最近者 |
 | `src/ui/insights.rs` | 3 | 累计总量与正确率、本周从周一开始、预计完成日期 |
 | `src/ui/widgets.rs` | 3 | 按显示宽度截断/折行、底栏提示不越界 |
 | `src/ui/overlays.rs` | 4 | 结算/确认弹层在最小终端内不越界、按钮行与方向键提示在 60×20 内放得下 |
 | `src/ui/theme.rs` | 2 | 主题 token → ratatui Color 映射 |
+| `src/ui/typing_buttons.rs` | 2 | 按钮条不越界不重叠、最小 60 列下提示行不被裁掉 |
 | `src/domain/scheduler.rs` | 2 | `enable_fuzz` 的开关、最小间隔与 ±5% 抖动范围 |
 | `src/domain/statistics.rs` | 2 | 跨天会话计数去重、single/旧记录兼容 |
 | `src/app/mod.rs` | 1 | 30 秒周期保存只在时长真正推进时触发 |
@@ -101,6 +103,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/real_assets.rs` | 3 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载；内置文章书目 `length` 与文章文件篇数一致（5 篇） |
 | `tests/typing_keys.rs` | 16 | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 1 | 与上游 ts-fsrs 5.4.1 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
+| `tests/data_dir_lock.rs` | 4 | 数据目录互斥：同进程持锁时第二个写入口被拒、跨进程（`CARGO_BIN_EXE_tw` 真实子进程）被拒且 stderr 给出提示、只读的 `tw doctor` / `tw export-web` 不受影响、启动创建 `<home>/.tw.lock` 且退出后释放 |
 | `tests/docs.rs` | 2 | 文档一致性：README 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown |
 
 ### 4.3 测试基础设施与写法

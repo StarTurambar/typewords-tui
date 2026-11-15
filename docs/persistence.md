@@ -20,7 +20,8 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 | `<home>/themes/*.json` | 启动时只读 | 自定义主题（格式见 [主题系统](themes.md)） |
 | `<home>/dicts/<language>/word/<url>` | 导入时写、运行时读 | `import-dict` 导入的用户词库 |
 | `<home>/list/word.json` | 导入时写、启动时读 | 用户词库目录，与内置目录合并 |
-| `<home>/.<文件名>.tmp` | 临时 | 原子写的中间文件，正常结束后不存在 |
+| `<home>/.<文件名>.tw-<pid>-<n>.tmp` | 临时 | 原子写的中间文件，每次写入独占一个名字；正常结束后不存在，崩溃可能残留，可安全删除 |
+| `<home>/.tw.lock` | 读写 | 数据目录独占锁文件（`src/fs.rs` 的 `LOCK_FILE_NAME`），内容是持锁进程 PID，常驻不删 |
 | `<home>/<文件名>.corrupt-<时间戳>.json` | 隔离产物 | 解析失败的坏存档备份 |
 | `<assets>/list/word.json` | 只读 | 内置词库目录 `DictResource[]` |
 | `<assets>/list/article.json` | 只读 | 内置文章书目 `ArticleBook[]`（进入文章页时读取） |
@@ -36,7 +37,15 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 3. `dirs::data_local_dir()` 下的 `typewords-tui` 子目录——Windows 通常为 `%LOCALAPPDATA%\typewords-tui`，Linux 为 `$XDG_DATA_HOME/typewords-tui`（缺省 `~/.local/share/typewords-tui`），macOS 为 `~/Library/Application Support/typewords-tui`；
 4. 以上都不可用时启动失败：`无法确定数据目录，请使用 --home 指定`。
 
-数据目录本身由 `store::FileStore::new` 用 `create_dir_all` 创建，TUI 启动、`tw doctor`、`tw task` 都会触发；创建失败会报 `创建数据目录失败 <路径>: <原因>`。注意 `tw doctor`/`tw task` 只创建目录，不写存档文件。
+数据目录本身用 `create_dir_all` 创建：只读入口经 `store::FileStore::new`，写入口经 `Paths::lock_home` 的 `ensure_home`，TUI 启动与各子命令都会触发；创建失败会报 `创建数据目录失败 <路径>: <原因>`。注意只读入口（`tw doctor` / `tw export-web`）只创建目录、不写任何文件；`tw task` 与其它写入口此外还会创建 `.tw.lock`。
+
+**数据目录锁**：写入口在启动时对 `<home>/.tw.lock` 取独占锁（`src/paths.rs` 的 `Paths::lock_home` → `src/fs.rs` 的 `try_lock_dir`，返回 `DirLock` 守卫）。取锁的入口是 TUI 本体与 `tw task`、`tw import-dict`、`tw import-web`；`tw doctor` 与 `tw export-web` 只读，不取锁。抢锁失败会在进入 TUI 之前报错退出、进程返回非 0（终端不会被弄坏）：
+
+```text
+另一个实例正在使用该数据目录（<home>）：请先退出那个 tw 进程，或用 --home 换一个数据目录
+```
+
+因此同一个 `<home>` 同一时刻只允许一个写入口。锁随进程正常退出或崩溃自动释放（句柄关闭即释放），锁文件本身**不删除**——删掉一个正在被持锁的文件会制造「两把锁」竞态；文件内容只记录持锁进程的 PID，供人工排障参考，判断是否被占用永远以操作系统锁为准。`.tw.lock` 在首次以写入口启动时创建；`tw doctor` / `tw export-web` 不创建它。
 
 ### 1.3 资源目录（assets）的解析顺序
 
@@ -65,11 +74,14 @@ typewords-tui 不使用数据库：学习进度、设置和断点缓存都是本
 ### 2.2 原子写（`fs::write_atomic`）
 
 1. 确保目标文件的父目录存在（`create_dir_all`）；
-2. 在同目录创建临时文件 `.<文件名>.tmp`（例如 `.dict.json.tmp`）；
+2. 在同目录创建**本次写入独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（例如 `.dict.json.tw-8124-7.tmp`）：`<pid>` 是进程号，`<n>` 是进程内单调递增的计数、每次写入取新值；用 `create_new` 独占创建，撞名（历史残留或 PID 复用）就换下一个序号重试，最多 16 次；
 3. `write_all` 写入内容并 `sync_all`（fsync；失败被忽略，不阻断写入）；
-4. `rename` 覆盖正式文件。临时文件与目标同目录，保证 rename 在同一文件系统内完成。
+4. `rename` 覆盖正式文件。临时文件与目标同目录，保证 rename 在同一文件系统内完成；
+5. 写入或 `rename` 失败时删除刚建的临时文件（尽力而为），正式文件保持原内容。
 
-因此进程在写入中途被杀，最坏情况是留下一个过期的 `.tmp` 文件，正式存档要么是旧内容、要么是新内容，不会出现半截 JSON。整个协议没有文件锁：同一 `<home>` 同时运行两个实例会互相覆盖，同名临时文件也会互相覆盖，应避免。
+因此进程在写入中途被杀，最坏情况是留下一个过期的 `.tmp` 临时文件——它不属于任何后续写入，不会被复用或删除，可以直接删掉；正式存档要么是旧内容、要么是新内容，不会出现半截 JSON。临时名唯一化后，同一进程内的并发写（存档与用户词库目录同时落盘）也不会再共用同一个中间文件；跨进程的互斥由数据目录锁负责（见 1.2），不再依赖「不要同时运行两个实例」的口头约定。
+
+原子性只覆盖**单份文件**：任何时刻读某个存档，拿到的要么是上一份完整内容、要么是这一份完整内容。`tw doctor` / `tw export-web` 不取锁，所以在另一个实例运行时读到的每个文件各自都是完整的，但**多份文件之间可能来自不同时刻**（例如 `dict.json` 还是几分钟前的、`setting.json` 是刚保存的）；需要一致快照时先退出 TUI，再跑这两个命令。
 
 ### 2.3 读取、空文件与 `LoadStatus`
 
@@ -494,7 +506,7 @@ function systemPractice() {
 1. 读取并解析 `<FILE>` 为 `Vec<Word>`，用 `Word::is_usable` 过滤空词条；至少要有 1 个可用词；
 2. 文件名必须以 `.json` 结尾；
 3. 加载词库目录（需要可用的 `assets/`）；
-4. 把源文件**原样复制**到 `<home>/dicts/en/word/<文件名>`（不改写内容）；
+4. 把源文件**原样写入** `<home>/dicts/en/word/<文件名>`（内容按读到的原文原样落盘、不改写，写入走原子写，崩溃不会留下半个词库文件）；
 5. 生成目录项：`id = enName = name = 文件名去掉 .json`、`description = "导入词库（N 词）"`、`url = 文件名`、`length = N`、`category = "自定义"`、`tags = ["导入"]`、`language = "en"`、`translateLanguage = "zh_CN"`、`type = "word"`、`version = 1`、`custom = true`；
 6. 写入 `<home>/list/word.json`（pretty JSON + 原子写；按解析后的 id 判重：同 id 替换旧目录项，否则追加），打印「已导入词库: <name>（N 词）」并提示 `tw --dict <id>` 切换；**不会自动切换**当前词库。
 
@@ -556,16 +568,16 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 
 ## 9. 备份、恢复与重置
 
-- **完整备份**：关闭程序后复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`、`themes/`、导入的 `dicts/` 与 `list/word.json`）。只拷 `dict.json` 会丢设置、断点与导入词库。
-- **恢复**：关闭程序 → 用备份覆盖 `<home>` → 启动；建议先跑 `tw doctor` 确认路径与词库数量，再打开设置页检查主题是否加载。
+- **完整备份**：先退出所有 tw 实例，再复制整个 `<home>`（含 `dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`、`.tw.lock`、`themes/`、导入的 `dicts/` 与 `list/word.json`；`.tw.lock` 只是锁文件，内容是上次持锁进程的 PID，复制或删除都无害）。只拷 `dict.json` 会丢设置、断点与导入词库。
+- **恢复**：先退出所有实例 → 用备份覆盖 `<home>` → 启动；建议先跑 `tw doctor` 确认路径与词库数量，再打开设置页检查主题是否加载。
 - **只重置练习**：`tw --reset-practice`（启动时删除缓存）或设置页「清空当前练习进度」（确认弹层后删除）。两者都只删 `practice-word.json` 与 `practice-article.json` 两个断点缓存，不影响 `dict.json` 里的统计、FSRS 卡片和收藏/错词/已掌握。
 - **重置学习记录（恢复出厂）**：设置页「其他 → 清除所有数据」，确认后 `boot.base = BaseState::default()`、`boot.settings = SettingState::default()`、删除 `practice-word.json` 与 `practice-article.json`，随即落盘两份存档；清完按全新安装重新选一本学习词典。等价于手工删掉 `dict.json` + `setting.json` + `practice-word.json` + `practice-article.json`，但不用退出程序。与上游 Web 的「设置 → 数据 → 清除所有数据」（`dataSyncPersistence.clear()`）行为一致。任一存档版本过高（本次运行只读）时该动作会拒绝执行并提示，避免假成功。
 - **彻底重置**：关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢）；下次启动会重建目录并按默认值运行。
 - **删除/隔离坏档**：启动 Toast 会给出隔离后的文件名（`*.corrupt-<时间戳>.json`）；确认不需要后可删除隔离文件与坏档本身。版本过高时**不要**为了启动而降级程序或手改 `version`，优先备份后升级程序。
-- **导入覆盖的备份**：`tw import-web` 覆盖前留下的 `<文件名>.bak-<时间戳>.json` 不会被自动清理；确认导入结果无误后可删除。需要退回时关闭程序，用备份文件覆盖同名存档（`dict.json` / `setting.json` / `practice-word.json` / `practice-article.json`）即可。
+- **导入覆盖的备份**：`tw import-web` 覆盖前留下的 `<文件名>.bak-<时间戳>.json` 不会被自动清理；确认导入结果无误后可删除。需要退回时先退出所有实例，再用备份文件覆盖同名存档（`dict.json` / `setting.json` / `practice-word.json` / `practice-article.json`）即可。
 - **版本降级风险**：`dict.json` 版本过高 → 本次运行只读、进度不落盘（数据仍安全）；`setting.json` 版本过高 → 同样只读、本次设置不写回；`practice-word.json` / `practice-article.json` 版本不符 → 忽略并在下次保存时覆盖。四类都不会破坏原文件，但下次以新版本保存后会升级文件格式，降级前应先备份。
 
-`tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**全部存档文件的大小**（`dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`，不存在则标注）、自定义主题目录与全部主题、主题加载告警。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
+`tw doctor` 是排障入口：它打印版本行、数据/资源目录、词库清单（含每个词库的词条文件路径）、**全部存档文件的大小**（`dict.json`、`setting.json`、`practice-word.json`、`practice-article.json`、`flows.json`，不存在则标注）、自定义主题目录与全部主题、主题加载告警。`tw doctor` 与 `tw export-web` 都是只读入口、不取数据目录锁，别的实例（TUI、`tw task`、导入命令）正在运行时仍可用它们排障与导出；但每份文件各自完整、彼此可能不是同一时刻的状态，要一致的快照请先退出所有实例——备份与用备份覆盖存档之前同样应先退出所有实例。它不解析存档内容，所以版本过高/损坏状态只会在启动 Toast 中出现：
 
 ```text
 存档：
@@ -581,7 +593,7 @@ Web 的导出 ZIP 中 `data.json` 的结构是 `{"version": 5, "val": { "dict": 
 - **纯本地**：依赖树中没有 HTTP/WebSocket 客户端（见 `Cargo.toml`），程序不发起网络请求；无账号、无云同步、无遥测。上游 Web 端的 umami 统计代码没有被移植。
 - **明文存储**：存档是可读 JSON，没有加密；笔记、进度、收藏等对同机有文件读权限的用户可见，取决于操作系统权限。
 - **手工编辑注意**：先关闭程序并备份；保持 `{ "val": ..., "version": ... }` 信封、UTF-8 编码、合法 JSON（不能有注释/尾逗号）；改坏会导致下次启动解析失败并隔离为 `*.corrupt-*.json`（数据还在隔离文件里）；运行中编辑会被退出时的内存状态覆盖。
-- **并发写入**：没有文件锁；同一 `<home>` 不要同时运行多个实例。把 `<home>` 放进 OneDrive 等同步目录时，注意多机同时运行没有冲突检测，最后写入者获胜。
+- **并发写入**：同一个 `<home>` 的写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）在启动时对 `<home>/.tw.lock` 取独占锁，第二个实例会在进入 TUI 之前报错退出，因此不会再出现「两个实例退出时互相整份覆盖存档」。锁随进程正常退出或崩溃自动释放，锁文件本身常驻不删（删除正被持锁的文件会制造「两把锁」竞态）。只读入口 `tw doctor` / `tw export-web` 不取锁，TUI 运行时也能排障与导出，但它们读到的多份文件不保证是同一时刻的状态（见 2.2）。**仍然存在的限制**：把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜；手工编辑存档前也先退出所有实例，运行中的实例退出时会用内存状态覆盖改动。
 
 ## 相关文档
 

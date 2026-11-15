@@ -16,7 +16,7 @@ cargo run --locked -- doctor          # 打印数据目录/资源目录/词库/�
 cargo run --locked -- task            # 只预览今日任务，不进 TUI
 cargo run --locked -- --home target/tmp/home --seed 42   # 隔离数据目录 + 固定随机种子
 
-cargo test --locked                   # 全部测试（102 单测 + 316 集成）
+cargo test --locked                   # 全部测试（109 单测 + 320 集成）
 cargo test --locked --test app_drive practice_progress_persists_and_resumes  # 单个集成测试
 cargo test --locked --lib domain::typing                                     # 单个模块的单测
 
@@ -57,7 +57,7 @@ main.rs → lib.rs::run(cli)
 | domain | `src/domain/` | **不能**依赖 `app`/`ui`/`store`/`theme`，也不引入终端相关 crate（因此可被单测与 `tw task` 直接复用）；`tests/layering.rs` 守着这条 |
 | store | `src/store/` | 依赖 domain 与 `fs`；原子写 + 版本校验 + 损坏隔离 |
 | theme | `src/theme/` | 不依赖 ratatui，也不依赖 `ui` |
-| fs | `src/fs.rs` | 只依赖 `std` 的原子写原语；`domain` 与 `store` 都用它，避免两层成环 |
+| fs | `src/fs.rs` | 只依赖 `std` 的原子写原语（唯一临时名）与数据目录锁（`<home>/.tw.lock`）；`domain` 与 `store` 都用它，避免两层成环 |
 | app | `src/app/` | 唯一的状态修改者，渲染入口调用 `ui` |
 | ui | `src/ui/` | 只读 `App`，**不得**修改状态 |
 
@@ -79,7 +79,7 @@ main.rs → lib.rs::run(cli)
 | `setting.json` | 23 | 设置（`SettingState` 建模 28 个具名字段，其余上游字段原样透传保存） |
 | `practice-word.json` | 2 | 断点练习缓存（游标 + 任务词表 + 统计快照），结算后删除 |
 
-写入是「同目录临时文件 + fsync + rename」；解析失败隔离为 `*.corrupt-<时间戳>.json`；`dict.json`/`setting.json` 版本高于程序支持版本时**只读不覆盖**，练习缓存版本不受支持时忽略（不移动文件）。完整字段与版本策略见 `docs/persistence.md`。
+写入是「同目录唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename」；写入口启动时对 `<home>/.tw.lock` 取排他锁（`Paths::lock_home`，只读的 `tw doctor` / `tw export-web` 不取锁）；解析失败隔离为 `*.corrupt-<时间戳>.json`；`dict.json`/`setting.json` 版本高于程序支持版本时**只读不覆盖**，练习缓存版本不受支持时忽略（不移动文件）。完整字段与版本策略见 `docs/persistence.md`。
 
 serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`Card` 保持 ts-fsrs 的 snake_case；新增可选字段必须带 `default`，保证旧存档可读。字段命名沿用上游，便于手工迁移。
 

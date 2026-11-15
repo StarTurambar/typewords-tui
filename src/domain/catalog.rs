@@ -356,7 +356,10 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("创建目录失败: {}", parent.display()))?;
     }
-    std::fs::copy(source, &target)
+    // 复用上面读到的原文并走原子写：直接 `fs::copy` 会在目标文件上就地截断，
+    // 进程中途被杀就留下半个词库文件；源与目标同路径（把数据目录里的词库再
+    // 导入一次）时更是先截断再读，内容会丢。
+    crate::fs::write_atomic(&target, &text)
         .with_context(|| format!("复制词库失败: {} → {}", source.display(), target.display()))?;
 
     let stem = file_name.trim_end_matches(".json").to_string();

@@ -82,6 +82,8 @@ cargo build --release --locked         # 发布构建，产物 target/release/tw
 
 目录里会出现 `dict.json`（词典与学习进度、FSRS 卡片、系统词典、统计）、`setting.json`（设置）和 `practice-word.json`（断点缓存，随练习生成）；文章跟打另存 `practice-article.json`；`themes/`、`dicts/`、`list/` 用于自定义主题与用户导入词库。字段细节见 [存档与数据格式](persistence.md)。
 
+以写入口启动（TUI、`tw task`、`tw import-dict`、`tw import-web`）时，数据目录里还会有 `.tw.lock` 实例锁文件（常驻不删）；原子写会在同目录短暂生成 `.<文件名>.tw-<pid>-<n>.tmp` 临时文件，正常结束后不留残渣。**同一个数据目录同时只允许一个写实例**：第二个实例会直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-web` 是只读入口，TUI 正在运行时也能用。
+
 首次启动没有存档时使用默认设置，并自动选择内置词库（优先 `cet4`，否则第一本）。退出程序：回到主页按 `q`（或点侧栏「退出」）并确认；正常退出会保存词典、设置与未结算的练习缓存。
 
 ### 升级与版本兼容
@@ -135,11 +137,11 @@ tw             # 2. 启动界面
 
 | 子命令 | 作用 | 输出要点 |
 | --- | --- | --- |
-| `tw doctor` | 打印解析到的路径与词库状态，不进入界面、不写存档 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 词数与词条文件路径；`dict.json`/`setting.json`/`practice-word.json`/`practice-article.json`/`flows.json` 的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
-| `tw task` | 只预览今日任务，不进入界面 | 当前词库、每日词数、学习进度、今日任务（新词 / 复习，到期数、随机补足数）与前 5 个新词、复习词；随机种子默认 42，可用 `--seed` |
-| `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 成功后打印词库名、词数与提示 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
-| `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份的内容；导入后需重启程序 |
-| `tw export-web [--out FILE]` | 把当前数据目录导出成网页版能导入的备份 JSON | 缺省写到标准输出；`--out` 指定文件时打印路径 |
+| `tw doctor` | 打印解析到的路径与词库状态，不进入界面、不写存档；只读，不取数据目录锁 | 版本行、数据目录、资源目录；每本词库的 id / enName / 名称 / 词数与词条文件路径；`dict.json`/`setting.json`/`practice-word.json`/`practice-article.json`/`flows.json` 的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
+| `tw task` | 只预览今日任务，不进入界面；需要取数据目录锁，另一个实例在运行时会被拒绝 | 当前词库、每日词数、学习进度、今日任务（新词 / 复习，到期数、随机补足数）与前 5 个新词、复习词；随机种子默认 42，可用 `--seed` |
+| `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json`；需要取数据目录锁，另一个实例在运行时会被拒绝 | 成功后打印词库名、词数与提示 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
+| `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5）；需要取数据目录锁，另一个实例在运行时会被拒绝 | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份的内容；导入后需重启程序 |
+| `tw export-web [--out FILE]` | 把当前数据目录导出成网页版能导入的备份 JSON；只读，不取数据目录锁 | 缺省写到标准输出；`--out` 指定文件时打印路径 |
 
 `import-dict` 的要求：文件必须以 `.json` 结尾、内容为词条数组（每项至少含 `word` 字段）、至少有一个可用单词；id 取文件名去掉 `.json`。重复导入同一文件名会覆盖同 id 的登记项（词条文件也覆盖），不会产生重复条目；细节见 [存档与数据格式](persistence.md)。
 
@@ -664,12 +666,13 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 | `<home>/setting.json` | 设置项（与主题选择） |
 | `<home>/practice-word.json` | 断点练习缓存（单词、游标、统计快照） |
 | `<home>/practice-article.json` | 文章跟打断点缓存（句子进度、用时） |
+| `<home>/.tw.lock` | 数据目录独占锁文件，内容是持锁进程 PID，常驻不删 |
 | `<home>/themes/*.json` | 自定义主题 |
 | `<home>/dicts/en/word/*.json` | `import-dict` 导入的词条文件 |
 | `<home>/list/word.json` | 用户词库目录（与内置目录合并） |
 
-- **备份**：退出程序后复制整个数据目录即可（四份 JSON + 主题 + 导入词库）。
-- **恢复 / 迁移**：把备份目录放回原路径，或用 `--home` / `TYPEWORDS_HOME` 指向备份目录；换机器同理。
+- **备份**：先退出所有 tw 实例，再复制整个数据目录即可（四份 JSON + 主题 + 导入词库 + `.tw.lock`；锁文件可留可删）。
+- **恢复 / 迁移**：先退出所有 tw 实例，再把备份目录放回原路径，或用 `--home` / `TYPEWORDS_HOME` 指向备份目录；换机器同理。
 - **重置**：删除 `practice-word.json` 只清断点缓存；删除 `setting.json` 恢复默认设置；删除 `dict.json` 会丢失学习进度、统计、FSRS 卡片与三本系统词典（谨慎）。`--reset-practice` 等价于只清断点缓存；设置页「清除所有数据」等价于把 `dict.json` 与 `setting.json` 一起恢复默认（还额外删掉断点缓存），不需要手工删文件。
 - **损坏与版本**：存档损坏会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；版本过高的 `dict.json` / `setting.json` 本次运行只读、不覆盖原文件；练习缓存版本不符会被忽略。恢复细节见 [存档与数据格式](persistence.md)。
 
@@ -681,6 +684,7 @@ tw --seed 42 --reset-practice       # 复现问题时清掉断点缓存
 | --- | --- | --- |
 | 启动报「找不到词库资源目录」 | `assets/` 不在 exe 同级或当前目录，`--assets` 指向的目录没有 `list/word.json` | 把 `assets/` 放到 `tw.exe` 同级，或用 `--assets` 指向包含 `list/word.json` 的目录 |
 | 启动报「加载词库失败」 | 存档里的当前词库在资源目录中找不到，或词条文件缺失 | `tw doctor` 看每本词库的「文件」路径；用 `--dict` 指定存在的词库 |
+| 启动提示「另一个实例正在使用该数据目录」 | 同一个 `--home` 已经有 tw 在运行（TUI、`tw task` 或导入命令） | 退出那个进程；或给本次启动换一个 `--home`（`tw doctor` / `tw export-web` 只读，本来就允许同时运行） |
 | 启动无反应 / 一直黑屏 | 终端小于 60 × 20 只显示提示；或进程还在装载大词库 | 放大窗口；等待首帧；按 `Ctrl+C` 退出后重试 |
 | 退出后终端显示错乱 | 进程被强制结束，未恢复备用屏幕 / 鼠标捕获 | 重开终端；Unix 可执行 `reset` |
 | 中文、边框错位 | 终端字体非等宽或不支持 CJK / 制表符；使用 conhost | 换 Windows Terminal，设置等宽且支持中文的字体 |
