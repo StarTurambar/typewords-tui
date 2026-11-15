@@ -5,17 +5,28 @@ mod common;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Color;
 use typewords_tui::app;
 use unicode_width::UnicodeWidthStr;
 
 fn render_text(app: &app::App, width: u16, height: u16) -> String {
+    render_rows(app, width, height)
+        .into_iter()
+        .map(|(text, _)| text + "\n")
+        .collect()
+}
+
+/// 渲染每一行：文本 + 该行字符格的前景色（用来断言某一行用了哪个主题色）。
+fn render_rows(app: &app::App, width: u16, height: u16) -> Vec<(String, Vec<Color>)> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal.draw(|frame| app.render(frame)).expect("draw");
     let buffer = terminal.backend().buffer();
-    let mut out = String::new();
+    let mut rows = Vec::with_capacity(height as usize);
     for y in 0..height {
         let mut skip_cells = 0usize;
+        let mut text = String::new();
+        let mut colors = Vec::new();
         for x in 0..width {
             if skip_cells > 0 {
                 skip_cells -= 1;
@@ -23,17 +34,26 @@ fn render_text(app: &app::App, width: u16, height: u16) -> String {
             }
             if let Some(cell) = buffer.cell((x, y)) {
                 let symbol = cell.symbol();
-                out.push_str(symbol);
+                text.push_str(symbol);
                 // 宽字符（CJK）占两个单元，跳过其续接单元
                 let display_width = UnicodeWidthStr::width(symbol);
                 if display_width > 1 {
                     skip_cells = display_width - 1;
                 }
+                colors.push(cell.fg);
             }
         }
-        out.push('\n');
+        rows.push((text, colors));
     }
-    out
+    rows
+}
+
+/// 取包含 `needle` 的那一行：文本 + 该行用到的前景色。
+fn rendered_row(app: &app::App, width: u16, height: u16, needle: &str) -> (String, Vec<Color>) {
+    render_rows(app, width, height)
+        .into_iter()
+        .find(|(text, _)| text.contains(needle))
+        .unwrap_or_else(|| panic!("没有任何一行包含 {needle:?}"))
 }
 
 #[test]
@@ -189,6 +209,59 @@ fn settings_rows_follow_their_documented_sections() {
             && row_of("单词发音") < row_of("文章朗读")
             && row_of("文章朗读") < review,
         "文章朗读应在音频分区，且排在单词发音之后"
+    );
+}
+
+/// 两个破坏性动作的右侧提示必须各自成立：「清除所有数据」不可撤销，
+/// 不能和「清空当前练习进度」共用一句「按 Enter 重置」被弱化成普通重置。
+///
+/// 早期实现 `setting_value` 对 `SettingKind::Action(_)` 用统一文案，
+/// 用户从行内看不出两者严重性不同。
+#[test]
+fn destructive_action_rows_hint_their_own_consequence() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let theme = app.theme();
+    // 一屏放下全部 39 行，两个动作项才都在画面里。
+    let (reset_text, reset_colors) = rendered_row(&app, 100, 60, "清空当前练习进度");
+    let (clear_text, clear_colors) = rendered_row(&app, 100, 60, "清除所有数据");
+
+    assert!(
+        reset_text.contains("按 Enter 重置"),
+        "清空练习进度只重置断点缓存，仍提示重置：{reset_text}"
+    );
+    assert!(
+        !reset_colors.contains(&theme.bad),
+        "普通重置不该用危险色：{reset_text}"
+    );
+
+    assert!(
+        clear_text.contains("按 Enter 清除"),
+        "清除所有数据应提示「清除」而不是「重置」：{clear_text}"
+    );
+    assert!(
+        !clear_text.contains("重置"),
+        "不可撤销的清除不能写成重置：{clear_text}"
+    );
+    assert!(
+        clear_text.contains("不可撤销"),
+        "行内要点明该动作不可撤销：{clear_text}"
+    );
+    assert!(
+        clear_colors.contains(&theme.bad),
+        "清除所有数据是危险动作，提示应用 bad 色：{clear_text}"
+    );
+
+    // 最小终端（60×20）里滚到最后一屏：提示要整句显示，不能被截成半句。
+    let last = app::SETTING_ROWS.len() - 1;
+    while app.settings_cursor < last {
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    let (narrow_text, _) = rendered_row(&app, 60, 20, "清除所有数据");
+    assert!(
+        narrow_text.contains("按 Enter 清除 · 不可撤销"),
+        "60 列下提示被截断了：{narrow_text}"
     );
 }
 

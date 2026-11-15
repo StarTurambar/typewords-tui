@@ -289,7 +289,7 @@ ui::render(app, frame)
 ### 8.3 设置页（settings.rs）
 
 - 7 个分区标题（通用/音频/复习/键入/显示/FSRS/其他）+ 32 行设置项 = 39 行；分区标题是「▎ 标题 ────」样式的整行。`layout` 先保证光标行可见，再尽量把光标所在分区的标题一起滚入视口；顶部/底部溢出时在内容区最右列画 `↑`/`↓`。
-- 每行「标签 + 右对齐当前值」：选中行 `selection` 背景 + 左侧 1 列 `accent`；值的颜色按类型区分（模式/主题/音标 `accent_alt`，布尔开 `good` 关 `muted`，数字 `fg`，「按 Enter 重置」`dim`）。数字值的格式化：每日词数「N 词」、比例裸数字、重复「N 次」、等待/冷却「N ms」、FSRS 阈值裸数字、留存率「N%」。
+- 每行「标签 + 右对齐当前值」：选中行 `selection` 背景 + 左侧 1 列 `accent`；值的颜色按类型区分（模式/主题/音标 `accent_alt`，布尔开 `good` 关 `muted`，数字 `fg`，动作项由 `action_hint` 按 `ConfirmAction` 分别给文案与颜色：「按 Enter 重置」用 `dim`，「按 Enter 清除 · 不可撤销」用危险色 `bad`，见 [设置项参考](settings.md) 的「动作项文案」）。数字值的格式化：每日词数「N 词」、比例裸数字、重复「N 次」、等待/冷却「N ms」、FSRS 阈值裸数字、留存率「N%」。
 - 数字项按 `Enter` 后不就地编辑，而是打开 `ui/overlays.rs` 的输入弹层（见第 10 节）；设置页布局本身不变。
 - `targets`：只给设置项行生成（分区标题不可点）；光标行 `ActivateSetting(index)`，其它行 `SelectSetting(index)`。截图见 [设置页](screenshots/settings-120x40-dark.png)。
 
