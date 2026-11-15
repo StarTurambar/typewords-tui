@@ -99,7 +99,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/backup_roundtrip.rs` | 网页版备份 `BackupData` v5 导入导出：版本与结构校验、拒绝损坏载荷、覆盖前 `.bak` 备份与失败回滚、文章断点分流 |
 | `tests/flow_parity.rs` | 7 个内置流程均可推进到结算、错词清空、相位与练习类型一致 |
 | `tests/home_resume.rs` | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
-| `tests/import_dict.rs` | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |
+| `tests/import_dict.rs` | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝；`export-dict` 与 `import-dict` 往返、缺省输出与当前学习词库、内置词典从存档导出、空词库与未知 id 的报错 |
 | `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
 | `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录；日志是进程级全局状态，用例串行 |
 | `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
@@ -107,7 +107,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
 | `tests/typing_keys.rs` | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 与上游 ts-fsrs 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
-| `tests/data_dir_lock.rs` | 数据目录互斥：同进程与跨进程（`CARGO_BIN_EXE_tw` 真实子进程）第二个写入口被拒且 stderr 给出提示、只读的 `tw doctor` / `tw export-web` 不受影响、启动创建 `<home>/.tw.lock` 退出释放 |
+| `tests/data_dir_lock.rs` | 数据目录互斥：同进程与跨进程（`CARGO_BIN_EXE_tw` 真实子进程）第二个写入口被拒且 stderr 给出提示、只读的 `tw doctor` / `tw export-dict` / `tw export-web` 不受影响、启动创建 `<home>/.tw.lock` 退出释放 |
 | `tests/progress_consistency.rs` | 进度口径：百分比与「N / M 词」同源（主页 / 词库页 / 结算 / 单词测试结算 / 学完判定），元数据 `length` 偏大时不漂移；「继续」不二次推进；每日 1 词也能学完 |
 | `tests/docs.rs` | 文档一致性：README、`CHANGELOG.md` 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown；`CHANGELOG.md` 遵循 Keep a Changelog（分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早版本 0.1.0 不缺失）；发布说明只从 `CHANGELOG.md` 提取，`release.yml` 不得再引用 `.github/release-notes/` 或 `--generate-notes` |
 

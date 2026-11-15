@@ -37,7 +37,7 @@
 | 词库 | 词库目录、切换与每日词数 | `(words)/dict-list.vue`、`components/word/PracticeSettingDialog.vue` | `src/ui/dict_picker.rs`；设置页「复习 → 每日词数」+ 主页 / 词库页 `+` `-` | 部分：三本内置词典 + 本地目录，可设为当前并打开词条页；无搜索、分类分组、封面、在线目录；每日词数步进 5、设置页可精确输入，无滑块与预计完成天数 |
 | 词库 | 修改学习进度 / 跳组 | `ChangeLastPracticeIndexDialog.vue`、`GroupList.vue` | 状态行「第 N 组」可点击 → 跳组弹层 | 已对齐 |
 | 词库 | 词条增删改查、批量、排序、自定义词典与收藏 | `(words)/dict.vue`、`BaseTable.vue`、`WordItem.vue`、`WordCollectPopover.vue` | 词条管理页；词库页 `n` 新建、`c` 复制；`Shift+Enter` 选收藏目标词典 | 已对齐：见 [使用手册 · 词条管理](usage.md#词条管理) |
-| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx / json）、`/import` | `tw import-dict`（词条数组 JSON） | 部分：仅 CLI、仅 JSON，没有导出与 xlsx |
+| 词库 | 词库导入 / 导出 | `(words)/dict.vue`（xlsx / json）、`/import` | `tw import-dict` / `tw export-dict`（词条数组 JSON，可往返） | 部分：仅 CLI、仅 JSON，没有 xlsx |
 | 练习 | 7 个内置流程 | `practice-flow-config.ts`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐：节点、步骤、7 词小组、错词清空一致，`tests/flow_parity.rs` 覆盖 |
 | 练习 | 练习模式切换入口 | `words.vue` 的模式下拉 | `m` 打开 10 项模式选择弹层（主页「模式」标签也可点开） | 已对齐：写入 `wordPracticeMode`，`--mode` 仍可启动覆盖 |
 | 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（存 localStorage） | 流程页：新建副本 / 编辑步骤 / 启用，存 `flows.json` | 部分：可调步骤顺序、乱序、组内巩固；不能增删节点、不能改节点词表来源 |
@@ -171,7 +171,7 @@ Web 备份 data.json                        TUI 数据目录
 | 终端交互：鼠标与键盘焦点导航 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs`、`src/ui/focus.rs`、`src/app/focus.rs` | 侧栏 / 按钮 / 列表点击与滚轮，练习页与跟打页可点底部动作按钮，鼠标捕获后需 `Shift+拖拽` 复制；套外壳的页面共用两栏焦点（宽屏侧栏竖向 / 窄屏顶栏横向，`Tab` 换栏，内容区按视觉行分带），进入页面默认选中内容区、底栏显示「选中 X」。上游只有鼠标 / 触屏 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；小于 60 × 20 只渲染提示 |
 | 点阵大字 | `src/ui/bigtext.rs`、`src/ui/practice.rs` | 5×7 点阵字体，空间足够时按本轮最长单词整体放大 2 倍；非 ASCII 回退普通文本 |
-| 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`scripts/package.sh`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`；发布包为 tar.gz（可执行文件 + assets + docs + LICENSE + sha256），没有 Node 与 WebView 运行时 |
+| 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`scripts/package.sh`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw export-dict` / `tw import-web` / `tw export-web`；发布包为 tar.gz（可执行文件 + assets + docs + LICENSE + sha256），没有 Node 与 WebView 运行时 |
 | 可复现界面 | `examples/shot.rs`、`examples/dump.rs`、`tools/render-snapshot.py` | 页面渲染成 JSON / 文本，用于截图与视觉回归，见 [开发指南 · 截图与视觉检查](development.md#6-截图与视觉检查) |
 
 ## 6. 仍未对齐与不可对等
@@ -181,7 +181,7 @@ Web 备份 data.json                        TUI 数据目录
 | 项 | 差距 | 原因 |
 | --- | --- | --- |
 | FSRS 高级参数 UI | `maximum_interval`、21 个 `w`、`enable_fuzz` 已在调度器生效，但设置页没有编辑入口 | 需要 21 项数值的编辑界面，优先级低于其它项 |
-| 词库导出与 xlsx | 只有 `tw import-dict`（词条数组 JSON），没有词库整体导出，也不支持 xlsx | xlsx 需要新依赖，与「保持轻量」冲突 |
+| xlsx 词库导入导出 | 词库导入导出只走 JSON（`tw import-dict` / `tw export-dict`），不支持 xlsx | xlsx 需要新依赖，与「保持轻量」冲突 |
 | 节点级流程编辑 | 流程页可增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点词表来源 | 终端里编辑多级结构的交互成本高 |
 | 文章逐句音频与课后题 | 没有 LRC 时间轴，无法做逐句高亮；课后题也没有实现 | 不打包 mp3，改用系统 TTS 整句朗读 |
 

@@ -17,7 +17,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 - 词条管理（搜索、编辑、增删、排序、批量标记、新建 / 复制自定义词典）。
 - 42 个可改绑的快捷键动作、6 套内置主题与用户自定义主题。
 - 系统 TTS / 终端响铃的音频实现，可选有道发音。
-- 与网页版备份 JSON（BackupData v5）互通的 tw import-web / tw export-web。
+- 与网页版备份 JSON（BackupData v5）互通的 tw import-web / tw export-web，词库词条可经 tw import-dict / tw export-dict 往返。
 - 默认开启的运行日志与 panic 崩溃报告（`<home>/logs/`），以及 Windows 双击启动时的早退保护。
 
 非目标（不计划在 TUI 内实现）：Supabase 云同步、在线查词 / 翻译、多语言界面、Web / Tauri 界面、xlsx 与 ZIP / mp3 打包备份、跨设备冲突合并。
@@ -58,7 +58,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
       -> Paths::resolve_home          数据目录（先于资源目录：日志要尽早可用）
       -> logging / crash              初始化运行日志、记下崩溃报告上下文
       -> Paths::resolve_in            资源目录
-      -> cli.rs                        doctor / task / import-dict / import-web / export-web
+      -> cli.rs                        doctor / task / import-dict / export-dict / import-web / export-web
       -> app::run(paths, cli)
            -> App::bootstrap           bootstrap.rs: store + domain + theme
            -> 事件循环: ui::render(&App)（只读）
@@ -90,10 +90,10 @@ src/ 共 66 个 Rust 文件，按目录分组：
 
 | 目录 | 文件与职责 |
 | --- | --- |
-| src/（9） | main.rs 入口（第一件事装 panic 钩子）；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 5 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出；logging.rs 运行日志；crash.rs 崩溃报告与早退保护 |
+| src/（9） | main.rs 入口（第一件事装 panic 钩子）；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 6 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出；logging.rs 运行日志；crash.rs 崩溃报告与早退保护 |
 | src/app/（7） | mod.rs App、事件循环、on_tick、会话集成、SETTING_ROWS；action.rs Action 与 apply_action；buttons.rs 两个键入页的动作按钮；dicts.rs 词库页条目与词数唯一口径；focus.rs 焦点状态机；keymap.rs 非练习键位 → Action；mouse.rs 鼠标 → Action |
 | src/audio/（4） | mod.rs 音频分发；bell.rs 终端响铃；tts.rs 系统 TTS（Windows 常驻 PowerShell）；player.rs 有道发音下载与外部播放器 |
-| src/domain/（17） | mod.rs；types.rs 存档模型与整数枚举；constants.rs；catalog.rs 词库目录 / 词条加载 / import_dict；study_task.rs 今日任务；fsrs.rs FSRS-6 移植；scheduler.rs 评级与到期；typing.rs 键入状态机；question.rs 自测题；session.rs 练习会话；article.rs 文章模型 / 断句 / 跟打；shortcut.rs 42 动作键位表；wordbook.rs 词条管理；statistics.rs 统计落盘与聚合；timer.rs 计时；i18n.rs 中文文案；rng.rs 可注入随机源 |
+| src/domain/（17） | mod.rs；types.rs 存档模型与整数枚举；constants.rs；catalog.rs 词库目录 / 词条加载 / import_dict（导出的读取与写回在 cli.rs，因为要读存档里的内置词典）；study_task.rs 今日任务；fsrs.rs FSRS-6 移植；scheduler.rs 评级与到期；typing.rs 键入状态机；question.rs 自测题；session.rs 练习会话；article.rs 文章模型 / 断句 / 跟打；shortcut.rs 42 动作键位表；wordbook.rs 词条管理；statistics.rs 统计落盘与聚合；timer.rs 计时；i18n.rs 中文文案；rng.rs 可注入随机源 |
 | src/domain/flow/（3） | mod.rs 内置流程 / 游标 / 相位 / 展示；navigator.rs 推进器与快照恢复；store.rs 自建流程数据结构 |
 | src/store/（1） | mod.rs 5 份存档的读写、信封、版本、隔离、原子写 |
 | src/theme/（3） | mod.rs 主题模型与注册表；builtin.rs 6 套内置主题；load.rs 用户主题加载与校验 |
@@ -114,7 +114,7 @@ src/ 共 66 个 Rust 文件，按目录分组：
 
 1. main.rs 第一件事是 `crash::install_hook()`（早于 Cli::parse 与任何路径解析），再 Cli::parse()、调用 typewords_tui::run(cli)；run 返回错误时 `crash::report_fatal_error` 打印 `Error: <错误链>` 与日志路径，Windows 双击启动（无参数、交互式终端）再等一次回车，退出码 1。
 2. lib.rs::run 先 Paths::resolve_home（数据目录：--home > TYPEWORDS_HOME > 系统本地数据目录），再 `logging::init` 初始化运行日志（--log / --no-log / --log-level；返回实际日志文件，不写日志时为 None）并 `crash::set_context` 记下数据目录与报告目录，随后记录平台、进程号、命令行、数据目录与日志文件。资源目录缺失这类最常见的启动失败因此也在日志里。
-3. run_resolved 再 Paths::resolve_in（资源目录：--assets > TYPEWORDS_ASSETS > exe 同级 assets/ > 当前目录及最多 3 级祖先的 assets/ 或 public/），补一次 `crash::set_context`（资源目录 + 日志文件）并记录资源目录；只读入口（tw doctor / tw export-web）直接分派，其余入口先取 <home>/.tw.lock 再分派，两条路径都记「执行: <子命令>」。
+3. run_resolved 再 Paths::resolve_in（资源目录：--assets > TYPEWORDS_ASSETS > exe 同级 assets/ > 当前目录及最多 3 级祖先的 assets/ 或 public/），补一次 `crash::set_context`（资源目录 + 日志文件）并记录资源目录；只读入口（tw doctor / tw export-dict / tw export-web）直接分派，其余入口先取 <home>/.tw.lock 再分派，两条路径都记「执行: <子命令>」。
 4. 按 cli.command 分派；无子命令才进入 TUI。返回时按结果记「进程退出: 正常」或「进程退出: 失败: <错误链>」。
 
 | 命令 | 行为 | 进入 TUI |
@@ -122,6 +122,7 @@ src/ 共 66 个 Rust 文件，按目录分组：
 | tw doctor | 打印版本、数据 / 资源目录、每本词库的实际可练习词数与文件路径、5 份存档大小、主题 id / 名称 / 告警；只读，不取数据目录锁 | 否 |
 | tw task | 装载存档与词库，用 --seed（缺省 42）生成今日任务，打印词库、进度、新词 / 复习 / 到期数与前 5 个词；取数据目录锁 | 否 |
 | tw import-dict FILE | 校验词条数组 JSON，复制到 home/dicts/en/word/，登记 home/list/word.json；取锁 | 否 |
+| tw export-dict [DICT_ID] [--out FILE] | 按 id / enName（缺省 --dict，再缺省当前学习词库）导出词条数组 JSON；内置词典从存档取词条，普通词库从词条文件补齐；只读，不取锁 | 否 |
 | tw import-web FILE | 解析网页版 BackupData v5，按版本与结构校验后拆成 dict / setting / practice-article 等文件，覆盖前留 .bak，失败回滚；取锁 | 否 |
 | tw export-web [--out FILE] | 把当前数据目录导出成网页版可导入的 BackupData v5；只读，不取锁 | 否 |
 
@@ -356,7 +357,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 - 5 份存档：dict.json（BaseState，v4）、setting.json（SettingState，v23）、practice-word.json（PracticeCacheCompact，v2）、practice-article.json（ArticleCacheEnvelope，v1）、flows.json（FlowStore，无版本）。
 - 前 4 份（dict / setting / practice-word / practice-article）外层是 SaveEnvelope { val, version, updated_at }；flows.json 是裸 FlowStore，无信封、无版本号。写入用 serde_json 紧凑格式。
 - 原子写：同目录唯一临时文件 .<文件名>.tw-<pid>-<n>.tmp（create_new，撞名换序号）→ write_all → sync_all → rename；失败清理临时文件。原子性只覆盖单份文件，多份文件之间可能来自不同时刻。
-- 数据目录锁：写入口在启动时对 <home>/.tw.lock 取独占锁；锁随进程退出释放，锁文件常驻不删。doctor / export-web 是只读入口，不取锁。
+- 数据目录锁：写入口在启动时对 <home>/.tw.lock 取独占锁；锁随进程退出释放，锁文件常驻不删。doctor / export-dict / export-web 是只读入口，不取锁。
 - 读取状态：Missing（默认值）、Loaded、Corrupt（隔离为 *.corrupt-<时间戳>.json）、VersionTooNew（dict / setting 只读不覆盖）、UnsupportedVersion（练习缓存忽略，不移动文件）。
 - dict / setting 版本高于程序支持版本时置 readonly_dict / readonly_settings，本次运行不写回；练习缓存只接受 v2。
 - 字段与备份细节见 persistence.md。
@@ -393,7 +394,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 - audio：键音与对错提示音走终端 BEL；单词 / 文章朗读走系统 TTS（Windows 常驻 PowerShell + System.Speech；macOS say；Linux espeak-ng / spd-say）；可选有道发音用系统 curl 下载 mp3 后交外部播放器。被安全软件拦截时本轮静默放弃，不重试。
 - backup：import-web 解析 BackupData v5，按版本与结构逐项校验；覆盖前复制 .bak，多文件写入失败时回滚；export-web 生成网页版可导入的 JSON。文章断点按来源分流：TUI 导出的带 tuiPracticeData 可往返，网页版自己的三级游标因缺文章 id 而丢弃。
 - bootstrap：FileStore + Catalog + ThemeRegistry 装配；readonly 标记；notices；ensure_study_dict；normalize_study_progress。
-- cli：参数与 5 个子命令的入口；parse_mode 接受英文模式名与中文别名；doctor_to 便于测试断言输出。
+- cli：参数与 6 个子命令的入口；parse_mode 接受英文模式名与中文别名；doctor_to / export_dict_to 便于测试断言输出；export-dict 的导出目标解析（内置词典走存档、普通词库走词条文件）也在这里，因为 domain 不能依赖 store。
 
 ### 7.7 logging / crash
 
@@ -428,7 +429,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 | 新增存档字段 | domain/types.rs（保持 serde 约定）-> store/mod.rs 版本处理 -> docs/persistence.md -> tests/store_roundtrip.rs。旧存档必须能靠 serde(default) 读取 |
 | 新增统计维度 | types.rs 的 Statistics / PracticeState -> statistics.rs 的 flush / DayTotals -> app/mod.rs 的 refresh_stats 与 SummaryData -> ui/insights.rs / stats.rs -> end_to_end 或存储往返测试 |
 | 新增主题 token | theme/mod.rs（模型与校验）-> theme/builtin.rs（6 套色值）-> ui/theme.rs（映射）-> docs/themes.md 的 token 表 -> ui_snapshots |
-| 新增 CLI 子命令 | cli.rs 的 Command 与 lib::run 分发；写入口注意取 <home>/.tw.lock；docs/usage.md |
+| 新增 CLI 子命令 | cli.rs 的 Command 与 lib::run 分发；写入口注意取 <home>/.tw.lock，只读入口登记进 lib::is_read_only（tests/data_dir_lock.rs 守着）；docs/usage.md |
 | 新增词库资源 | 把 JSON 放进 assets/dicts/en/word/ 并登记 assets/list/word.json，或用 tw import-dict；无需改代码 |
 
 ## 10. 已知限制与技术债

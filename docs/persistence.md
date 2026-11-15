@@ -38,7 +38,7 @@
 
 ### 1.3 数据目录锁：写入口与只读入口
 
-写入口启动时对 `<home>/.tw.lock` 取独占锁：`Paths::lock_home` → `src/fs.rs` 的 `try_lock_dir` 返回 `DirLock` 守卫，`lib::run` 让守卫活到进程退出。取锁的入口是 TUI、`tw task`、`tw import-dict`、`tw import-web`；`tw doctor` 与 `tw export-web` 在 `lib::is_read_only` 白名单里，不取锁，可在别的实例运行时排障与导出。
+写入口启动时对 `<home>/.tw.lock` 取独占锁：`Paths::lock_home` → `src/fs.rs` 的 `try_lock_dir` 返回 `DirLock` 守卫，`lib::run` 让守卫活到进程退出。取锁的入口是 TUI、`tw task`、`tw import-dict`、`tw import-web`；`tw doctor`、`tw export-dict` 与 `tw export-web` 在 `lib::is_read_only` 白名单里，不取锁，可在别的实例运行时排障与导出。
 
 - 用非阻塞 `try_lock`：抢不到锁立刻报错退出（终端不会被弄坏），退出码非 0，文案为 `另一个实例正在使用该数据目录（<home>）：请先退出那个 tw 进程，或用 --home 换一个数据目录`。
 - 锁随进程退出或崩溃自动释放（句柄关闭即释放），锁文件**不删除**——删一个正被持锁的文件会制造「两把锁」竞态。文件内容只是 PID，判断是否被占用永远以操作系统锁为准；跨进程用例在 `tests/data_dir_lock.rs`。
@@ -59,7 +59,7 @@
 
 | 项 | 规则 |
 | --- | --- |
-| 创建时机 | `lib::run` 解析出数据目录后立即 `logging::init`（所有入口都走这条，包括只读的 `tw doctor` / `tw export-web`）：创建目录并追加写；写失败只在 stderr 警告一次，程序继续运行 |
+| 创建时机 | `lib::run` 解析出数据目录后立即 `logging::init`（所有入口都走这条，包括只读的 `tw doctor` / `tw export-dict` / `tw export-web`）：创建目录并追加写；写失败只在 stderr 警告一次，程序继续运行 |
 | 落点 | 默认 `<home>/logs/tw-<启动当天本地日期>.log`；`--log FILE` 改为该文件（目录不存在会创建，相对路径视为当前目录），此时默认目录不再创建。崩溃报告跟着日志走：用 `--log` 就是它所在的目录，否则 `<home>/logs/` |
 | 关闭 | `--no-log` 不写日志、不建日志目录、也不做启动清理；panic 时仍写 `<home>/logs/crash-<时间戳>.txt` |
 | 保留 | 启动时清理日志所在目录：日志保留 14 天、崩溃报告 30 天（按修改时间，只匹配 `tw-*.log` 与 `crash-*.txt`，其它文件不动）；panic 写报告前再清一次过期报告 |
@@ -86,7 +86,7 @@
 
 `src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
 
-因此进程中途被杀不会留下半截 JSON：正式文件要么旧内容、要么新内容。残留的 `.tmp` 不属于任何后续写入，不会被复用或删除，可直接清理；临时名唯一化后，同进程内并发写（存档与词库目录同时落盘）也不会互相截断。原子性只覆盖**单份文件**：`tw doctor` / `tw export-web` 不取锁，读到的每份文件各自完整，但多份文件可能来自不同时刻，需要一致快照就先退出所有实例。
+因此进程中途被杀不会留下半截 JSON：正式文件要么旧内容、要么新内容。残留的 `.tmp` 不属于任何后续写入，不会被复用或删除，可直接清理；临时名唯一化后，同进程内并发写（存档与词库目录同时落盘）也不会互相截断。原子性只覆盖**单份文件**：`tw doctor` / `tw export-dict` / `tw export-web` 不取锁，读到的每份文件各自完整，但多份文件可能来自不同时刻，需要一致快照就先退出所有实例。
 
 ### 2.3 读取状态 `LoadStatus`
 
@@ -274,7 +274,7 @@
 
 书目在 `<assets>/list/article.json`（`src/domain/article.rs` 的 `ArticleBook`：`enName` / `name` / `description` / `url` / `category` / `tags` / 登记 `length`），正文在 `<assets>/dicts/en/article/<url>`（`Article` 数组：`id`、`title`、`titleTranslate`、`text`、`textTranslate`、`audioSrc`；`sections` 是运行时由 `gen_sections` 生成的断句结果，不落盘）。书目登记的篇数一律被 `load_books` 用实际篇数覆盖，文件读不到时记为未知（界面显示「篇数未知」）而不是拿登记值充数。当前只有一本书《新概念英语1》（`NCE_1.json`，5 篇）。
 
-## 9. `tw import-dict`
+## 9. `tw import-dict` / `tw export-dict`
 
 只接受**词条数组 JSON**（与 8.2 同格式），不支持词库目录对象、ZIP、Excel。步骤（`Catalog::import_dict`）：
 
@@ -284,6 +284,13 @@
 4. 写 `<home>/list/word.json`（pretty JSON + 原子写；按归一化 id 判重，同 id 替换、否则追加），打印导入结果并提示 `tw --dict <id>`；**不会自动切换**当前词库。
 
 要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`复制词库失败: <源> → <目标>`。
+
+**`tw export-dict [DICT_ID] [--out FILE]`**（只读入口，不取锁）是它的逆操作：
+
+1. `DICT_ID`（id 或 enName）先在词库目录里找，命中就读词条文件；全局 `--dict` 作为缺省值。两者都没有时取**当前学习词库**（`dict.json` 的 `studyIndex`），空数据目录还没有当前词库则报错并提示用 `tw doctor` 查 id。
+2. 没在词库目录命中的再查存档：收藏 / 错词 / 已掌握的词条只在 `dict.json` 里，没有词条文件；普通词库的词表在存档落盘时被 `shake_common_dict` 清空，按 id / enName 回词条文件补齐，所以导出的始终是完整词表。
+3. 词条按 `Word` 序列化成词条数组（pretty JSON，与 8.2 同格式），空词条被 `Word::is_usable` 过滤；过滤后为空直接报错 `词库中没有可用单词: <名称>`，而不是写出一个 `import-dict` 会拒收的 `[]`。
+4. `--out` 缺省写到标准输出（只有 JSON，可直接重定向或接管道）；写文件走原子写（同 `import-dict`），中途失败不会留下半个词库文件。常见失败文案：`未找到词库: <id>（用 tw doctor 查看全部词库 id）`、`还没有当前学习词库，请指定 DICT_ID（tw doctor 可列出全部词库 id）`、`词库中没有可用单词: <名称>`、`写入词库文件失败: <path>`。
 
 ## 10. 与 Web 数据互通
 
@@ -313,7 +320,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 - **重置学习记录**：设置页「清除所有数据」确认后 `boot.base` / `boot.settings` 回到默认值、删除两份缓存并立即落盘，再按全新安装重新选一本学习词典；任一存档版本过高（本次只读）时拒绝执行并提示，避免假成功（`flows.json` 不在清除范围）。**彻底重置**则关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢），下次启动重建目录。
 - **清理与退回**：隔离文件 `*.corrupt-<时间戳>.json` 与导入产生的 `*.bak-<时间戳>.json` 都不自动清理，确认无用后手工删除；需要退回导入前的状态时退出所有实例，用 `.bak` 覆盖同名存档即可。版本降级不会破坏原文件（过高只读、缓存版本不符忽略并覆盖），但新版本保存后格式会升级，降级前先备份。
 
-`tw doctor` 是排障入口：打印版本行、数据目录、资源目录、日志目录、词库清单（含词条文件路径与词数）、5 份存档的大小（不存在则标注）、自定义主题目录与全部主题及加载告警。它不解析存档内容，版本过高 / 损坏只会在启动 Toast 里出现；`tw doctor` 与 `tw export-web` 不取锁，但在别的实例运行时读到的多份文件不保证同一时刻，需要一致快照就先退出所有实例。
+`tw doctor` 是排障入口：打印版本行、数据目录、资源目录、日志目录、词库清单（含词条文件路径与词数）、5 份存档的大小（不存在则标注）、自定义主题目录与全部主题及加载告警。它不解析存档内容，版本过高 / 损坏只会在启动 Toast 里出现；`tw doctor`、`tw export-dict` 与 `tw export-web` 不取锁，但在别的实例运行时读到的多份文件不保证同一时刻，需要一致快照就先退出所有实例。
 
 ## 12. 安全与隐私
 

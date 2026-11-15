@@ -72,7 +72,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | Linux | `$XDG_DATA_HOME/typewords-tui`，缺省 `~/.local/share/typewords-tui` |
 | macOS | `~/Library/Application Support/typewords-tui` |
 
-首次运行自动创建目录并写入 5 份存档：`dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）、`setting.json`（设置）、`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）、`flows.json`（自建流程），另有 `themes/`、`dicts/`、`list/`，以及运行日志与崩溃报告的 `logs/`（不是存档，删了不影响学习进度）；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-web` 只读，TUI 运行时也能用。
+首次运行自动创建目录并写入 5 份存档：`dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）、`setting.json`（设置）、`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）、`flows.json`（自建流程），另有 `themes/`、`dicts/`、`list/`，以及运行日志与崩溃报告的 `logs/`（不是存档，删了不影响学习进度）；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-dict` / `tw export-web` 只读，TUI 运行时也能用。
 
 ### 升级与版本兼容
 
@@ -102,10 +102,11 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `tw doctor` | 打印解析到的路径与词库 / 存档 / 主题状态，不进入界面、不写存档 | 版本行、数据目录、资源目录、日志目录（`<home>/logs`，`--log` 可指定文件、`--no-log` 关闭）；每本词库的 id / enName / 名称 / 目录登记词数 / 实际可练习词数（空词条不计，与程序真正加载的词数一致）与词条文件路径（缺失显示 `<缺失>`，解析失败显示原因）；5 份存档的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
 | `tw task` | 只预览今日任务，不进入界面 | 当前词库与每日词数、学习进度（`已学 N / M` 与百分比同源，分母是有效词数）、今日任务（新词 / 复习，到期数与随机补足数）与前 5 个新词、复习词；需取数据目录锁 |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 打印词库名、词数与 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
+| `tw export-dict [DICT_ID] [--out FILE]` | 把词库词条导出成词条数组 JSON（`import-dict` 的逆操作），可直接再导入 | 缺省写到标准输出（只有 JSON，便于重定向）；`--out` 指定文件时打印词库名、词数与路径。`DICT_ID` 取 id 或 enName，缺省用全局 `--dict`，再缺省用当前学习词库；收藏 / 错词 / 已掌握的词条只在存档里，也能导出；只读，不取锁 |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份；导入后需重启程序 |
 | `tw export-web [--out FILE]` | 把当前数据目录导出成网页版能导入的备份 JSON | 缺省写到标准输出；`--out` 指定文件时打印路径；只读，不取锁 |
 
-`import-dict` 要求文件以 `.json` 结尾、内容为词条数组（每项至少含 `word` 字段）、至少有一个可用单词；重复导入同一文件名会覆盖同 id 的登记项，不产生重复条目。`import-web` / `export-web` 与网页版「设置 → 数据管理 → 导出」同一套格式：备份版本高于 5 时拒绝导入；逐项校验存档版本，任一项版本过高或反序列化失败就跳过 / 拒绝该项，原文件保持不变；覆盖前先复制为 `<文件名>.bak-<时间戳>.json`，失败会回滚；文章练习缓存按来源分流（本程序导出的备份能还原句子进度，网页版自己产生的缓存只有「段落 / 句 / 词」游标，导入时列为「已丢弃」）。完整规则见 [存档与数据格式](persistence.md)。
+`import-dict` 要求文件以 `.json` 结尾、内容为词条数组（每项至少含 `word` 字段）、至少有一个可用单词；重复导入同一文件名会覆盖同 id 的登记项，不产生重复条目。`export-dict` 与它对称：输出同样是词条数组（`Word` 的全部字段，空词条被过滤），空词库直接报错而不是写出一个 `import-dict` 不接受的 `[]`；导出文件可原样再导入，`id` 取新文件名。`import-web` / `export-web` 与网页版「设置 → 数据管理 → 导出」同一套格式：备份版本高于 5 时拒绝导入；逐项校验存档版本，任一项版本过高或反序列化失败就跳过 / 拒绝该项，原文件保持不变；覆盖前先复制为 `<文件名>.bak-<时间戳>.json`，失败会回滚；文章练习缓存按来源分流（本程序导出的备份能还原句子进度，网页版自己产生的缓存只有「段落 / 句 / 词」游标，导入时列为「已丢弃」）。完整规则见 [存档与数据格式](persistence.md)。
 
 ### 环境变量与目录查找顺序
 
@@ -118,6 +119,7 @@ tw --dict cet4                       # 直接进入 CET-4；内置词典用 word
 tw doctor --home D:\tmp\twhome       # 全局参数也可放在子命令之后
 tw task --seed 42                    # 预览今日任务，固定随机种子
 tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict my-words 切换
+tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict cet4 导出到标准输出
 ```
 
 ## 日志与崩溃报告
@@ -389,7 +391,7 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 | --- | --- | --- |
 | 启动报「找不到词库资源目录」 | `assets/` 不在可执行文件同级或当前目录，`--assets` 指向的目录没有 `list/word.json` | 把 `assets/` 放到可执行文件同级（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），或用 `--assets` 指向包含 `list/word.json` 的目录 |
 | 启动报「加载词库失败」 | 存档里的当前词库在资源目录中找不到，或词条文件缺失 | `tw doctor` 看每本词库的「文件」路径；用 `--dict` 指定存在的词库 |
-| 启动提示「另一个实例正在使用该数据目录」 | 同一个 `--home` 已经有 tw 在运行（TUI、`tw task` 或导入命令） | 退出那个进程；或换一个 `--home`（`tw doctor` / `tw export-web` 只读，本来就允许同时运行） |
+| 启动提示「另一个实例正在使用该数据目录」 | 同一个 `--home` 已经有 tw 在运行（TUI、`tw task` 或导入命令） | 退出那个进程；或换一个 `--home`（`tw doctor` / `tw export-dict` / `tw export-web` 只读，本来就允许同时运行） |
 | 启动无反应 / 一直黑屏 | 终端小于 60 × 20 只显示提示；或进程还在装载大词库 | 放大窗口；等待首帧；`Ctrl+C` 退出后重试 |
 | 退出后终端显示错乱 | 进程被强制结束，未恢复备用屏幕 / 鼠标捕获 | 重开终端；Unix 可执行 `reset` |
 | 中文 / 边框错位、颜色发灰偏色 | 终端字体非等宽或不支持 CJK / 制表符、使用 conhost；终端不支持 24-bit 真彩色 | 换 Windows Terminal 并设置等宽且支持中文的字体；确认 `COLORTERM=truecolor`，或换「高对比」/ 自定义 ANSI 颜色主题 |

@@ -31,7 +31,7 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
       ├─ Paths::resolve_home()       数据目录解析（先于资源目录：日志要尽早可用）
       ├─ logging::init() / crash::set_context()   运行日志 + 崩溃报告上下文
       ├─ Paths::resolve_in()         资源目录解析
-      ├─ cli.rs                      doctor / task / import-dict / import-web / export-web（不进 TUI）
+      ├─ cli.rs                      doctor / task / import-dict / export-dict / import-web / export-web（不进 TUI）
       └─ app::run(paths, cli)
            ├─ App::bootstrap()       store + domain + theme 装载，失败则在进入终端前 bail!
            └─ 事件循环：ui::render(&App)（只读）+ keymap/mouse/buttons → Action → App::apply_action
@@ -71,7 +71,7 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 
 另有 `<home>/logs/`：运行日志 `tw-<日期>.log` 与崩溃报告 `crash-<时间戳>.txt`，程序自动创建，**不属于存档**（无信封 / 版本号，删了不影响进度，备份时可留可删）。
 
-写入是「同目录唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename」；写入口启动时对 `<home>/.tw.lock` 取排他锁（`Paths::lock_home`，只读的 `tw doctor` / `tw export-web` 不取锁）；解析失败隔离为 `*.corrupt-<时间戳>.json`；`dict.json`/`setting.json` 版本高于程序支持版本时**只读不覆盖**，练习缓存版本不受支持时忽略（不移动文件）。完整字段与版本策略见 `docs/persistence.md`。
+写入是「同目录唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename」；写入口启动时对 `<home>/.tw.lock` 取排他锁（`Paths::lock_home`，只读的 `tw doctor` / `tw export-dict` / `tw export-web` 不取锁）；解析失败隔离为 `*.corrupt-<时间戳>.json`；`dict.json`/`setting.json` 版本高于程序支持版本时**只读不覆盖**，练习缓存版本不受支持时忽略（不移动文件）。完整字段与版本策略见 `docs/persistence.md`。
 
 serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`Card` 保持 ts-fsrs 的 snake_case；新增可选字段必须带 `default`，保证旧存档可读。字段命名沿用上游，便于手工迁移。
 

@@ -25,7 +25,7 @@
 - **主题**：6 套内置（深色 / 浅色 / 高对比 / 午夜墨 / 纸墨 / 克莱因蓝）+ `<home>/themes/*.json` 自定义主题。
 - **终端交互**：响应式外壳（宽屏侧栏 / 窄屏顶栏）、可点击的导航 / 按钮 / 列表、滚轮滚动；60 × 20 起可用。
 - **断点续练**：单词游标与文章句进度写入本地 JSON，重启后按 `Enter` 继续；退出练习页回主页再按 `Enter` 也接着练。
-- **工具命令**：`tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`，覆盖排障、脚本化预览、词库导入与网页版备份互通。
+- **工具命令**：`tw doctor` / `tw task` / `tw import-dict` / `tw export-dict` / `tw import-web` / `tw export-web`，覆盖排障、脚本化预览、词库导入导出与网页版备份互通。
 
 非目标：Supabase 云同步、在线查词 / 翻译、多语言界面、xlsx 与 ZIP / mp3 打包备份、跨设备冲突合并。完整差异见 [与上游对照](docs/upstream-parity.md)。
 
@@ -90,6 +90,7 @@ Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的�
 | `tw doctor` | 打印数据目录、资源目录、词库、5 份存档与主题状态；只读 |
 | `tw task` | 预览今日任务（新词 / 到期复习 / 随机补足） |
 | `tw import-dict FILE` | 把词条数组 JSON 导入数据目录并登记 |
+| `tw export-dict [DICT_ID] [--out FILE]` | 把词库词条导出成可再导入的词条数组 JSON |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（BackupData v5） |
 | `tw export-web [--out FILE]` | 导出成网页版能导入的备份 JSON |
 | `tw --assets DIR` | 指定只读资源目录（需含 `list/word.json`） |
