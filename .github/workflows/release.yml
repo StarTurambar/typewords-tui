@@ -7,37 +7,152 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  package:
+    name: package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            packager: pwsh
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            packager: bash
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+            packager: bash
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            packager: bash
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            packager: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked
-      - name: Package
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
+          echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
+      - name: Package (Windows)
+        if: matrix.packager == 'pwsh'
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/package.ps1 -Target ${{ matrix.target }}
+      - name: Package (Linux / macOS)
+        if: matrix.packager == 'bash'
+        shell: bash
+        run: bash scripts/package.sh --target ${{ matrix.target }}
+      # 冒烟直接解压归档再跑：同时验证「归档能解、二进制是同版本、assets 与可执行文件同级」
+      - name: Smoke test packaged archive (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          $name = "typewords-tui-$tag-x86_64-pc-windows-msvc"
-          $stage = "dist/$name"
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item target/release/tw.exe $stage
-          Copy-Item -Recurse assets $stage/assets
-          Copy-Item -Recurse docs $stage/docs
-          Copy-Item README.md, LICENSE $stage
-          Compress-Archive -Path $stage -DestinationPath "dist/$name.zip"
-          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Set-Content "dist/$name.zip.sha256"
+          $archive = (Get-ChildItem 'dist/*.tar.gz' | Select-Object -First 1).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'tw-smoke'
+          if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          tar -xzf $archive -C $dir
+          if ($LASTEXITCODE -ne 0) { throw '解压归档失败' }
+          $exe = Get-ChildItem (Join-Path $dir '*/tw.exe') | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) { throw '归档里没有 tw.exe' }
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $out = & $exe --version
+          if ($out -notmatch [regex]::Escape($version)) { throw "版本不符：$out（期望 $version）" }
+          $home2 = Join-Path $env:RUNNER_TEMP 'tw-smoke-home'
+          if (-not (& $exe doctor --home $home2 | Select-String -SimpleMatch 'CET-4')) {
+            throw 'doctor 找不到内置 CET-4（assets/ 没有与可执行文件同级）'
+          }
+      # x86_64-apple-darwin 在 arm64 runner 上运行需要 Rosetta，只冒烟 Linux 与原生 arm64
+      - name: Smoke test packaged archive (unix)
+        if: runner.os == 'Linux' || matrix.target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d)
+          tar -xzf dist/*.tar.gz -C "$dir"
+          exe=$(ls "$dir"/*/tw)
+          "$exe" --version | grep -F "${GITHUB_REF_NAME#v}"
+          "$exe" doctor --home "$(mktemp -d)" | grep -F 'CET-4'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: publish
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(tr -d '\r' < Cargo.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} 与 Cargo.toml 的 version $version 不一致" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          # 归档数必须与 release.yml 的 matrix 一致：缺包（命名漂移、只产 tar.gz 没产 .sha256）时直接失败。
+          # `if-no-files-found` 只在完全没匹配到文件时报错，兜不住「少了其中一个平台」。
+          expected=$(grep -c '^          - target: ' ../.github/workflows/release.yml)
+          actual=$(ls -1 *.tar.gz | wc -l)
+          if [ "$actual" -ne "$expected" ]; then
+            echo "期望 $expected 个归档（见 release.yml 的 matrix），实际 $actual 个：$(ls -1)" >&2
+            exit 1
+          fi
+          for archive in *.tar.gz; do
+            sha256sum -c "$archive.sha256"
+          done
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS
       - name: Publish
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = '${{ github.ref_name }}'
-          $notes = ".github/release-notes/$tag.md"
-          if (Test-Path $notes) {
-            gh release create $tag dist/*.zip dist/*.sha256 --title $tag --notes-file $notes
-          } else {
-            gh release create $tag dist/*.zip dist/*.sha256 --title $tag --generate-notes
-          }
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes=".github/release-notes/${tag}.md"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag 已存在，改上传产物（--clobber）"
+            gh release upload "$tag" --clobber dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS
+          else
+            args=(--title "$tag")
+            if [ -f "$notes" ]; then
+              args+=(--notes-file "$notes")
+            else
+              args+=(--generate-notes)
+            fi
+            gh release create "$tag" dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS "${args[@]}"
+          fi
