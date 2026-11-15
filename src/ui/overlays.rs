@@ -747,6 +747,8 @@ fn edit_label(edit: &EditState) -> String {
         crate::app::EditTarget::Note => "单词笔记".to_string(),
         crate::app::EditTarget::WordSoundSpeed => "发音倍速".to_string(),
         crate::app::EditTarget::DictName => "词典名称".to_string(),
+        crate::app::EditTarget::MaximumInterval => tr("maximum_interval"),
+        crate::app::EditTarget::Weight(index) => format!("权重 w[{index}]"),
     }
 }
 

@@ -263,6 +263,7 @@ fn setting_value(app: &App, key: &str, kind: SettingKind, theme: &Theme) -> (Str
         ),
         SettingKind::Action(action) => action_hint(action, theme),
         SettingKind::Shortcuts => ("按 Enter 打开".to_string(), theme.dim),
+        SettingKind::AdvancedFsrs => ("按 Enter 打开".to_string(), theme.dim),
         SettingKind::AudioSource => (
             if app.boot.settings.tts_source == "youdao" {
                 "有道发音（需网络）".to_string()
@@ -287,6 +288,8 @@ fn action_hint(action: ConfirmAction, theme: &Theme) -> (String, Color) {
         ConfirmAction::Quit => ("按 Enter 退出".to_string(), theme.dim),
         ConfirmAction::ResetPractice => ("按 Enter 重置".to_string(), theme.dim),
         ConfirmAction::ClearAllData => ("按 Enter 清除 · 不可撤销".to_string(), theme.bad),
+        // 「恢复默认 FSRS 参数」只出现在高级 FSRS 页，不占设置页的行。
+        ConfirmAction::ResetFsrs => ("按 Enter 恢复".to_string(), theme.warn),
     }
 }
 
@@ -323,5 +326,8 @@ fn number_text(target: EditTarget, value: i64) -> String {
         EditTarget::Note => String::new(),
         EditTarget::WordSoundSpeed => format!("{value}%"),
         EditTarget::DictName => String::new(),
+        EditTarget::MaximumInterval => format!("{value} 天"),
+        // 权重是浮点，只在「高级 FSRS」页显示（`ui::adv_fsrs`），这里用不到。
+        EditTarget::Weight(_) => value.to_string(),
     }
 }

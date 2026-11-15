@@ -388,6 +388,17 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::WordTestExit),
             _ => word_test_shortcut_action(app, key),
         },
+        // 高级 FSRS 子屏：方向键 / Enter 走统一的焦点语义（见 focus_action），
+        // 这里只留翻页与空格「修改」。
+        Screen::AdvFsrs => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+            KeyCode::Char(' ') => Some(Action::ActivateFocus),
+            KeyCode::PageUp => Some(Action::AdvFsrsMove(-10)),
+            KeyCode::PageDown => Some(Action::AdvFsrsMove(10)),
+            KeyCode::Home => Some(Action::AdvFsrsMove(-1000)),
+            KeyCode::End => Some(Action::AdvFsrsMove(1000)),
+            _ => None,
+        },
         Screen::Shortcuts => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
             KeyCode::PageUp => Some(Action::ShortcutMove(-10)),

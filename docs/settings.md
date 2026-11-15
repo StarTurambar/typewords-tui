@@ -1,8 +1,8 @@
 # 设置项参考
 
-本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、32 行设置各自的分区 / 默认值 / 取值范围 / 生效方式，以及只有配置文件里才有的 FSRS 参数和未建模的透传字段。设置页操作与界面导览见 [使用手册 · 设置页](usage.md#设置页)；存档格式、版本与备份见 [存档与数据格式](persistence.md)。
+本文是 `setting.json` 与设置页的权威参考：文件在哪、何时保存、33 行设置各自的分区 / 默认值 / 取值范围 / 生效方式、「高级 FSRS」子页可调的调度参数、仍需手改配置文件的两项步进，以及未建模的透传字段。设置页操作与界面导览见 [使用手册 · 设置页](usage.md#设置页)；存档格式、版本与备份见 [存档与数据格式](persistence.md)。
 
-设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。
+设置页由 `src/app/mod.rs` 的 `SETTING_ROWS` 定义、`src/ui/settings.rs` 渲染；高级 FSRS 页的行由同一文件的 `AdvFsrsRow` 定义、`src/ui/adv_fsrs.rs` 渲染；默认值定义在 `src/domain/types.rs` 的 `SettingState::default`。
 
 ## 设置文件与保存时机
 
@@ -20,9 +20,10 @@
   - 开关类直接切换；音标在「美式 / 英式」间切换；发音来源在「系统 TTS / 有道发音」间切换。
   - 练习模式打开 **10 项选择弹层**（不是循环）；主题在 `auto → 6 套内置 → 自定义主题` 之间循环。
   - 数字类打开输入弹层：只接受 ASCII 数字与 `Backspace`，最多 6 位，留空按 0 解析后按范围收敛，`Enter` 保存、`Esc` 取消。
+  - 入口类：「快捷键」打开快捷键编辑页；「高级 FSRS」打开高级 FSRS 页，返回时设置页光标回到第一行。
   - 「清空当前练习进度」与「清除所有数据」弹确认；动作项右侧提示按后果区分：前者「按 Enter 重置」（次级色），后者「按 Enter 清除 · 不可撤销」（危险色）。
-- 没有单项恢复默认；「清除所有数据」会把设置与学习记录一起恢复默认（不可撤销）。想只重置某一项，退出后编辑或删除 `setting.json`。
-- 分区与顺序：通用（5 行）→ 音频（6 行）→ 复习（4 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（4 行）→ 其他（2 行），共 **32 行 = 30 个配置项 + 2 个动作项**。
+- 设置页本身没有单项恢复默认（FSRS 参数例外：高级 FSRS 页有「恢复默认」）；「清除所有数据」会把设置与学习记录一起恢复默认（不可撤销）。想只重置其它单项，退出后编辑或删除 `setting.json`。
+- 分区与顺序：通用（5 行）→ 音频（6 行）→ 复习（4 行）→ 键入（7 行）→ 显示（4 行）→ FSRS（5 行）→ 其他（2 行），共 **33 行 = 31 个配置项 + 2 个动作项**；FSRS 分区的最后一行「高级 FSRS」是入口行，真正的调度参数在子页里。
 
 ## 分区总表
 
@@ -60,6 +61,7 @@
 | FSRS | `fsrs_good_limit` | FSRS Good 阈值 | 整数 | 3 | 0 ~ 20 | 超过 Easy 且 ≤ 本阈值 → Good；结算时生效 |
 | FSRS | `fsrs_hard_limit` | FSRS Hard 阈值 | 整数 | 6 | 0 ~ 20 | 超过 Good 且 ≤ 本阈值 → Hard，更大 → Again；结算时生效 |
 | FSRS | `fsrsParameters.request_retention` | 目标留存率 | 整数 % | 90 | 50 ~ 99 | 传给 FSRS 的期望留存率（文件内为小数）；结算时生效 |
+| FSRS | `advanced_fsrs`（入口） | 高级 FSRS | 入口 | — | — | 进入「高级 FSRS」页改留存率 / 最大间隔 / 调度开关 / 21 个权重；见下文「高级 FSRS 页」 |
 | 其他 | `reset_practice_progress` | 清空当前练习进度 | 动作 | — | — | 确认后删除 `practice-word.json` 与 `practice-article.json`；立即生效 |
 | 其他 | `clear_all_data` | 清除所有数据 | 动作 | — | — | 确认后 `dict.json` 与 `setting.json` 恢复默认并删除断点缓存；不可撤销 |
 
@@ -128,34 +130,83 @@
 
 学习 / 重学步进由 `src/domain/scheduler.rs` 写死为 1 / 6 / 10 分钟；阈值与留存率只影响评级和 FSRS 间隔，不改变这些步进。
 
-### 无 UI 的 FSRS 参数
+### 高级 FSRS 页
 
-`setting.json` 的 `val.fsrsParameters` 下还有以下字段，设置页没有入口：
+设置页「FSRS → 高级 FSRS」（右侧显示「按 Enter 打开」）进入，套同一套外壳、侧栏高亮「设置」。内容区是单列表格，共 **26 行**，分 4 个分区：
 
-| 字段 | 默认值 | 是否生效 | 说明 |
+| 分区 | 行 | 行数 |
+| --- | --- | --- |
+| 留存率与间隔 | 目标留存率、最大间隔(天) | 2 |
+| 调度开关 | 间隔抖动 fuzz、短期调度 | 2 |
+| 权重 w（FSRS-6） | `w[0]` ~ `w[20]`，每行右侧显示当前值与合法区间 | 21 |
+| 重置 | 恢复默认 FSRS 参数 | 1 |
+
+- **键位**：`↑` / `↓`（`j` / `k`）移动，`PgUp` / `PgDn` 移 10 行，`Home` / `End` 到首末；`Enter` 或空格修改当前行；`Esc` / `q` 保存并返回设置页，设置页光标重置到第一行（与快捷键页一致）。鼠标第一次点行只是选中、再点已选中行才修改，滚轮移动光标；底栏「选中 X」显示当前行名（如「选中 w[12] 遗忘难度幂」）。
+- **数字行**（目标留存率、最大间隔、21 个权重）：弹输入框，`Enter` 保存、`Esc` 取消。留存率按 50 ~ 99、最大间隔按 1 ~ 36500 静默夹取。权重预填当前值（最多 6 位小数、去掉末尾 0，如 `0.212`），只接受数字与一个小数点；非法输入提示「请输入数字：如 0.212」并保持原值，超出合法区间按区间夹取并提示「w[n] 已夹取到 min ~ max」。
+- **开关行**（fuzz、短期调度）：直接切换并立即保存。
+- **重置行**（右侧「按 Enter 恢复」）：弹确认「恢复默认 FSRS 参数？将覆盖目标留存率、最大间隔、调度开关、21 个权重与学习 / 重学步进。」，确认后把整个 `fsrsParameters` 换回默认值并 Toast「已恢复默认 FSRS 参数」；`learning_steps` / `relearning_steps` 不在页内，但「恢复默认」会把它们一起还原成默认值，手改过的值会丢。
+- **落盘与生效**：每次修改立即写 `setting.json` 的 `val.fsrsParameters`（内部 snake_case，`version` 仍是 23），在下一次结算计算到期时生效，已经排好的到期时间不会追溯改变。`setting.json` 版本过高（本次运行只读）时与其它设置一样只改内存、不写盘。
+- **区间同源**：权重区间来自 `src/domain/fsrs.rs` 的 `weight_bounds`，与调度器实际夹取用的是同一份表——`relearning_steps` 多于一步时 `w[17]` / `w[18]` 的上限更小，`w[19]` 的下限在开启短期调度时是 0.01、关闭后放宽到 0。界面显示的区间就是实际生效的区间。
+
+| 行 | 默认值 | 界面范围 | 作用与生效 |
 | --- | --- | --- | --- |
-| `request_retention` | `0.9` | 生效（有 UI） | 见上 |
-| `maximum_interval` | `36500.0` | 生效 | 间隔上限（天）；小于 1 时回退 36500 |
-| `w` | 21 个默认权重 | 生效 | 必须恰好 21 个有限数，否则整组回退默认 |
-| `enable_fuzz` | `false` | 生效 | 对 ≥ 2.5 天的间隔按上游分段区间抖动（2.5–7 天 ±15%、7–20 天 ±10%、≥20 天 ±5%），随机源与上游一致 |
-| `enable_short_term` | `true` | 生效 | 关闭后改用长期调度器，不经过学习步进 |
-| `learning_steps` | `["1m", "10m"]` | 生效 | 新卡 / 学习态步进；单位支持 m / h / d |
-| `relearning_steps` | `["10m"]` | 生效 | 复习卡评 Again 后的重学步进 |
+| 目标留存率 | 90%（文件内 `0.9`） | 50 ~ 99（%） | 期望留存率，越高复习越密；设置页同名行与子页改的是同一个值，结算时生效 |
+| 最大间隔(天) | 36500 | 1 ~ 36500 | 单张卡下次到期的天数上限；结算时生效 |
+| 间隔抖动 fuzz | 关闭 | 开启 / 关闭 | 开启后对 ≥ 2.5 天的间隔按上游分段区间抖动：2.5–7 天 ±15%、7–20 天 ±10%、≥20 天 ±5%，随机源与上游一致；结算时生效 |
+| 短期调度 | 开启 | 开启 / 关闭 | 关闭后改用长期调度器，不经过学习步进；只影响此后结算的卡片 |
 
-手工修改步骤：退出程序 → 备份 `setting.json` → 编辑 `val.fsrsParameters`（外层 camelCase、内部 snake_case，`w` 必须 21 个数字）→ 保持 `version: 23` → 启动后到设置页确认「目标留存率」。字段名拼错会落进 `extra` 但不生效；`w` 长度不对会静默回退默认权重。
+21 个权重是 FSRS-6 的拟合参数，默认值与上游 ts-fsrs 一致；没有调参需求时保持默认即可：
+
+| 行 | 含义 | 默认值 | 合法区间 |
+| --- | --- | --- | --- |
+| `w[0]` | 初始稳定性 · Again | 0.212 | 0.001 ~ 100 |
+| `w[1]` | 初始稳定性 · Hard | 1.2931 | 0.001 ~ 100 |
+| `w[2]` | 初始稳定性 · Good | 2.3065 | 0.001 ~ 100 |
+| `w[3]` | 初始稳定性 · Easy | 8.2956 | 0.001 ~ 100 |
+| `w[4]` | 初始难度 | 6.4133 | 1 ~ 10 |
+| `w[5]` | 初始难度指数 | 0.8334 | 0.001 ~ 4 |
+| `w[6]` | 难度变化率 | 3.0194 | 0.001 ~ 4 |
+| `w[7]` | 难度回归均值 | 0.001 | 0.001 ~ 0.75 |
+| `w[8]` | 稳定性增长指数 | 1.8722 | 0 ~ 4.5 |
+| `w[9]` | 稳定性衰减指数 | 0.1666 | 0 ~ 0.8 |
+| `w[10]` | 检索难度系数 | 0.796 | 0.001 ~ 3.5 |
+| `w[11]` | 遗忘稳定性基数 | 1.4835 | 0.001 ~ 5 |
+| `w[12]` | 遗忘难度幂 | 0.0614 | 0.001 ~ 0.25 |
+| `w[13]` | 遗忘稳定性幂 | 0.2629 | 0.001 ~ 0.9 |
+| `w[14]` | 遗忘系数 | 1.6483 | 0 ~ 4 |
+| `w[15]` | Hard 惩罚 | 0.6014 | 0 ~ 1 |
+| `w[16]` | Easy 加成 | 1.8729 | 1 ~ 6 |
+| `w[17]` | 短期稳定性指数 | 0.5425 | 0 ~ 2（重学步数多于一步时上限更小） |
+| `w[18]` | 短期偏移 | 0.0912 | 0 ~ 2（同上） |
+| `w[19]` | 短期衰减 | 0.0658 | 0.01 ~ 0.8（关闭短期调度时下限为 0） |
+| `w[20]` | 衰减系数 | 0.1542 | 0.1 ~ 0.8 |
+
+### 仍需手改的 FSRS 参数
+
+`val.fsrsParameters` 下的 `learning_steps` / `relearning_steps` 在设置页与高级 FSRS 页都没有入口：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `learning_steps` | `["1m", "10m"]` | 新卡 / 学习态步进；单位支持 m / h / d |
+| `relearning_steps` | `["10m"]` | 复习卡评 Again 后的重学步进 |
+
+没做成界面项的原因：它们是**字符串步进列表**（可增删步骤、每项带单位），要配一整套列表编辑器才安全；默认值已按上游推荐给出，极少需要改，界面成本高于收益。改动它们只影响 FSRS 卡片自己的学习 / 重学步进与到期时间，界面上的练习阶段仍由流程模板与 `src/domain/scheduler.rs` 的 1 / 6 / 10 分钟步进决定。
+
+手工修改步骤：退出程序 → 备份 `setting.json` → 编辑 `val.fsrsParameters`（外层 camelCase、内部 snake_case）→ 保持 `version: 23` → 启动后到设置页确认「目标留存率」。字段名拼错会落进 `extra` 但不生效；`w` 长度不对或不是 21 个有限数会静默回退默认权重。
 
 ## 有 UI 的设置 vs 透传字段
 
 | 类别 | 字段 |
 | --- | --- |
 | 有 UI 且生效（28 项） | `word_practice_mode`、`theme`、`sound_type`、`tui_big_word`、`shortcut_key_map`、`word_review_ratio`、`auto_add_random_review_when_no_due`、`ignore_simple_word`、`auto_next_word`、`repeat_count`、`wait_time_for_change_word`、`space_cooldown_time`、`input_wrong_clear`、`ignore_case`、`show_word_question`、`show_etymology_and_rel_words`、`show_near_word`、`show_usage_tips`、`keyboard_sound`、`effect_sound`、`word_sound`、`article_sound`、`tts_source`、`word_sound_speed`、三个 FSRS 阈值、`request_retention` |
+| 有 UI 且生效（高级 FSRS 页 4 项） | `maximum_interval`、`w`（21 个权重按一组）、`enable_fuzz`、`enable_short_term`；`request_retention` 在设置页与子页都有入口 |
 | 有 UI、写词典元数据 | 每日词数（`dict.json` 的 `perDayStudyNumber`，不写 `setting.json`） |
 | 有 UI、条件生效 | `repeat_custom_count`（仅 `repeat_count == 100` 时参与） |
-| 无 UI、内部会读取 | `maximum_interval`、`w`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps` |
+| 仍需手改、内部会读取 | `learning_steps`、`relearning_steps`（见上文「仍需手改的 FSRS 参数」） |
 | 无 UI、当前不读取（只保存） | `word_practice_type`、`always_show_note`、`dictation`、`translate`、`ignore_symbol`、`_ignoreWatch` |
 | 透传保留 | `extra`：`SettingState` 未建模的 Web 字段原样保存并写回 |
 
-`SettingState` 共建模 **43 个具名字段** + `extra`；设置页覆盖其中 **29 个配置项**（28 个有 UI 且生效 + 条件生效的 `repeat_custom_count`），另有「每日词数」一行（词典元数据）与 2 个动作项，共 32 行；快捷键页是独立入口。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留；字段类型不匹配或枚举值非法会触发损坏隔离。
+`SettingState` 共建模 **43 个具名字段** + `extra`；设置页覆盖其中 **29 个配置项**（28 个有 UI 且生效 + 条件生效的 `repeat_custom_count`），另有「每日词数」一行（词典元数据）、「高级 FSRS」入口行与 2 个动作项，共 33 行；快捷键页与高级 FSRS 页是独立入口。兼容策略是 `#[serde(default)]` + `#[serde(flatten)] extra`：旧文件缺字段用默认值，未知字段原样保留；字段类型不匹配或枚举值非法会触发损坏隔离。
 
 ## 未生效 / 半生效设置项
 
@@ -170,7 +221,7 @@
 ## 与 Web 设置字段对照（版本 23）
 
 - **版本**：`setting.json` 的 `version` 恒为 23，对应 Web 的 `typing-word-setting` v23；TUI 不升级也不降级该版本号。
-- **同名字段**：上表 28 个有 UI 的设置字段与 Web 使用相同 camelCase 键名与数值语义（练习模式枚举 0~9，见上文）；Web 其余字段通过 `extra` 原样保留。
+- **同名字段**：上表「有 UI 且生效」的设置字段（设置页 28 项 + 高级 FSRS 页 4 项）与 Web 使用同名键名与数值语义（练习模式枚举 0~9，见上文；`fsrsParameters` 内部沿用 ts-fsrs 的 snake_case）；Web 其余字段通过 `extra` 原样保留。
 - **FSRS 参数**：`fsrsParameters` 与 ts-fsrs 的参数结构一致，两端可手工互相拷贝；TUI 的 FSRS-6 逐条移植自 ts-fsrs，黄金样本见 `tests/fsrs_parity.rs`。
 - **TUI 新增**：`tuiBigWord` 是 TUI 专属字段，Web 设置里没有对应项。
 - **不互通**：TUI 不读写浏览器 IndexedDB，设置不会自动双向同步；手工迁移见 [存档与数据格式](persistence.md)。
@@ -181,9 +232,10 @@
 | --- | --- | --- |
 | 改了设置本轮没变化 | 词库相关项只在下次生成任务时生效 | 正常；回主页或结算后继续即可 |
 | 设置页改了每日词数，`setting.json` 里找不到 | 每日词数是词典元数据 | 正常；它在 `dict.json` 的当前学习词典里 |
-| 想恢复默认设置 | 单项重置没有入口，全部重置有 | 设置页「其他 → 清除所有数据」（不可撤销）；只重置单项则退出后编辑 `setting.json` |
+| 想恢复默认设置 | 设置页没有单项重置，全部重置有；FSRS 参数可单独恢复 | 设置页「其他 → 清除所有数据」（不可撤销）；FSRS 参数走「FSRS → 高级 FSRS → 恢复默认」；其它单项退出后编辑 `setting.json` |
 | 手工改完设置，重启丢失 | 修改时程序仍在运行 | 退出程序 → 改文件 → 再启动 |
 | 启动提示设置损坏 | JSON 语法错误、类型不匹配或枚举值非法 | 修复或删除 `setting.json`；坏文件已隔离为 `*.corrupt-*.json` |
+| 想调 FSRS 参数 | 留存率 / 最大间隔 / fuzz / 短期调度 / 21 个权重已有界面入口，改完在下次结算时生效 | 设置页「FSRS → 高级 FSRS」逐项修改；`learning_steps` / `relearning_steps` 仍需退出后手改 `setting.json` |
 | 手工改了 FSRS 参数没效果 | 字段名拼错、`w` 不是 21 个，或程序运行中被覆盖 | 退出后修改；核对 snake_case 字段名与 `w` 长度 |
 | 设置版本过高，改动不保存 | 存档来自更新版本，本次运行只读 | 备份后升级程序；本次运行的设置不会写回 |
 

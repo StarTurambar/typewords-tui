@@ -101,7 +101,7 @@ src/ 共 66 个 Rust 文件，按目录分组：
 
 测试与辅助：
 
-- tests/：29 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
+- tests/：30 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
 - scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）、scripts/changelog.sh（从根目录 `CHANGELOG.md` 取某版本的发布说明，发布 workflow 与本地预览共用）。
@@ -373,9 +373,9 @@ FSRS（fsrs.rs + scheduler.rs）：
 ### 7.4 app
 
 - App 状态分组：启动装载（boot、store）、页面（screen、各光标）、焦点（focus、last_content_focus、viewport）、会话（session、typing、stat、identify_select）、随机源（rng、seed）、提示与弹层（toasts、quit、edit、confirm、summary）、显示开关（show_toolbar / show_panel / show_meta）、动作按钮（typing_button）、统计缓存（task_preview、today_*）、生命周期（fatal、last_activity、last_timer_tick、pending_practice_save）。
-- 设置页由 SETTING_ROWS 单一数据源驱动：32 行（30 配置 + 2 动作），7 个分区；SettingKind 决定提交行为（Mode 打开模式选择弹层、Theme 循环、Bool 切换、Number 打开输入弹层、Action 打开确认、Shortcuts 打开编辑页、AudioSource 切换）。
+- 设置页由 SETTING_ROWS 单一数据源驱动：33 行（31 配置 + 2 动作），7 个分区；SettingKind 决定提交行为（Mode 打开模式选择弹层、Theme 循环、Bool 切换、Number 打开输入弹层、Action 打开确认、Shortcuts 打开快捷键编辑页、AdvancedFsrs 打开高级 FSRS 页、AudioSource 切换）。高级 FSRS 页的行由 `AdvFsrsRow` 枚举，权重区间统一取 `domain::fsrs::weight_bounds`，修改经 `App::activate_adv_fsrs` / `apply_weight_text` 落盘。
 - 保存时机：会话开始 / 推进 / 错误 / 自测 -> 500 ms 防抖保存练习缓存；30 秒整点 -> 防抖保存；Ctrl+C -> 立即保存缓存 + 词典；结算 -> 保存词典并删除练习缓存；设置修改 -> 立即保存设置（每日词数是词典字段）；退出 / 事件循环结束 -> save_all；窗口缩放不保存。保存失败转 Error Toast，不 panic。
-- 清除所有数据：readonly 时拒绝；清缓存、恢复 BaseState / SettingState 默认、重新选学习词典、保存并刷新统计与任务；不可撤销。
+- 清除所有数据：readonly 时拒绝；清缓存、恢复 BaseState / SettingState 默认、重新选学习词典、保存并刷新统计与任务；不可撤销。高级 FSRS 页的「恢复默认」只覆盖 `fsrsParameters`（含 `learning_steps` / `relearning_steps`），不动其它设置与学习记录。
 - 细节：SETTING_ROWS 与 action.rs 是权威；按键语义见 usage.md / shortcuts.md。
 
 ### 7.5 ui
@@ -450,7 +450,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 | 代码区域 / 主题 | 权威文档 |
 | --- | --- |
 | 用户操作、CLI、界面、练习流程、排障 | [usage.md](usage.md) |
-| 设置页 32 行、FSRS 参数、透传字段 | [settings.md](settings.md) |
+| 设置页 33 行、高级 FSRS 页、FSRS 参数、透传字段 | [settings.md](settings.md) |
 | 42 个快捷键动作、改绑、TUI 专有键 | [shortcuts.md](shortcuts.md) |
 | 6 套主题、13 token、自定义主题格式 | [themes.md](themes.md) |
 | 5 份存档、资源 JSON、版本策略、Web 互通 | [persistence.md](persistence.md) |

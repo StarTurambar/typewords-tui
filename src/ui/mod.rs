@@ -3,6 +3,7 @@
 //! 分层：`theme`（颜色映射）/ `shell` 与各页面（纯布局 + 渲染）/
 //! `hit`（把布局命中转换成 Action）。渲染只读 App，不修改状态。
 
+pub mod adv_fsrs;
 pub mod articles;
 pub mod bigtext;
 pub mod dict_picker;
@@ -76,6 +77,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         Screen::Stats => stats::render(app, frame, area, &theme),
         Screen::Settings => settings::render(app, frame, area, &theme),
         Screen::Shortcuts => shortcuts::render(app, frame, area, &theme),
+        Screen::AdvFsrs => adv_fsrs::render(app, frame, area, &theme),
         Screen::Help => help::render(app, frame, area, &theme),
     }
 

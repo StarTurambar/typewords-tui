@@ -181,7 +181,7 @@
 
 每个设置项的含义、默认值与取值范围见 [设置项参考](settings.md)，这里只记存档层面：
 
-- 写入时机：设置页改值、快捷键改绑 / 清除 / 恢复默认、切换练习模式、切回内置流程等操作后立即 `App::save_settings_now`；离开设置页与快捷键页、确认退出时再保存一次（`save_all`）。`readonly_settings` 为真时全部跳过。
+- 写入时机：设置页改值、快捷键改绑 / 清除 / 恢复默认、高级 FSRS 页改参数 / 恢复默认、切换练习模式、切回内置流程等操作后立即 `App::save_settings_now`；离开设置页、快捷键页与高级 FSRS 页、确认退出时再保存一次（`save_all`）。`readonly_settings` 为真时全部跳过。
 - 枚举字段（`wordPracticeMode` / `wordPracticeType`）序列化为整型，未知数值解析失败会触发隔离。`waitTimeForChangeWord` / `spaceCooldownTime` 读取后夹在 0–10000 毫秒；`repeatCount == 100` 时取 `repeatCustomCount`。
 - `fsrsParameters` 用 snake_case 键（`request_retention`、`maximum_interval`、`w`、`enable_fuzz`、`enable_short_term`、`learning_steps`、`relearning_steps`），默认值由 `src/domain/constants.rs` 的 `default_fsrs_parameters` 给出；参数兜底统一在 `src/domain/fsrs.rs` 的 `Fsrs::new` 里做，手改坏参数不会让调度崩溃。
 - `extra` 透传由 `tests/store_roundtrip.rs` 的 `settings_roundtrip_preserves_unknown_fields` 固定；设置页的「每日词数」不在 `setting.json`，它改 `dict.json` 当前词典的 `perDayStudyNumber`（3.2）。

@@ -40,6 +40,10 @@ pub enum Action {
     SettingsMove(i32),
     SelectSetting(usize),
     ActivateSetting(usize),
+    // 高级 FSRS
+    AdvFsrsMove(i32),
+    AdvFsrsSelect(usize),
+    AdvFsrsActivate(usize),
     // 统计
     StatsScroll(i32),
     StatsToggleView,
@@ -196,6 +200,18 @@ impl App {
                     self.activate_setting(index);
                 }
             }
+            Action::AdvFsrsMove(delta) => self.move_adv_fsrs_cursor(delta),
+            Action::AdvFsrsSelect(index) => {
+                if index < super::AdvFsrsRow::ALL.len() {
+                    self.adv_fsrs_cursor = index;
+                }
+            }
+            Action::AdvFsrsActivate(index) => {
+                if index < super::AdvFsrsRow::ALL.len() {
+                    self.adv_fsrs_cursor = index;
+                    self.activate_adv_fsrs(index);
+                }
+            }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
             Action::StatsToggleView => self.toggle_stats_view(),
             Action::StatsDayMove(delta) => self.move_stats_day(delta),
@@ -302,6 +318,13 @@ impl App {
                         crate::app::EditTarget::Note | crate::app::EditTarget::DictName => {
                             !character.is_control() && edit.buffer.chars().count() < 200
                         }
+                        // 权重是浮点：允许数字与一个小数点（合法区间全部非负，
+                        // 因此不需要负号）。
+                        crate::app::EditTarget::Weight(_) => {
+                            (character.is_ascii_digit()
+                                || (character == '.' && !edit.buffer.contains('.')))
+                                && edit.buffer.len() < 12
+                        }
                         _ => character.is_ascii_digit() && edit.buffer.len() < 6,
                     };
                     if accepted {
@@ -359,6 +382,10 @@ impl App {
                 self.shortcut_cursor = 0;
                 self.shortcut_capturing = false;
             }
+            Screen::AdvFsrs => {
+                self.set_screen(Screen::AdvFsrs);
+                self.adv_fsrs_cursor = 0;
+            }
             Screen::WordTest => {
                 self.set_screen(Screen::WordTest);
             }
@@ -412,6 +439,10 @@ impl App {
                 self.navigate_to(Screen::Home);
             }
             Screen::Shortcuts => {
+                self.save_settings_now();
+                self.navigate_to(Screen::Settings);
+            }
+            Screen::AdvFsrs => {
                 self.save_settings_now();
                 self.navigate_to(Screen::Settings);
             }
@@ -502,6 +533,7 @@ impl App {
                     crate::domain::i18n::tr("clear_success"),
                 );
             }
+            ConfirmAction::ResetFsrs => self.reset_fsrs_parameters(),
         }
     }
 
@@ -518,6 +550,11 @@ impl App {
         }
         if edit.target == crate::app::EditTarget::Note {
             self.save_word_note(edit.buffer);
+            return;
+        }
+        // 权重是浮点、且要按与调度器同源的区间夹取，不走整数路径。
+        if let crate::app::EditTarget::Weight(index) = edit.target {
+            self.apply_weight_text(index, &edit.buffer);
             return;
         }
         let value = edit.buffer.parse::<i64>().unwrap_or_default();
@@ -584,6 +621,7 @@ impl App {
             Screen::DictPicker => self.move_dict_cursor(delta),
             Screen::Stats => self.scroll_stats(delta),
             Screen::Settings => self.move_settings_cursor(delta),
+            Screen::AdvFsrs => self.move_adv_fsrs_cursor(delta),
             Screen::Flows => self.move_flow_edit_cursor(delta),
             Screen::Words => self.move_words_cursor(delta),
             Screen::Shortcuts => self.move_shortcut_cursor(delta),
@@ -612,6 +650,7 @@ impl App {
         match self.screen {
             Screen::DictPicker => self.activate_dict(self.dict_cursor),
             Screen::Settings => self.activate_setting(self.settings_cursor),
+            Screen::AdvFsrs => self.activate_adv_fsrs(self.adv_fsrs_cursor),
             Screen::Flows => self.activate_flow(),
             Screen::Articles => self.select_article(),
             Screen::Words => self.edit_current_word(),
@@ -666,6 +705,11 @@ impl App {
                 let before = self.settings_cursor;
                 self.move_selection(if forward { 1 } else { -1 });
                 before != self.settings_cursor
+            }
+            (Screen::AdvFsrs, FocusDir::Up | FocusDir::Down) => {
+                let before = self.adv_fsrs_cursor;
+                self.move_selection(if forward { 1 } else { -1 });
+                before != self.adv_fsrs_cursor
             }
             (Screen::Words, FocusDir::Up | FocusDir::Down) => {
                 let before = self.words_cursor;
@@ -881,6 +925,10 @@ impl App {
             }
             super::SettingKind::Shortcuts => {
                 self.open_shortcuts();
+                return;
+            }
+            super::SettingKind::AdvancedFsrs => {
+                self.navigate_to(Screen::AdvFsrs);
                 return;
             }
             super::SettingKind::AudioSource => {
