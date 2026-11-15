@@ -2842,6 +2842,7 @@ impl App {
             return;
         };
         let path = self.boot.catalog.dict_write_file(&resource);
+        let word_count = dict.words.len();
         let text = match serde_json::to_string_pretty(&dict.words) {
             Ok(text) => text,
             Err(err) => {
@@ -2865,6 +2866,21 @@ impl App {
             );
             return;
         }
+        // 词数有两个落地位置：词条文件本身，以及用户词库目录里的登记
+        // 条目（`list/word.json` 的 `length`）。只写词条文件会让登记值
+        // 停在旧词数——推荐列表、`tw doctor` 在词库还没被打开过时读的
+        // 就是它。内置词库的资源文件只读、用户目录里也没有条目，这里
+        // 自然跳过，界面上由「词条优先」的口径兜底。
+        if let Err(err) = self
+            .boot
+            .catalog
+            .sync_user_catalog_length(&resource.id_string(), word_count)
+        {
+            self.toast(NoticeLevel::Warning, format!("词库目录词数未更新: {err}"));
+        }
+        // 存档里的 `length` 与笔记也一起落盘：重启后当前词典还没加载
+        // 词表时，界面读的就是这两个值。
+        self.save_dict_now();
         self.toast(NoticeLevel::Success, "词条已保存");
     }
 

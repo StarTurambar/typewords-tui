@@ -909,7 +909,14 @@ impl BaseState {
             let per_day = dict.per_day_study_number;
             let complete = dict.complete;
             existing.words = words;
-            existing.length = dict.length.max(existing.words.len());
+            // 词数跟着词表走：有词条时一律是词条数，登记值只在词表为空时
+            // 保留。用 `max` 会把目录里过期的登记值顶回来，界面（主页磁贴
+            // 读 `effective_length`、词库页读登记值）就会各显示一个数。
+            existing.length = if existing.words.is_empty() {
+                dict.length
+            } else {
+                existing.words.len()
+            };
             existing.last_learn_index = last_learn_index;
             existing.per_day_study_number = per_day;
             existing.complete = complete;
@@ -921,7 +928,9 @@ impl BaseState {
             self.word.study_index = index as i32;
         } else {
             let mut dict = dict;
-            dict.length = dict.length.max(dict.words.len());
+            if !dict.words.is_empty() {
+                dict.length = dict.words.len();
+            }
             self.word.book_list.push(dict);
             self.word.study_index = (self.word.book_list.len() - 1) as i32;
         }

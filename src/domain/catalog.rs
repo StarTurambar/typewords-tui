@@ -87,7 +87,11 @@ impl DictResource {
             },
             description: self.description.clone(),
             url: self.url.clone(),
-            length: if self.length > 0 {
+            // 词数是词条数据的派生量：拿到词表就以词条数为准，登记值只在
+            // 词表为空（空的自建词典、还没加载）时兜底。反过来的优先级会让
+            // 编辑 / 删除词条后登记值把 `length` 顶回原值，主页磁贴与词库页
+            // 从此各显示一个数。
+            length: if words.is_empty() {
                 self.length
             } else {
                 words.len()
@@ -247,6 +251,41 @@ impl Catalog {
         }
         let text = serde_json::to_string_pretty(value)?;
         crate::fs::write_atomic(&file, &text)
+    }
+
+    /// 把词条文件的真实词数写回用户词库目录里已登记的条目。
+    ///
+    /// 词条被编辑 / 删除后，`list/word.json` 的 `length` 是同一个「词数」的
+    /// 另一个来源；只改词条文件会让没打开过这本词库的界面（推荐列表、
+    /// `tw doctor`）继续显示旧值。内置词库的词条文件随发布包分发、目录里
+    /// 没有对应条目，这里自然跳过——它们的词数由「词条优先」的显示规则
+    /// 兜底。返回是否真的写了文件（没有条目、长度没变都不写）。
+    pub fn sync_user_catalog_length(&self, id: &str, length: usize) -> Result<bool> {
+        let mut entries = self.read_user_catalog()?;
+        let mut changed = false;
+        for entry in &mut entries {
+            let Ok(resource) = serde_json::from_value::<DictResource>(entry.clone()) else {
+                continue;
+            };
+            if !resource.matches_id(id) {
+                continue;
+            }
+            let current = entry
+                .get("length")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            if current == length as u64 {
+                continue;
+            }
+            if let Some(object) = entry.as_object_mut() {
+                object.insert("length".to_string(), serde_json::Value::from(length));
+                changed = true;
+            }
+        }
+        if changed {
+            self.write_user_catalog(&entries)?;
+        }
+        Ok(changed)
     }
 }
 

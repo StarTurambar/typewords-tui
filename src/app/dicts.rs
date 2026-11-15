@@ -9,6 +9,7 @@
 //! 内置词典的词条存在 `dict.json` 里（`system: true`），资源词库的词条按需
 //! 从词条文件加载；两者的「当前」「词数」「进度」口径因此在同一处收敛。
 
+use crate::domain::catalog::DictResource;
 use crate::domain::constants::system_dict_hint;
 use crate::domain::types::Dict;
 
@@ -38,8 +39,9 @@ pub struct DictEntry {
     pub description: String,
     pub category: String,
     pub tags: Vec<String>,
-    /// 词数：一律取实际词条数（已装载的词典用 `Dict::effective_length()`），
-    /// 只有从未装载过的资源词库才回退到目录登记的长度。
+    /// 词数：以词条数为准，只有存档里还没有这本词库的词条与 `length` 时
+    /// 才用目录登记值——登记值不会跟着用户的编辑回写，拿它当准星就会和
+    /// 主页磁贴各显示一个数。取值见 [`App::resource_word_count`]。
     pub length: usize,
     /// 学习进度百分比（内置词典平时不推进，界面不给它们画进度条）。
     pub percent: u32,
@@ -52,6 +54,48 @@ pub struct DictEntry {
 }
 
 impl App {
+    /// 存档里与资源词库对应的词典（按 id / enName 认）。
+    fn owned_dict(&self, resource: &DictResource) -> Option<&Dict> {
+        let id = resource.id_string();
+        self.boot
+            .base
+            .word
+            .book_list
+            .iter()
+            .find(|dict| dict.matches_id(&id) || dict.matches_id(&resource.en_name))
+    }
+
+    /// 一本词典的显示词数：词库页与主页词典磁贴共用这一个口径。
+    ///
+    /// 顺序是「已加载 / 已存档的词条数 → 存档里的 `length` → 目录登记值」
+    /// （前两级由 [`Dict::effective_length`] 负责）。登记值是发布时写下的
+    /// 名义词数：内置词库的资源文件只读，用户编辑词条后改不回去，所以只要
+    /// 存档里记得这本词库就以存档为准，只有两者都没有（还没打开过）时才
+    /// 回落到登记值。早期主页磁贴读 `effective_length`、词库页读登记值，
+    /// 编辑或删除词条后两处就会各显示一个数。
+    pub fn dict_word_count(&self, dict: &Dict) -> usize {
+        let known = dict.effective_length();
+        if known > 0 {
+            return known;
+        }
+        self.boot
+            .catalog
+            .find(&dict.id)
+            .or_else(|| self.boot.catalog.find(&dict.en_name))
+            .map(|resource| resource.length)
+            .unwrap_or(0)
+    }
+
+    /// 资源词库的词数：词库页与主页「推荐」列表共用这一个口径。
+    ///
+    /// 存档里已经有这本词库就用 [`App::dict_word_count`]（词条数为准），
+    /// 否则只能用目录登记值——那本词库还没被打开过，词条文件也还没读过。
+    pub fn resource_word_count(&self, resource: &DictResource) -> usize {
+        self.owned_dict(resource)
+            .map(|dict| self.dict_word_count(dict))
+            .unwrap_or(resource.length)
+    }
+
     /// 词库页的全部条目：内置词典在前，词库资源在后。
     pub fn dict_entries(&self) -> Vec<DictEntry> {
         let base = &self.boot.base;
@@ -84,11 +128,7 @@ impl App {
 
         for (index, resource) in self.boot.catalog.resources().iter().enumerate() {
             let id = resource.id_string();
-            let owned = base
-                .word
-                .book_list
-                .iter()
-                .find(|dict| dict.matches_id(&id) || dict.matches_id(&resource.en_name));
+            let owned = self.owned_dict(resource);
             // 资源词库按 id / enName 认「当前」：`select_dict` 用的是
             // `set_study_dict`，可能更新既有条目也可能追加，下标不保证稳定。
             let current = study
@@ -102,13 +142,11 @@ impl App {
                 description: resource.description.clone(),
                 category: resource.category.clone(),
                 tags: resource.tags.clone(),
-                // 已经装载过的词典按实际词条数显示：目录里的 `length` 只是
-                // 登记值，删过词 / 换过更短的词库文件后会大于真实词数；主页与
-                // `Dict::progress_percent` 都按实际词数算，两处必须同口径。
-                length: owned
-                    .map(Dict::effective_length)
-                    .filter(|length| *length > 0)
-                    .unwrap_or(resource.length),
+                // 词数走唯一口径 `resource_word_count`：已经装载过的词典按
+                // 实际词条数显示（目录里的 `length` 只是登记值，删过词 / 换过
+                // 更短的词库文件后会大于真实词数），主页磁贴、词库页与
+                // `Dict::progress_percent` 必须同口径。
+                length: self.resource_word_count(resource),
                 percent: owned.map(Dict::progress_percent).unwrap_or(0),
                 current,
                 system: false,

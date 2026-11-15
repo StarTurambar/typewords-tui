@@ -190,7 +190,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `id` | 词典身份；资源文件里的数字 id 会在读取时转成字符串（如 `1`） |
 | `enName` | 上游路由名；读取时也接受 `en_name` 别名，两者都可作为 `--dict` 的取值 |
 | `name` / `description` / `url` / `category` / `tags` / `language` / `translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
-| `length` | 目录登记词数。学完判定、进度与界面上的「N 词」一律按词表实际词数 `words.len()`（`Dict::effective_length`）；装载词表后 `Dict::normalize_progress` 会把 `length` 校准成实际词数（见 [domain.md](domain.md) 12.5） |
+| `length` | 词数缓存；有词表时一律等于 `words.len()`（`Dict::effective_length`）。`select_dict` 加载词表时会把目录登记值校准成实际词条数，随后 `Dict::normalize_progress` 把 `length` 校准成实际词数（见 [domain.md](domain.md) 12.5） |
 | `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值，随后按实际词数校正：`lastLearnIndex` 已到/越过实际词数时夹回并置 `complete = true`，同时丢弃旧的单词练习断点（见 [domain.md](domain.md) 12.5） |
 | `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
 | `articles` | 文章数组；TUI 原样透传、不读取 |
@@ -227,6 +227,7 @@ article.bookList 中 system == false 的词典                        → articl
 | 离开练习 | `Ctrl+C`（无结算时）、结算后「回主页」不写（已保存过） |
 | `Ctrl+Enter`（重学本组） | 重建会话后立即保存练习缓存（新会话） |
 | 词库页 `Enter` 切换词库（含内置词典）、词库页 `w` 打开词条页、主页/词库页 `+`/`-`、设置页「复习 → 每日词数」（`daily_words`，`PerDay`） | 修改当前词典元数据 / `studyIndex` 后立即保存（写 `dict.json`，不是 `setting.json`） |
+| 词条页编辑 / 删除 / 排序（`App::persist_words`） | 先重写词条文件、同步用户目录里的 `length`，再保存 `dict.json`（词数、笔记与当前词典元数据） |
 | 确认退出 / 事件循环结束 | `save_all` 保存；首次运行即使没进练习，也会在退出时生成 `dict.json` |
 
 练习过程中的收藏/错词/已掌握改动只改内存，靠上述时机落盘；中途崩溃最多丢掉这次会话的未保存改动（练习缓存另算）。FSRS 卡片与统计**只在结算时产生**，练习到一半退出不会写入评级。
@@ -467,12 +468,14 @@ function systemPractice() {
 | `enName` | 字符串 | 上游路由名，可用作 `--dict` 取值；也接受 `en_name` 别名 |
 | `name` / `description` | 字符串 | 展示名与简介 |
 | `url` | 字符串 | 词条文件名，拼接为 `dicts/<language>/word/<url>` |
-| `length` | 整数 | 词数；为 0 时加载后以实际词数为准 |
+| `length` | 整数 | 名义词数；加载词表后以实际词条数为准，见本节末段 |
 | `category` / `tags` / `language` / `translateLanguage` | 字符串 / 数组 | 展示与语言元数据；`language` 为空时按 `en` |
 | `type` | 字符串，可选 | 只处理 `"word"` 或缺省的项，其它类型（如 article）被过滤 |
 | `version` / `cover` / 其它 | — | 不参与 TUI 逻辑；未知字段被忽略 |
 
 内置文件当前只有一本：`id = 1`、`enName = "cet4"`、`url = "CET4_T.json"`、`length = 2607`。
+
+`length` 只是名义词数：用户在词条页编辑 / 删除 / 排序后，`App::persist_words` 除了重写词条文件，还会调用 `Catalog::sync_user_catalog_length` 把**用户目录**里同 id 条目的 `length` 改成真实词条数（内置资源目录只读，一个字节都不改）。界面上的词数一律以词条为准：已拥有的词库不看登记值（`App::dict_word_count` / `App::resource_word_count`），登记值只用于从没打开过、词条文件还没读过的词库。
 
 ### 6.2 `<assets>/dicts/en/word/*.json`（`Word`）
 

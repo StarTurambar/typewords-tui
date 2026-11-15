@@ -205,7 +205,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `en_name` | 也可作为路由/切换参数；反序列化兼容 `en_name` |
 | `name`、`description`、`category`、`tags`、`cover?` | 展示元数据 |
 | `url` | 词条文件名，相对 `dicts/<language>/word/` |
-| `length` | 目录登记词数；`to_dict` 在缺省时回退实际词数。它只是登记值：学完判定与进度一律按词表实际词数（`Dict::effective_length`），装载词表后 `normalize_progress` 会把 `length` 校准成实际词数 |
+| `length` | 目录登记词数（只是「词条数」的缓存）。`DictResource::to_dict` 以词条数为准，只有词表为空时才回退登记值；学完判定与进度一律按词表实际词数（`Dict::effective_length`），装载词表后 `normalize_progress` 会把 `length` 校准成实际词数 |
 | `language`、`translate_language` | 缺省语言为 `"en"` |
 | `type` / `kind` | 只有 `word`（或缺省）会被收录 |
 | `version` | 词库资源版本，TUI 不做升级处理 |
@@ -220,7 +220,10 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `user_dict_file(name)` | `home/dicts/en/word/<name>` |
 | `read_user_catalog()` | 读 `home/list/word.json`；不存在返回空数组 |
 | `write_user_catalog(value)` | 以 pretty JSON 原子写入用户目录 |
-| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 缺省用实际词数、`custom` 取自目录项的 `custom` 标记；装载词表后由 `Bootstrapped::select_dict` 的进度校正把 `length` 校准成实际词数（见 12.5） |
+| `sync_user_catalog_length(id, length)` | 把真实词条数写回用户目录里同 id 条目的 `length`；没有条目、长度没变都不写文件（内置资源目录只读，不会被改写） |
+| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 以词条数为准（词表为空时用登记值）、`custom` 取自目录项的 `custom` 标记；装载词表后由 `Bootstrapped::select_dict` 的进度校正把 `length` 校准成实际词数（见 12.5） |
+
+**词数的唯一口径**：`Dict.length` 与资源目录里的 `length` 都只是「词条数」的缓存。`DictResource::to_dict` 与 `BaseState::set_study_dict` 一律用非空词表把 `length` 校准成 `words.len()`（登记值只在词表为空时保留）；装载后 `Dict::normalize_progress` 再把越过实际词数的进度夹回并补完成态（见 12.5）。显示层用 `App::dict_word_count`（主页磁贴、词库页行与详情面板）与 `App::resource_word_count`（推荐列表）取值——已拥有（当前加载或存档里记过）的词库以词条数为准，登记值只在从没打开过这本词库时兜底。早期词库页直接读登记值、主页磁贴读 `effective_length`，编辑或删除词条后两处就会各显示一个数。
 
 `import_dict(paths, source)` 的完整行为：
 
