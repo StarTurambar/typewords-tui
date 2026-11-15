@@ -50,7 +50,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 词库资源 | `public/list/word.json` + `public/dicts/<lang>/word/*.json`（另有 article 目录） | 同布局的 `assets/`（当前仅 CET-4），可 `--assets` 替换、`tw import-dict` 扩展 |
 | 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 4 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 / 1 |
 | 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 默认无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测；「有道发音」可选，用系统 `curl` 下载 mp3 |
-| 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 24 个集成测试文件 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
+| 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 27 个集成测试文件 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
 | 分发 | 静态站 + Tauri NSIS 安装包 | GitHub Release 的 Windows zip（`tw.exe`、`assets/`、`docs/`、README、LICENSE、SHA256） |
 | 许可证 | GPL-3.0（上游仓库内含 LICENSE，词库数据同许可证） | GPL-3.0（见仓库 LICENSE，词库数据沿用上游许可证） |
 

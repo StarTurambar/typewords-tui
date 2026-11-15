@@ -84,7 +84,7 @@ docs/                   本文档目录
 .github/workflows/      ci.yml（fmt/clippy/test）、release.yml（tag v* 发版）
 ```
 
-规模参考：`src/` 64 个 Rust 文件、约 2.6 万行；集成测试约 1 万行；内置词库总大小约 4.5 MB。
+规模参考：`src/` 64 个 Rust 文件、约 2.6 万行；集成测试约 1.1 万行；内置词库总大小约 4.5 MB。
 
 ## 5. 进程生命周期
 
