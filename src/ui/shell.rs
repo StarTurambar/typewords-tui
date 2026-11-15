@@ -561,9 +561,13 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("ctrl+p", "发音"),
             ("esc", "退出"),
         ],
+        // 文章页是「书本 / 文章」两栏，但方向键不按栏分工：↑/↓ 移动当前栏的
+        // 光标，←/→ 在书本栏与文章栏之间切换（`App::move_selection` /
+        // `App::switch_selection_pane`）。底栏一度写成「↑↓ 选书本 / ←→ 选文章」，
+        // 与实际键位相反。
         Screen::Articles => &[
-            ("↑↓", "选书本"),
-            ("←→", "选文章"),
+            ("↑↓", "选择"),
+            ("←→", "换栏"),
             ("enter", "开始/继续"),
             ("esc", "返回"),
         ],
