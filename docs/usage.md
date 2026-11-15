@@ -4,7 +4,7 @@ typewords-tui 是 TypeWords 的终端客户端：在终端里选词库、按 FSR
 
 ## 环境要求与终端兼容性
 
-发布包为 Windows `x86_64-pc-windows-msvc`，源码可在 Linux / macOS 构建（CI 覆盖 Ubuntu 与 Windows）；构建需 Rust 1.90+ stable（edition 2024）与 Windows 上的 MSVC 工具链，运行期不需要 Node.js / WebView，默认离线，唯一联网点是主动把「发音来源」切到「有道发音」后下载 mp3。
+官方发布包覆盖 Windows x86_64（`x86_64-pc-windows-msvc`）、Linux x86_64（`x86_64-unknown-linux-gnu` 与静态链接的 `x86_64-unknown-linux-musl`）、macOS Apple Silicon（`aarch64-apple-darwin`）与 Intel（`x86_64-apple-darwin`），下载、解压与校验见下面「安装与升级 → 下载发布包」。源码同样可在这些平台构建（CI 覆盖 Ubuntu 与 Windows）：构建需 Rust 1.90+ stable（edition 2024），Windows 另需 MSVC 工具链；运行期不需要 Node.js / WebView，默认离线，唯一联网点是主动把「发音来源」切到「有道发音」后下载 mp3。
 
 终端最小 60 × 20；主题按 24-bit RGB 输出（建议 `COLORTERM=truecolor`，低色彩终端用「高对比」）；字体需等宽且支持中文与制表符，Windows 推荐 Windows Terminal；鼠标需终端上报事件，不支持时仍可纯键盘操作。组合键在部分终端或输入法下会被吞掉：常见的是 `Alt+数字`、`Ctrl+方向键`、`Ctrl+Enter`，有的终端还把 `Ctrl+I` / `Ctrl+J` / `Ctrl+M` 与 Tab / 换行 / Enter 视为同一字节，替代方式见「按键参考」；程序正常退出会恢复终端，进程被强制结束时终端可能停在备用屏幕或鼠标捕获状态，重开一个终端即可。
 
@@ -12,7 +12,45 @@ typewords-tui 是 TypeWords 的终端客户端：在终端里选词库、按 FSR
 
 ### 下载发布包
 
-从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.zip` 与同名 `.sha256`，解压后得到 `tw.exe`、`assets/`（只读资源：`list/word.json` 与 `dicts/`，内置 CET-4）、`docs/`、`README.md` 与 `LICENSE`。在终端里运行 `tw.exe` 即可，程序自动使用同级的 `assets/`（必须与 exe 同级，否则用 `--assets` 指定）。先校验哈希再运行：PowerShell 执行 `Get-FileHash .\<zip> -Algorithm SHA256`，与 `.sha256` 文件里的 `<sha256>  <zip 文件名>` 对照。
+从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载对应平台的归档与同名 `.sha256`：
+
+| 平台 | 归档名 | 解压后可执行文件 |
+| --- | --- | --- |
+| Windows x86_64（Windows 10+，系统自带 tar 可解压） | `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz` | `tw.exe` |
+| Linux x86_64（glibc，在 Ubuntu 22.04 上构建） | `typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` | `tw` |
+| Linux x86_64（musl 静态，不依赖系统 glibc，任意发行版 / 容器可用） | `typewords-tui-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` | `tw` |
+| macOS Apple Silicon（macOS 11+） | `typewords-tui-vX.Y.Z-aarch64-apple-darwin.tar.gz` | `tw` |
+| macOS Intel（macOS 11+） | `typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz` | `tw` |
+
+解压后得到 `typewords-tui-vX.Y.Z-<target>/` 目录，内含可执行文件、`assets/`（只读资源：`list/word.json` 与 `dicts/`，内置 CET-4）、`docs/`、`README.md` 与 `LICENSE`；程序自动使用同级的 `assets/`（必须与可执行文件同级，否则用 `--assets` 指定）。每个归档旁的 `.sha256` 内容为 `<sha256>  <归档名>`，Release 另附聚合文件 `SHA256SUMS`（`sha256sum -c SHA256SUMS` 可一次校验全部归档）；Windows 把 `Get-FileHash` 的输出与 `.sha256` 里的值对照（输出为大写，比较时忽略大小写）。先校验哈希再运行：
+
+Windows（PowerShell）：
+
+```powershell
+Get-FileHash .\typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz -Algorithm SHA256
+tar -xzf typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz
+.\typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc\tw.exe doctor
+```
+
+Linux：
+
+```bash
+sha256sum -c typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+./typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu/tw doctor
+```
+
+macOS：
+
+```bash
+shasum -a 256 -c typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz.sha256
+tar -xzf typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz
+./typewords-tui-vX.Y.Z-x86_64-apple-darwin/tw doctor
+```
+
+- **glibc 太旧**：`x86_64-unknown-linux-gnu` 在 Ubuntu 22.04 上构建（glibc 2.35 基线）；发行版比它更老（运行报 `GLIBC_2.3x not found`）或使用精简容器时，改用静态链接的 `x86_64-unknown-linux-musl` 包，把归档名换掉即可，校验与解压命令相同。
+- **macOS Gatekeeper**：发布包未签名，从浏览器下载的二进制可能带隔离属性，首次运行提示「无法验证开发者」或「已损坏」时，先按上面的 `shasum` 校验哈希，再执行 `xattr -d com.apple.quarantine ./tw`。
+- 解压后提示没有执行权限时执行 `chmod +x tw`。
 
 ### 从源码构建
 
@@ -21,9 +59,10 @@ git clone https://github.com/StarTurambar/typewords-tui.git && cd typewords-tui
 cargo run --locked                    # 开发运行，自动使用仓库内 assets/
 cargo build --release --locked        # 产物 target/release/tw（Windows 为 tw.exe）
 pwsh -File scripts/package.ps1        # 本地打 Windows 发布包，产物在 dist/
+bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.gz 包，产物在 dist/
 ```
 
-`--locked` 按仓库提交的 `Cargo.lock` 锁定依赖；直接运行 `target/release/tw.exe` 时仍需把 `assets/` 放在 exe 同级，或用 `--assets` / `TYPEWORDS_ASSETS` 指定。构建、测试与发布流程见 [开发指南](development.md)。
+`--locked` 按仓库提交的 `Cargo.lock` 锁定依赖；`pwsh -File scripts/package.ps1` 用于 Windows、`bash scripts/package.sh` 用于 Linux / macOS，两者都产出 `dist/<归档名>.tar.gz` 与同名 `.sha256`。直接运行 `target/release/tw`（Windows 为 `tw.exe`）时仍需把 `assets/` 放在可执行文件同级，或用 `--assets` / `TYPEWORDS_ASSETS` 指定。构建、测试与发布流程见 [开发指南](development.md)。
 
 ### 首次启动与数据目录
 
@@ -37,7 +76,7 @@ pwsh -File scripts/package.ps1        # 本地打 Windows 发布包，产物在 
 
 ### 升级与版本兼容
 
-升级 = 用新版本替换 `tw.exe` 与 `assets/`，保留数据目录；新增字段都带默认值，旧存档可读。版本高于程序支持的 `dict.json` / `setting.json` 本次运行只读、不覆盖原文件；练习缓存版本不符时忽略（不移动文件）。升级前建议备份数据目录，版本策略与迁移细节见 [存档与数据格式](persistence.md)。
+升级 = 用新版本的发布包替换可执行文件（Windows 为 `tw.exe`，Linux / macOS 为 `tw`）与 `assets/`，保留数据目录；新增字段都带默认值，旧存档可读。版本高于程序支持的 `dict.json` / `setting.json` 本次运行只读、不覆盖原文件；练习缓存版本不符时忽略（不移动文件）。升级前建议备份数据目录，版本策略与迁移细节见 [存档与数据格式](persistence.md)。
 
 ## 命令行参考
 
@@ -313,7 +352,7 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 
 | 现象 | 可能原因 | 处理 |
 | --- | --- | --- |
-| 启动报「找不到词库资源目录」 | `assets/` 不在 exe 同级或当前目录，`--assets` 指向的目录没有 `list/word.json` | 把 `assets/` 放到 `tw.exe` 同级，或用 `--assets` 指向包含 `list/word.json` 的目录 |
+| 启动报「找不到词库资源目录」 | `assets/` 不在可执行文件同级或当前目录，`--assets` 指向的目录没有 `list/word.json` | 把 `assets/` 放到可执行文件同级（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），或用 `--assets` 指向包含 `list/word.json` 的目录 |
 | 启动报「加载词库失败」 | 存档里的当前词库在资源目录中找不到，或词条文件缺失 | `tw doctor` 看每本词库的「文件」路径；用 `--dict` 指定存在的词库 |
 | 启动提示「另一个实例正在使用该数据目录」 | 同一个 `--home` 已经有 tw 在运行（TUI、`tw task` 或导入命令） | 退出那个进程；或换一个 `--home`（`tw doctor` / `tw export-web` 只读，本来就允许同时运行） |
 | 启动无反应 / 一直黑屏 | 终端小于 60 × 20 只显示提示；或进程还在装载大词库 | 放大窗口；等待首帧；`Ctrl+C` 退出后重试 |
@@ -327,13 +366,16 @@ tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict
 | 练习 / 单词测试没有发音，或安全软件弹「隐藏执行 PowerShell」 | 「单词发音」被关掉；系统 TTS 不可用（Windows 上通过 PowerShell 调 `System.Speech`，安全软件的「系统加固」会拦脚本引擎） | 确认设置页「音频 → 单词发音」开启，按 `Ctrl+P` 手动重播以区分「自动朗读没触发」与「TTS 无声」；关掉「文章朗读」或对 `tw.exe` 放行一次并记住 |
 | 每日词数调不动 | 已到 1 ~ 当前词库词数的边界，或当前词库未加载 | 词库页先「设为当前」；用设置页「复习 → 每日词数」直接输入（保存时按范围夹取） |
 | 学习记录 / 统计清不掉 | 「清空当前练习进度」与 `--reset-practice` 只清断点缓存，不碰 `dict.json` | 用设置页「其他 → 清除所有数据」（不可撤销） |
+| macOS 打开被拦（提示「无法验证开发者」或「已损坏」） | 发布包未签名，从浏览器下载的二进制带 quarantine 隔离属性 | 先按「下载发布包」校验 sha256，再执行 `xattr -d com.apple.quarantine ./tw` |
+| Linux 运行报 `GLIBC_2.3x not found` | 发行版 glibc 比构建基线（Ubuntu 22.04）旧，`x86_64-unknown-linux-gnu` 包跑不起来 | 改用 `x86_64-unknown-linux-musl` 静态包，不依赖系统 glibc |
+| 解压后没有执行权限（Permission denied） | 解压工具没保留可执行位，或手动复制过二进制 | 执行 `chmod +x tw` 后再运行 |
 
 ### FAQ
 
 - **和 Web 版 TypeWords 是什么关系？** 独立的终端客户端：共享词库资源格式与存档字段命名，不共享代码，也不读写浏览器 IndexedDB；功能差异见 [与上游对照](upstream-parity.md)。
 - **会联网吗？** 默认不会——没有网络请求、遥测与账号，数据全部在本地。唯一例外是设置里把「发音来源」切到「有道发音」后，发音会联网下载 mp3；关掉即恢复完全离线。
 - **能改快捷键吗？** 可以。设置 →「快捷键」，42 个动作都可改绑（`Enter` 改绑、`Delete` 清除、`r` / `R` 恢复默认），保存于 `setting.json` 的 `shortcutKeyMap`；完整动作表见 [快捷键](shortcuts.md)。
-- **支持 Linux / macOS 吗？** 源码跨平台（CI 覆盖 Ubuntu 与 Windows），发布包只有 Windows；其他平台可从源码构建，并自备 `assets/`。
+- **支持 Linux / macOS 吗？** 支持。官方发布包覆盖 Windows x86_64、Linux x86_64（glibc 与 musl 静态）与 macOS Apple Silicon / Intel，仍可从源码构建；平台与归档名对照见「安装与升级 → 下载发布包」。
 - **存档在哪 / 能否多设备同步？** 数据在本地数据目录，没有云同步与账号；多设备只能手工复制数据目录（见「数据与备份」）。报 issue 时请附版本、`tw doctor` 输出与复现步骤，见下节。
 
 ## 反馈与贡献

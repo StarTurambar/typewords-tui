@@ -11,7 +11,7 @@
 | 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 64 个 Rust 文件、约 2.8 万行，12 个屏幕 + 7 类弹层 |
 | 产物与环境 | `nuxt generate` 静态站；桌面端是 Tauri 安装包（WebView2 载入同一份前端），运行在浏览器或桌面窗口 | 单个 `tw` 二进制 + 只读 `assets/`，运行在终端（最小 60 × 20），无 WebView、无 Node 运行时 |
 | 数据与网络 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1)；在线查词、百度翻译、有道发音、Supabase 同步、umami 埋点 | 数据目录 5 份 JSON：`dict.json`(4)、`setting.json`(23)、`practice-word.json`(2)、`practice-article.json`(1)、`flows.json`（无版本）；默认离线，唯一联网能力是可选的有道发音（系统 `curl` 下载 mp3，外部播放器播放） |
-| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 27 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 的 Windows zip（exe + assets + docs + LICENSE + SHA256） |
+| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 27 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
 
 ### 1.2 对照基线
 
@@ -171,7 +171,7 @@ Web 备份 data.json                        TUI 数据目录
 | 终端交互：鼠标与键盘焦点导航 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs`、`src/ui/focus.rs`、`src/app/focus.rs` | 侧栏 / 按钮 / 列表点击与滚轮，练习页与跟打页可点底部动作按钮，鼠标捕获后需 `Shift+拖拽` 复制；套外壳的页面共用两栏焦点（宽屏侧栏竖向 / 窄屏顶栏横向，`Tab` 换栏，内容区按视觉行分带），进入页面默认选中内容区、底栏显示「选中 X」。上游只有鼠标 / 触屏 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；小于 60 × 20 只渲染提示 |
 | 点阵大字 | `src/ui/bigtext.rs`、`src/ui/practice.rs` | 5×7 点阵字体，空间足够时按本轮最长单词整体放大 2 倍；非 ASCII 回退普通文本 |
-| 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`；Windows zip 含 exe + assets + docs + LICENSE + SHA256，没有 Node 与 WebView 运行时 |
+| 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`scripts/package.sh`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw import-web` / `tw export-web`；发布包为 tar.gz（可执行文件 + assets + docs + LICENSE + sha256），没有 Node 与 WebView 运行时 |
 | 可复现界面 | `examples/shot.rs`、`examples/dump.rs`、`tools/render-snapshot.py` | 页面渲染成 JSON / 文本，用于截图与视觉回归，见 [开发指南 · 截图与视觉检查](development.md#6-截图与视觉检查) |
 
 ## 6. 仍未对齐与不可对等

@@ -33,7 +33,37 @@
 
 ### 下载发布包（推荐）
 
-从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载 `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.zip`，解压后包含 `tw.exe`、`assets/`（词库与文章资源，必须与 exe 同级）、`docs/`、`README.md` 与 `LICENSE`。在终端里运行 `tw.exe` 即可；建议先运行 `tw.exe doctor` 确认路径与词库。
+从 [Releases](https://github.com/StarTurambar/typewords-tui/releases) 下载对应平台的 `typewords-tui-vX.Y.Z-<target>.tar.gz`，解压后得到一个同名顶层目录，内含可执行文件（Windows 为 `tw.exe`，Linux / macOS 为 `tw`）、`assets/`（词库与文章资源，必须与可执行文件同级）、`docs/`、`README.md` 与 `LICENSE`。
+
+| 平台 | 归档名 | 解压后可执行文件 |
+| --- | --- | --- |
+| Windows x86_64（Windows 10+，系统自带 tar 可解压） | `typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz` | `tw.exe` |
+| Linux x86_64（glibc，在 Ubuntu 22.04 上构建） | `typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` | `tw` |
+| Linux x86_64（musl 静态，不依赖系统 glibc，任意发行版 / 容器可用） | `typewords-tui-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` | `tw` |
+| macOS Apple Silicon（macOS 11+） | `typewords-tui-vX.Y.Z-aarch64-apple-darwin.tar.gz` | `tw` |
+| macOS Intel（macOS 11+） | `typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz` | `tw` |
+
+每个归档旁都有同名 `.sha256` 校验文件（内容为 `<sha256>  <归档名>`），Release 另附聚合文件 `SHA256SUMS`，一次列出全部归档。下载后先校验、再解压运行，归档与校验文件需放在同一目录：Linux / macOS 用 `sha256sum -c` / `shasum -a 256 -c` 读取 `.sha256` 里的归档名自行比对；Windows 用 `Get-FileHash` 的输出与 `.sha256` 里的值对照（输出为大写，比较时忽略大小写）。
+
+Windows（PowerShell）：
+
+    Get-FileHash .\typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz -Algorithm SHA256
+    tar -xzf typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc.tar.gz
+    .\typewords-tui-vX.Y.Z-x86_64-pc-windows-msvc\tw.exe doctor
+
+Linux：
+
+    sha256sum -c typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz.sha256
+    tar -xzf typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+    ./typewords-tui-vX.Y.Z-x86_64-unknown-linux-gnu/tw doctor
+
+macOS：
+
+    shasum -a 256 -c typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz.sha256
+    tar -xzf typewords-tui-vX.Y.Z-x86_64-apple-darwin.tar.gz
+    ./typewords-tui-vX.Y.Z-x86_64-apple-darwin/tw doctor
+
+musl 静态包把归档名换成 `typewords-tui-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz`，校验与解压命令相同。建议先运行 `doctor` 确认路径与词库，再进入界面。
 
 ### 从源码构建
 
@@ -50,7 +80,7 @@
     tw          # 进入界面：Enter 开始学习，f 自由练习，? 查看帮助
     tw task     # 只预览今日任务，不进入界面
 
-终端建议使用 **Windows Terminal**；最小尺寸 60 × 20；深色 / 浅色主题需要真彩色终端（不支持时可换「高对比」主题）。终端兼容性、组合键问题与鼠标说明见 [使用手册](docs/usage.md)。
+Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的终端；最小尺寸 60 × 20；深色 / 浅色主题需要真彩色终端（不支持时可换「高对比」主题）。终端兼容性、组合键问题与鼠标说明见 [使用手册](docs/usage.md)。
 
 ## 常用命令
 

@@ -88,7 +88,7 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 ## 上游与资源
 
 - 上游 `zyronon/TypeWords` 的本地解包快照可能位于 `target/upstream/`（被 `.gitignore` 忽略，全新克隆没有），做功能对齐时可参考其 `app/**`；`docs/upstream-parity.md` 记录了对照基线与「已对齐 / 部分 / 行为不同 / 缺失 / TUI 独有」的判定结论，结论只以源码为准。
-- `assets/` 是运行期只读资源：`list/word.json`（词库目录）+ `dicts/en/word/*.json`（内置 CET-4，2607 词，约 4.5 MB）+ `list/article.json` + `dicts/en/article/*.json`（《新概念英语1》，5 篇）。发布包中 `assets/` 必须与 `tw.exe` 同级，否则用 `--assets` 指定。
+- `assets/` 是运行期只读资源：`list/word.json`（词库目录）+ `dicts/en/word/*.json`（内置 CET-4，2607 词，约 4.5 MB）+ `list/article.json` + `dicts/en/article/*.json`（《新概念英语1》，5 篇）。发布包中 `assets/` 必须与可执行文件同级（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），否则用 `--assets` 指定。
 - 新增词库无需改代码：把 JSON 放进 `assets/dicts/en/word/` 并登记 `assets/list/word.json`，或走 `tw import-dict`（写入用户数据目录）。
 
 ## 约定
@@ -97,4 +97,4 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 - 错误处理：跨层边界用 `anyhow::Result`；启动期不可恢复错误在进入终端前 `bail!`，运行期可恢复错误转 Toast；不用 panic 作控制流。
 - clippy 全目标 `-D warnings`，不要用 `#[allow(...)]` 掩盖可修问题。
 - 保持 TUI 轻量：新增依赖前先确认必要性（不引入 HTTP 客户端或音频库；TTS / 播放器走系统命令），并一并更新 `Cargo.lock`。
-- 发布：改 `Cargo.toml` 的 `version` → 推送 `vX.Y.Z` tag 触发 Windows 发布包（`tw.exe` + `assets/` + `docs/` + README + LICENSE + sha256）。
+- 发布：改 `Cargo.toml` 的 `version` → 推送 `vX.Y.Z` tag 触发五平台矩阵发布（Windows x86_64、Linux x86_64 gnu / musl、macOS Apple Silicon / Intel）；每个目标产出 `typewords-tui-vX.Y.Z-<target>.tar.gz`（可执行文件 + `assets/` + `docs/` + README + LICENSE）与同名 `.sha256`，Release 另附聚合 `SHA256SUMS`，旧的 `.zip` 不再产出。

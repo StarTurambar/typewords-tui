@@ -7,7 +7,7 @@
 | 项 | 要求 |
 | --- | --- |
 | Rust | **1.90+ stable**（`Cargo.toml` 的 `rust-version`），edition 2024 |
-| 平台 | Windows 为首要目标（`x86_64-pc-windows-msvc`），MSVC 工具链可直接 `cargo build`；Linux / macOS 源码可用，CI 覆盖 Ubuntu 与 Windows |
+| 平台 | 发布覆盖 Windows x86_64、Linux x86_64（gnu + musl）、macOS arm64 与 x86_64；CI 测试矩阵仍为 Ubuntu + Windows |
 | 终端 | Windows Terminal 推荐；最小 60 × 20；真彩色终端体验更好 |
 | Node.js / Python | 仅维护者用：`scripts/sync-assets.mjs` 与 `tools/fsrs_golden.mjs` 需 Node，截图渲染需 Python + Pillow。构建、运行、`cargo test` 都不需要 |
 
@@ -180,8 +180,8 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain                
 ## 8. CI 与发布
 
 - **持续集成**（`.github/workflows/ci.yml`）：push 到 `main` 与任意 pull request 触发，旧任务自动取消；`fmt`（`cargo fmt --all --check`）、`clippy`（`--all-targets --locked -- -D warnings`）、`test`（Ubuntu + Windows 矩阵，`cargo test --locked`）三个任务，依赖用 `Swatinem/rust-cache` 缓存。提交前本机至少跑这三条。
-- **发布**（`.github/workflows/release.yml`）：推送 `v*` tag 触发 Windows 任务——`cargo build --release --locked` → 组装 `tw.exe` + `assets/` + `docs/` + `README.md` + `LICENSE` → `Compress-Archive` → 生成 `.sha256` → `gh release create`。发布说明优先读 `.github/release-notes/<tag>.md`，没有则退回 `--generate-notes`。本地复现同一产物用 `pwsh -File scripts/package.ps1`。
-- **发版清单**：① 改 `Cargo.toml` 的 `version`（包名与 `tw --version` 都取这里）并同步 [docs/README.md](README.md) 唯一的那行「对应版本」；② 重新生成 `docs/screenshots/`（侧栏与底栏显示版本号，见第 6 节）；③ fmt / clippy / test 全绿、`tests/docs.rs` 通过；④ 解压产物到空目录，跑 `tw.exe doctor` 与一次「开始练习 → 退出」冒烟，确认 `tw --version`、zip 名、sha256 一致。
+- **发布**（`.github/workflows/release.yml`）：推送 `v*` tag 触发，`package` 任务用 matrix 覆盖 5 个目标——`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`x86_64-unknown-linux-musl`、`aarch64-apple-darwin`、`x86_64-apple-darwin`，每个目标在自己的 `runs-on` 上构建（Windows、Ubuntu、macOS；gnu 目标在 Ubuntu 22.04 上构建，构建基线即 glibc 2.35，更老的发行版建议改用 musl 静态包）。musl 目标需先装 `musl-tools` 并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc`；构建后统一用 `tar -czf` 打成 `typewords-tui-vX.Y.Z-<target>.tar.gz`（内含可执行文件 + `assets/` + `docs/` + `README.md` + `LICENSE`），并为每个归档生成 `<归档名>.sha256`；随后把归档解压出来跑一次 `tw --version` 与 `tw doctor` 冒烟（顺带验证 `assets/` 与可执行文件同级；`x86_64-apple-darwin` 在 arm64 runner 上运行需要 Rosetta，跳过）。各个构建任务只 `upload-artifact`；独立的 `release` 任务先核对 `tag` 与 `Cargo.toml` 的版本一致，下载全部 artifact 后断言「归档数 = matrix 条目数」并逐个核对 `.sha256`，再生成聚合 `SHA256SUMS`（`sha256sum -c` 自检），最后用 `gh release create` 一次发布。**不能每个构建任务各自 create release**：多个任务会并发竞争同一个 release（重复创建或互相覆盖上传），而聚合 `SHA256SUMS` 只有在全部归档到齐后才能生成，只能由汇总任务统一产出。发布说明优先读 `.github/release-notes/<tag>.md`，没有则退回 `--generate-notes`。本地打一份同名同结构的包用于冒烟：`pwsh -File scripts/package.ps1 -Target <target>`（Windows）或 `bash scripts/package.sh --target <target>`（Linux / macOS），产物在 `dist/`（另支持 `-SkipBuild` / `--skip-build` 复用已编译产物）；tar 会记录 mtime，本地 sha256 与 CI 产物不同，只用于核对命名与包内布局。
+- **发版清单**：① 改 `Cargo.toml` 的 `version`（包名与 `tw --version` 都取这里）并同步 [docs/README.md](README.md) 唯一的那行「对应版本」；② 重新生成 `docs/screenshots/`（侧栏与底栏显示版本号，见第 6 节）；③ fmt / clippy / test 全绿、`tests/docs.rs` 通过；④ 解压产物到空目录（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），跑 `doctor` 与一次「开始练习 → 退出」冒烟，确认 `tw --version`、tar.gz 名与 sha256、`SHA256SUMS` 一致；本机可用 `pwsh -File scripts/package.ps1` 或 `bash scripts/package.sh` 打同名同结构的包核对命名与布局（`dist/` 下 `<归档名>.tar.gz` 与同名 `.sha256`；tar 会记录 mtime，本地 sha256 与 CI 不同）。
 
 ## 9. 代码风格与约定
 

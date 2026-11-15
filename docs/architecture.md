@@ -99,9 +99,9 @@ src/ 共 64 个 Rust 文件，按目录分组：
 - tests/：27 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
-- scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1（本地打包）。
+- scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）。
 - assets/：list/word.json、list/article.json、dicts/en/word/CET4_T.json（2607 词）、dicts/en/article/NCE_1.json（5 篇）。
-- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（tag 触发 Windows 发布包）。
+- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（tag 触发五平台 tar.gz 发布：Windows x86_64、Linux x86_64 gnu + musl、macOS arm64 与 x86_64）。
 
 ## 5. 进程生命周期
 
