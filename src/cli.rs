@@ -1,5 +1,6 @@
 //! 命令行入口：参数、doctor、task 预览、import-dict。
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -79,51 +80,71 @@ pub fn parse_mode(value: &str) -> Result<WordPracticeMode> {
 }
 
 pub fn doctor(paths: &Paths) -> Result<()> {
-    println!("{}", crate::version_line());
-    println!("数据目录: {}", paths.home.display());
-    println!("资源目录: {}", paths.assets.display());
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    doctor_to(&mut out, paths)
+}
+
+/// 把排障信息写进 `out`。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容：`println!` 在测试进程里抓不到，
+/// 而「doctor 报的词数」与「程序实际加载的词数」必须是同一个数字。
+pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
+    writeln!(out, "{}", crate::version_line())?;
+    writeln!(out, "数据目录: {}", paths.home.display())?;
+    writeln!(out, "资源目录: {}", paths.assets.display())?;
 
     let catalog = crate::domain::catalog::Catalog::load(paths)?;
-    println!("\n词库（{} 本）：", catalog.resources().len());
+    writeln!(out, "\n词库（{} 本）：", catalog.resources().len())?;
     for resource in catalog.resources() {
         let file = catalog.dict_file(resource);
-        let words = file
-            .as_ref()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|text| serde_json::from_str::<Vec<crate::domain::types::Word>>(&text).ok())
-            .map(|words| words.len());
-        println!(
-            "  - {:<12} {:<10} {:<8} {:<6} {:?}",
+        // 词数必须走真正的加载路径 `Catalog::load_words`：它用
+        // `retain(Word::is_usable)` 过滤空词条。这里若自己解析 JSON 再 `len()`，
+        // 含空词条的词库就会被多算——doctor 的数字比程序实际加载的大，
+        // 排障时最容易误判。
+        let summary = if file.is_none() {
+            "<缺失>".to_string()
+        } else {
+            match catalog.load_words(resource) {
+                Ok(words) => format!("{} 词", words.len()),
+                Err(err) => format!("! {err:#}"),
+            }
+        };
+        writeln!(
+            out,
+            "  - {:<12} {:<10} {:<8} {:<6} {}",
             resource.id_string(),
             resource.en_name,
             resource.name,
-            resource.length.to_string(),
-            words.map(|count| format!("{count} 词"))
-        );
-        println!(
+            resource.length,
+            summary
+        )?;
+        writeln!(
+            out,
             "      文件: {}",
-            file.map(|path| path.display().to_string())
+            file.as_ref()
+                .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "<缺失>".to_string())
-        );
+        )?;
     }
 
     let store = crate::store::FileStore::new(&paths.home)?;
-    println!("\n存档：");
+    writeln!(out, "\n存档：")?;
     for (name, size) in store.describe_files() {
         match size {
-            Some(size) => println!("  - {name}: {size} bytes"),
-            None => println!("  - {name}: 不存在"),
+            Some(size) => writeln!(out, "  - {name}: {size} bytes")?,
+            None => writeln!(out, "  - {name}: 不存在")?,
         }
     }
 
     let themes = crate::theme::ThemeRegistry::load(&paths.themes_dir());
-    println!("\n主题（{} 个自定义）：", themes.custom_count());
-    println!("  目录: {}", paths.themes_dir().display());
+    writeln!(out, "\n主题（{} 个自定义）：", themes.custom_count())?;
+    writeln!(out, "  目录: {}", paths.themes_dir().display())?;
     for id in themes.ids() {
-        println!("  - {:<16} {}", id, themes.label(id));
+        writeln!(out, "  - {:<16} {}", id, themes.label(id))?;
     }
     for warning in themes.warnings() {
-        println!("  ! {warning}");
+        writeln!(out, "  ! {warning}")?;
     }
     Ok(())
 }

@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **431 个测试**：109 个单元测试 + 322 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **433 个测试**：109 个单元测试 + 324 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -99,6 +99,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/flow_parity.rs` | 4 | 7 个内置流程均可推进到结算；错词清空；相位与练习类型一致 |
 | `tests/home_resume.rs` | 3 | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
 | `tests/import_dict.rs` | 3 | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |
+| `tests/cli_doctor.rs` | 2 | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载的可用词数（空词条不计）；词库文件缺失或解析失败时逐本标注原因，且不中断后续输出 |
 | `tests/layering.rs` | 2 | 分层约束：`src/domain/` 不依赖 `app`/`ui`/`store`/`theme` |
 | `tests/real_assets.rs` | 3 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载；内置文章书目 `length` 与文章文件篇数一致（5 篇） |
 | `tests/typing_keys.rs` | 16 | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
@@ -118,7 +119,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 | 手段 | 用法 |
 | --- | --- |
-| 路径排查 | `tw doctor` 打印数据目录、资源目录、每本词库的文件与词数、存档文件大小、主题清单与告警 |
+| 路径排查 | `tw doctor` 打印数据目录、资源目录、每本词库的文件与实际词数（与程序加载一致，空词条不计）、存档文件大小、主题清单与告警 |
 | 任务排查 | `tw task` 打印今日新词/到期复习/随机补足数量与前几个词，不进入界面 |
 | 数据隔离 | `--home <临时目录>`（或 `TYPEWORDS_HOME`）避免污染真实存档 |
 | 资源隔离 | `--assets <目录>`（或 `TYPEWORDS_ASSETS`）指定测试词库 |
