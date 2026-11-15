@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **418 个测试**：102 个单元测试 + 316 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **435 个测试**：112 个单元测试 + 323 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -59,6 +59,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/domain/typing.rs` | 10 | 五种练习类型的键入分支、大小写、全角标点、重复次数、自动下一词、错误计数 |
 | `src/audio/tts.rs` | 7 | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
 | `src/domain/shortcut.rs` | 7 | 键位往返、默认表覆盖全部动作、与上游默认表一致、冲突拒绝、一键反查多动作、方向键往返 |
+| `src/domain/types.rs` | 6 | 词典进度口径：有效词数是唯一分母、`last_learn_index` 夹在 `[0, 有效词数]`、`percent_of` 四舍五入与 0 分母、`complete` 固定 100、空词表回退 `length`、`set_study_dict` 把非空词表的 `length` 校正为 `words.len()` |
 | `src/ui/bigtext.rs` | 5 | 字形行数、1×/2× 放大、遮罩空心占位、超长拆行、非 ASCII 回退 |
 | `src/theme/load.rs` | 4 | base 继承、非法文件跳过、保留 id、未知 token 告警 |
 | `src/audio/player.rs` | 3 | 仅整词可发音、缺少播放程序时的报错、脚本参数拼接 |
@@ -69,10 +70,13 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/ui/widgets.rs` | 3 | 按显示宽度截断/折行、底栏提示不越界 |
 | `src/ui/overlays.rs` | 4 | 结算/确认弹层在最小终端内不越界、按钮行与方向键提示在 60×20 内放得下 |
 | `src/ui/theme.rs` | 2 | 主题 token → ratatui Color 映射 |
+| `src/ui/typing_buttons.rs` | 2 | 按钮条不越界、不重叠；最小终端下提示行放得下 |
 | `src/domain/scheduler.rs` | 2 | `enable_fuzz` 的开关、最小间隔与 ±5% 抖动范围 |
 | `src/domain/statistics.rs` | 2 | 跨天会话计数去重、single/旧记录兼容 |
+| `src/domain/study_task.rs` | 2 | 只剩最后一个词时仍会出题、词表学完后不再出新词（`is_end` 只在真正到头时成立） |
 | `src/app/mod.rs` | 1 | 30 秒周期保存只在时长真正推进时触发 |
-| `src/domain/session.rs` | 1 | 除默写外每种模式换词都自动朗读 |
+| `src/cli.rs` | 1 | `tw task` 的「N 词」与「学习进度 x/y (z%)」都用有效词数（`dict_progress_lines`） |
+| `src/domain/session.rs` | 2 | 除默写外每种模式换词都自动朗读、结算推进到最后一词时把词典置为完成（分母为有效词数） |
 | `src/domain/flow/mod.rs` | 2 | 有内置 flow 的 7 个模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应、两种单词测试与「自定义流程」不在内置列表里且 `get_flow_id_for_mode` 兜底成 `system` |
 
 ### 4.2 集成测试（`tests/`）
@@ -101,6 +105,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/real_assets.rs` | 3 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载；内置文章书目 `length` 与文章文件篇数一致（5 篇） |
 | `tests/typing_keys.rs` | 16 | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 1 | 与上游 ts-fsrs 5.4.1 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
+| `tests/progress_consistency.rs` | 7 | 词典进度口径：百分比与「N / M 词」同源（主页 / 词库页 / 结算 / 单词测试结算 / 学完判定），元数据 `length` 比实际词表大时不漂移；「继续」不二次推进进度、「每日 1 词」也能把整本学完 |
 | `tests/docs.rs` | 2 | 文档一致性：README 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown |
 
 ### 4.3 测试基础设施与写法

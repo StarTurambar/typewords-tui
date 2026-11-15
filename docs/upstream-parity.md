@@ -50,7 +50,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 词库资源 | `public/list/word.json` + `public/dicts/<lang>/word/*.json`（另有 article 目录） | 同布局的 `assets/`（当前仅 CET-4），可 `--assets` 替换、`tw import-dict` 扩展 |
 | 存档 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1) | 数据目录下 4 个 JSON 文件，同构信封 `{val, version, updated_at}`，版本 4 / 23 / 2 / 1 |
 | 网络 | 在线查词、百度翻译、有道发音、Supabase 云同步、umami 埋点 | 默认无网络依赖（`Cargo.toml` 无 HTTP 客户端），无账号、无遥测；「有道发音」可选，用系统 `curl` 下载 mp3 |
-| 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 6 组集成测试 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
+| 测试 | `package.json` 的 `test` 为空，本次快照未见测试目录 | `tests/` 24 个集成测试文件 + 源码 `#[cfg(test)]` 单测；CI 跑 fmt / clippy / Linux+Windows 测试 |
 | 分发 | 静态站 + Tauri NSIS 安装包 | GitHub Release 的 Windows zip（`tw.exe`、`assets/`、`docs/`、README、LICENSE、SHA256） |
 | 许可证 | GPL-3.0（上游仓库内含 LICENSE，词库数据同许可证） | GPL-3.0（见仓库 LICENSE，词库数据沿用上游许可证） |
 
@@ -107,6 +107,7 @@ typewords-tui 不是把上游 Web 端逐行改写成 Rust，而是沿用上游�
 | 调度 | 学习步进 | ts-fsrs 的 `learning_steps` / `relearning_steps` | 读设置，同上游 | 已对齐 | 详见 4.1 |
 | 调度 | 复习间隔 | ts-fsrs（FSRS-6，21 权重） | `src/domain/fsrs.rs` 逐条移植 ts-fsrs | 已对齐 | 同一张卡的下次复习时间相同；黄金样本见 `tests/fsrs_parity.rs` |
 | 调度 | 到期复习筛选 | `core/hooks/dict.ts` 的 `getCurrentStudyWord` | `src/domain/study_task.rs` | 部分 | 都按本地自然日；上游会顺手删除已掌握词的 FSRS 记录，TUI 只忽略不删 |
+| 调度 | 词典进度推进 / 学完判定 | `usePracticeWordSession.ts` 的 `updateCompletedDictProgress`、`core/hooks/dict.ts` 的 `isEnd` | `domain/session.rs` 的 `advance_dict_progress`、`domain/study_task.rs` | 行为不同 | 上游在 `settle` 与 `createNextTask` 各推进一次 `lastLearnIndex`（「继续」后整组词被跳过）、`isEnd = length - 1`（只剩最后一个词时永远学不完）；TUI 只在结算推进一次、`create_next_task` 只复核完成度，`is_end` 到词表末尾才成立（见 [领域逻辑](domain.md) 第 5 与 12.5 节） |
 | 调度 | 高级 FSRS 参数 | `components/setting/FsrsSetting.vue` | 仅留存率有 UI | 部分 | `maximum_interval`/`w`/`enable_fuzz` 改文件后生效但无 UI；fuzz 为 ±5% 近似实现（见 4.3） |
 | 调度 | 无到期时随机填充复习 | `study-task.ts` 的 `addRandomReviewWhenNoDue` | `src/domain/study_task.rs` | 已对齐 | 数量、排除集合、随机来源一致 |
 | 统计 | 主页三项统计与本周记录 | `(words)/words.vue` | `src/ui/home.rs`、`src/ui/insights.rs` | 已对齐 | 今日时长 / 学习天数 / 累计时长 + 周一至周日 |

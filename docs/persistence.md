@@ -178,7 +178,7 @@ article.bookList 中 system == false 的词典                        → articl
 | `id` | 词典身份；资源文件里的数字 id 会在读取时转成字符串（如 `1`） |
 | `enName` | 上游路由名；读取时也接受 `en_name` 别名，两者都可作为 `--dict` 的取值 |
 | `name` / `description` / `url` / `category` / `tags` / `language` / `translateLanguage` | 展示与资源定位元数据；`url` 是 `dicts/<language>/word/` 下的文件名 |
-| `length` | 词数；有效词数还应参考 `words.len()`（`Dict::effective_length`） |
+| `length` | 词数**元数据**，只在词表未加载时充当分母兜底：词表在内存里时一律以 `words.len()` 为准（`Dict::effective_length`），`BaseState::set_study_dict` 写回时会把非空词表的 `length` 校正为 `words.len()`，只有空词表（`shake_common_dict` 清空后只剩元数据）才保留原值。进度百分比与「已学 N / M 词」都按有效词数计算，不按这个字段（见 [领域逻辑](domain.md)） |
 | `lastLearnIndex` / `perDayStudyNumber` / `complete` | 学习进度、每日目标、是否已完成；每日目标即每日词数，主页/词库页 `+` / `-` 与设置页「复习 → 每日词数」都改它；`select_dict` 切换词库时会保留既有值 |
 | `words` | 词条数组，结构见 6.2；官方资源词库保存时被清空（见 2.6） |
 | `articles` | 文章数组；TUI 原样透传、不读取 |
@@ -455,7 +455,7 @@ function systemPractice() {
 | `enName` | 字符串 | 上游路由名，可用作 `--dict` 取值；也接受 `en_name` 别名 |
 | `name` / `description` | 字符串 | 展示名与简介 |
 | `url` | 字符串 | 词条文件名，拼接为 `dicts/<language>/word/<url>` |
-| `length` | 整数 | 词数；为 0 时加载后以实际词数为准 |
+| `length` | 整数 | 声明词数；装载成 `Dict` 后只作「词表未加载」时的兜底，实际以词条文件里的词数（`words.len()`）为准（见 3.3） |
 | `category` / `tags` / `language` / `translateLanguage` | 字符串 / 数组 | 展示与语言元数据；`language` 为空时按 `en` |
 | `type` | 字符串，可选 | 只处理 `"word"` 或缺省的项，其它类型（如 article）被过滤 |
 | `version` / `cover` / 其它 | — | 不参与 TUI 逻辑；未知字段被忽略 |

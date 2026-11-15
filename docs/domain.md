@@ -20,7 +20,7 @@
 | 文件 | 职责 | 关键导出 |
 | --- | --- | --- |
 | `src/domain/mod.rs` | 模块声明 | 13 个 `pub mod`（flow 含 navigator 子模块） |
-| `src/domain/types.rs` | 数据模型与序列化 | `Word`、`Dict`、`BaseState`、`SettingState`、`PracticeState`、`PracticeData`、`Card`、`TaskWords`、`PracticeCache`、整数枚举 |
+| `src/domain/types.rs` | 数据模型与序列化 | `Word`、`Dict`、`DictProgress`（含自由函数 `percent_of`）、`BaseState`、`SettingState`、`PracticeState`、`PracticeData`、`Card`、`TaskWords`、`PracticeCache`、整数枚举 |
 | `src/domain/constants.rs` | 与 Web 对齐的常量与默认值 | `GROUP_SIZE`、`CURRENT_FLOW_VERSION`、系统词典 id、`SIMPLE_WORDS`、`DEFAULT_FSRS_W`、三个存档版本 |
 | `src/domain/catalog.rs` | 词库目录、词条文件、导入 | `Catalog`、`DictResource`、`import_dict` |
 | `src/domain/study_task.rs` | 今日任务生成 | `create_study_task`、`create_shuffle_task`、`get_current_study_word`、`StudyTaskResult` |
@@ -98,7 +98,7 @@
 | `Word` | `id?`、`custom`、`word`、`phonetic0/1`、`trans`、`sentences`、`phrases`、`synos`、`rel_words`、`etymology` | 词条；`lower()`、`is_usable()`（仅要求 `word` 非空）、`trans_joined()`、`phonetic(uk)` |
 | `Trans` / `WordSubContent` | `pos`、`cn`、`frequency?`；`c`、`cn` | 释义、例句与短语 |
 | `Syno` / `RelGroup` / `RelWords` / `Etymology` | `pos`、`cn`、`ws`；`pos`、`words`；`root`、`rels`；`t`、`d` | 同义词、同根词、词源 |
-| `Dict` | `id`、`en_name`、`name`、`description`、`url`、`length`、`category`、`tags`、`translate_language`、`language`、`last_learn_index`、`per_day_study_number`、`words`、`articles`、`statistics`、`custom`、`system`、`source_id`、`complete`、`cover?`、`extra` | 词库或系统词典；`identity_list`/`matches_id`（id 与 enName 都可作路由）、`effective_length`、`progress_percent`、`per_day` |
+| `Dict` | `id`、`en_name`、`name`、`description`、`url`、`length`、`category`、`tags`、`translate_language`、`language`、`last_learn_index`、`per_day_study_number`、`words`、`articles`、`statistics`、`custom`、`system`、`source_id`、`complete`、`cover?`、`extra` | 词库或系统词典；`identity_list`/`matches_id`（id 与 enName 都可作路由）、`effective_length`、`progress`（→ `DictProgress`）、`progress_percent`、`per_day` |
 | `BookGroup` | `book_list`、`study_index` | `study_index < 0` 表示没有当前词典 |
 | `Card` | `due`、`stability`、`difficulty`、`elapsed_days`、`scheduled_days`、`learning_steps`、`reps`、`lapses`、`state`、`last_review?` | 与 ts-fsrs `Card` 对齐；`state` 取值 0–3 |
 | `Statistics` | `start_date`、`spend`、`total`、`new`、`review`、`wrong`、`title?`、`segments?`、`session_role?` | 一条学习记录；`segments` 为 `[startMs, endMs]` 数组 |
@@ -110,6 +110,17 @@
 | `TaskWords` | `new`、`review` | 今日任务词表；`total()`、`is_empty()` |
 | `Question` / `Candidate` | `candidates`、`correct_index`；`word`、`similarity` | 自测题 |
 | `PracticeCache` / `PracticeCacheCompact` | 见第 12 节 | 断点续练 |
+
+**词典进度口径**：`Dict::effective_length()` 是全站**唯一**的「有效词数 / 进度分母」——词表已加载时取 `words.len()`，只有词表为空（官方资源词库保存时被 `shake_common_dict` 清空、或存档 shake 后只剩元数据）才回退到 `length`。所有「已学多少 / 共多少」的显示与判定都从它派生：
+
+| 接口 | 行为 |
+| --- | --- |
+| `Dict::progress() -> DictProgress` | 一次取全进度快照：`total = effective_length()`、`learned = last_learn_index` 夹在 `[0, total]`（存档里可能残留超出词表的旧值）、`complete` 原样带出 |
+| `DictProgress::percent()` | `complete` 时固定 100，否则 `percent_of(learned, total)` |
+| `types::percent_of(done, total)` | 全站唯一的百分比公式：`total == 0` 记 0，否则四舍五入；主页进度条、结算弹层、`tw task` 都用它 |
+| `Dict::progress_percent()` | `progress().percent()` 的便捷入口，与主页 / 结算同一口径 |
+
+早期实现是两套分母：百分比用 `length.max(words.len())`、「N / M 词」用 `effective_length`，元数据比实际词表大时同一屏会互相矛盾。现在主页 hero、结算弹层（`SummaryData::percent()`）、`tw task`、词库页资源行与 `insights::estimated_finish` 全部取这一套。结算推进 `advance_dict_progress` 的「学完」判定与 `last_learn_index` 上限、今日任务的 `is_end`、`per_day()` 的夹取范围同样按有效词数（见第 5 节与 12.5）。`BaseState::set_study_dict` 写入时会把非空词表的 `length` 校正为 `words.len()`，只有空词表才保留元数据，因此 `length` 退化为「词表未加载时的兜底词数」。
 
 ### 2.4 SettingState 中被领域层消费的字段
 
@@ -205,7 +216,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `en_name` | 也可作为路由/切换参数；反序列化兼容 `en_name` |
 | `name`、`description`、`category`、`tags`、`cover?` | 展示元数据 |
 | `url` | 词条文件名，相对 `dicts/<language>/word/` |
-| `length` | 声明词数；`to_dict` 在缺省时回退实际词数 |
+| `length` | 声明词数；`to_dict` 在缺省时回退实际词数。装载成 `Dict` 后只作「词表未加载」时的兜底分母，实际以词表长度为准（见 2.3 的进度口径） |
 | `language`、`translate_language` | 缺省语言为 `"en"` |
 | `type` / `kind` | 只有 `word`（或缺省）会被收录 |
 | `version` | 词库资源版本，TUI 不做升级处理 |
@@ -242,7 +253,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 1. 取 `base.study_dict()`；没有词典或词表为空则返回空任务。
 2. 计算忽略集合：`base.ignore_words_set(settings.ignore_simple_word)`，即“已掌握词”的小写集合；开启“忽略简单词”时再并入 `simple_words` 的小写形式。
 3. 计算每日词数 `per_day = dict.per_day()`：词典完成后取 `per_day_study_number.max(1)`，否则 `per_day_study_number` clamp 到 `[1, effective_length]`。
-4. 计算新词：从 `last_learn_index` 开始向后扫描 `dict.words`，跳过忽略集合中的词，收集到 `per_day` 个为止。若 `is_end`（扫描起点 `start >= dict.length - 1` 且 `length != 1`）或词典已完成，则不取新词。
+4. 计算新词：从 `last_learn_index` 开始向后扫描 `dict.words`，跳过忽略集合中的词，收集到 `per_day` 个为止。若 `is_end`（扫描起点 `start >= 有效词数`，即新词已全部学完）或词典已完成，则不取新词。`is_end` 与 `per_day()`、结算推进同用 `effective_length()`：读 `length` 时元数据一旦比实际词表大，就永远判不出「最后一组」，整本学完也进不了总复习。上游 `core/hooks/dict.ts` 写成 `start >= length - 1`：只剩最后一个词时会被判成「已到头」，新词列表恒空、`last_learn_index` 停在 `有效词数 - 1`，词典永远学不完（词数 ≡ 1 mod 每日词数时必现）；TUI 刻意修正成到词表末尾才成立。
 5. 计算到期复习：当 `word_review_ratio >= 1` 或词典完成或已到末尾时执行；目标数量 `per_day * ratio`（`is_end` 时 ratio 至少为 1）。从 `base.fsrs_data` 中筛出同时满足以下条件的词：未在忽略集合、卡片按 `Local` 自然日到期（`due.date <= 今天`）、词条存在于当前词典、不属于本轮新词；按 `due` 升序取前 `total_need` 个，再整体洗牌。
 6. 随机填充：若开关开启且到期复习为 0，则 `total_need = per_day * word_review_ratio`（小于 0 按 0），从已学范围 `words[..min(last_learn_index, len)]` 中排除忽略词与本轮新词/复习词后洗牌取前 `total_need` 个。
 
@@ -575,7 +586,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 | 已掌握 | 反引号键或自测“已掌握” | `toggle_word_simple_for_current` / `on_word_mastered` |
 | FSRS 卡 | 会话结算 `settle` | `Scheduler::next_card` → `BaseState::fsrs_data` |
 | statistics | 会话结算 `settle` | `flush_stat_to_store` |
-| `last_learn_index` / `complete` | 结算（见 12.5）与继续下一组 | `advance_dict_progress` |
+| `last_learn_index` / `complete` | 只在结算推进（见 12.5）；「继续」只复核完成度 | `advance_dict_progress`（上限为有效词数） |
 | 练习缓存 | 应用层的定时/推进/退出保存 | `build_cache` + `cache_to_compact` |
 
 ### 12.4 断点续练缓存
@@ -597,7 +608,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 `settle(base, settings, stat, now)` 的顺序：
 
 1. `stat.wrong = data.all_wrong_words.len()`（本轮仍错的唯一词数）。
-2. 非 Shuffle 模式调用 `advance_dict_progress(base, stat.new_word_number, false)`：`last_learn_index += new_word_number`；从推进后的位置统计“已掌握词”数量并计入完成判断，达到 `length` 时置 `complete = true` 并把下标设为 `length`。
+2. 非 Shuffle 模式调用 `advance_dict_progress(base, stat.new_word_number, false)`：`last_learn_index += new_word_number`；从推进后的位置统计“已掌握词”数量并计入完成判断，达到有效词数（`Dict::effective_length()`）时置 `complete = true` 并把下标设为有效词数。**学完判定与进度上限都用有效词数，不用元数据 `length`**——否则元数据偏大时整本学完也置不了 `complete`，主页与结算永远停在半截。
 3. `close_open_segment` 后 `normalize_practice_timer`，把清洗结果写回 `stat`。
 4. `flush_stat_to_store(base.study_dict_mut(), stat)` 写入统计。
 5. 构造 `Scheduler`，遍历 `data.wrong_times_map`：评级优先取 `rating_map`，否则按错误次数映射；用 `scheduler.next_card` 更新 `base.fsrs_data`。`settle` 只在会话完成时调用一次，练习过程中不写 FSRS 卡。
@@ -609,9 +620,10 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 | `spend_ms` | `stat.spend`（归一化后） |
 | `accuracy` | `round((total - wrong) / total * 100)`，`total == 0` 时为 100 |
 | `new_words` / `review` / `wrong` | `stat.new_word_number` / `stat.review_word_number` / `stat.wrong` |
-| `last_learn_index` / `length` / `complete` | 结算后的当前学习词典 |
+| `last_learn_index` / `length` / `complete` | 结算后的当前学习词典，三项取自 `Dict::progress()`（`learned` / `total` / `complete`），`length` 即有效词数 |
+| `percent()` | 学习进度的唯一百分比入口：`types::percent_of(last_learn_index, length)`（`total == 0` 记 0），`complete` 时固定 100；结算弹层的进度条与百分比都走它 |
 
-后续会话：`create_next_task` 在 Shuffle 模式下重新 `create_shuffle_task`；其他模式若词典尚未完成，会再以 `check_all = true` 调一次 `advance_dict_progress`（与 Web 的 `createNextTask` 行为一致），然后 `create_study_task`。`create_repeat_task` 回滚 `last_learn_index -= stat.new_word_number`（Shuffle 除外），按忽略集合过滤任务词后重学。
+后续会话：`create_next_task` 在 Shuffle 模式下重新 `create_shuffle_task`；其他模式若词典尚未完成，会再调一次 `advance_dict_progress(base, 0, true)` **只做完成度复核**——`last_learn_index` 已在上一轮 `settle` 推进过，不能再加 `new_word_number`（`stat` 要到下一轮 `initialize_task` 才重置，上游 `createNextTask` 会再加一次：进度一次跳两组、被跳过的整组词永远不出现在练习里，TUI 刻意修正），然后 `create_study_task`。`create_repeat_task` 回滚 `last_learn_index -= stat.new_word_number`（Shuffle 除外），按忽略集合过滤任务词后重学。
 
 ### 12.6 模式差异
 
