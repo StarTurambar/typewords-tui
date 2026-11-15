@@ -48,7 +48,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | 文件 | 覆盖点 |
 | --- | --- |
 | `src/domain/article.rs` | 断句（数字 / 货币 / 缩写 / 智能引号）、句子与译文对齐、跟打目标与可省略的词间空格、错字落位与退格、`load_books` 以文章文件实际篇数为准 |
-| `src/domain/fsrs.rs` | FSRS-6：新卡与学习步进、毕业、重学、Hard/Good/Easy 间隔排序、fuzz 确定性与默认关闭、参数夹取 |
+| `src/domain/fsrs.rs` | FSRS-6：新卡与学习步进、毕业、重学、Hard/Good/Easy 间隔排序、fuzz 确定性与默认关闭、参数夹取、高级 FSRS 页的权重区间与调度器夹取同源 |
 | `src/domain/typing.rs` | 五种练习类型的键入分支、大小写、全角标点、重复次数、自动下一词、错误计数 |
 | `src/domain/session.rs` | 除默写外每种模式换词自动朗读、结算按词表实际词数判完成、推进到最后一词时把词典置为完成 |
 | `src/domain/study_task.rs` | 取新词与学完判定按词表实际词数、最后一个词仍作为新词取、剩余词全被忽略时转向复习 |
@@ -77,7 +77,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 ### 4.2 集成测试（`tests/`）
 
-29 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`。
+30 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`。
 
 | 文件 | 覆盖点 |
 | --- | --- |
@@ -107,6 +107,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
 | `tests/typing_keys.rs` | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 与上游 ts-fsrs 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
+| `tests/adv_fsrs.rs` | 高级 FSRS 子屏：设置页入口与 `Esc` 返回、数字 / 权重输入的解析与夹取、开关与恢复默认、修改后重新装载 `setting.json` 仍生效、鼠标选中-激活与滚轮、底栏「选中 X」、120×40 与 60×20 渲染不越界 |
 | `tests/data_dir_lock.rs` | 数据目录互斥：同进程与跨进程（`CARGO_BIN_EXE_tw` 真实子进程）第二个写入口被拒且 stderr 给出提示、只读的 `tw doctor` / `tw export-dict` / `tw export-web` 不受影响、启动创建 `<home>/.tw.lock` 退出释放 |
 | `tests/progress_consistency.rs` | 进度口径：百分比与「N / M 词」同源（主页 / 词库页 / 结算 / 单词测试结算 / 学完判定），元数据 `length` 偏大时不漂移；「继续」不二次推进；每日 1 词也能学完 |
 | `tests/docs.rs` | 文档一致性：README、`CHANGELOG.md` 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown；`CHANGELOG.md` 遵循 Keep a Changelog（分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早版本 0.1.0 不缺失）；发布说明只从 `CHANGELOG.md` 提取，`release.yml` 不得再引用 `.github/release-notes/` 或 `--generate-notes` |
@@ -141,7 +142,7 @@ python tools/render-snapshot.py target/tmp/home.json docs/screenshots/home-120x4
 cargo run --quiet --example shot -- practice 120 40 dark --plain                          # 只输出文本，直接在终端对比
 ```
 
-`docs/screenshots/` 的 25 张图由下表组合生成（Windows、Cascadia Mono + 微软雅黑、`--scale 2`）。`shot` 对 `dict` / `dict-builtin` / `stats` / `settings` / `shortcuts` / `help` 走真实入口（数字键、`s`、设置行 `Enter`、`?`），底栏因此带「选中 X」焦点提示；直接改 `app.screen` 会留下上一页的焦点身份，截图不要那样写。
+`docs/screenshots/` 的 26 张图由下表组合生成（Windows、Cascadia Mono + 微软雅黑、`--scale 2`）。`shot` 对 `dict` / `dict-builtin` / `stats` / `settings` / `shortcuts` / `adv-fsrs` / `help` 走真实入口（数字键、`s`、设置行 `Enter`、`?`），底栏因此带「选中 X」焦点提示；直接改 `app.screen` 会留下上一页的焦点身份，截图不要那样写。
 
 | 文件 | 命令参数（screen, 宽, 高, theme） |
 | --- | --- |
@@ -161,6 +162,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain                
 | `dict-builtin-120x40-dark.png` | `dict-builtin 120 40 dark`（选中内置词典「收藏」，右侧详情与「w 查看词条」） |
 | `stats-120x40-dark.png` | `stats 120 40 dark` |
 | `settings-120x40-dark.png` | `settings 120 40 dark` |
+| `adv-fsrs-120x40-dark.png` | `adv-fsrs 120 40 dark`（设置页 FSRS 分区的「高级 FSRS」行按 `Enter` 进入） |
 | `shortcuts-120x40-dark.png` | `shortcuts 120 40 dark` |
 | `wordtest-120x40-dark.png` | `wordtest 120 40 dark` |
 | `words-120x40-dark.png` | `words 120 40 dark` |

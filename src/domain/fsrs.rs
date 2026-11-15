@@ -174,15 +174,17 @@ fn clamp_parameters(enable_short_term: bool) -> [(f64, f64); 21] {
     ]
 }
 
-/// 把参数夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
+/// 完整的参数夹取区间：基础表 + 按重学步数收紧的 `w[17]`/`w[18]` 上限。
 ///
-/// `num_relearning_steps > 1` 时会额外收紧 `w[17]`/`w[18]` 的上限，
-/// 保证「多次重学步进」不会让稳定性超过上限。
-pub fn clip_parameters(
+/// `num_relearning_steps > 1` 时收紧上限，保证「多次重学步进」不会让
+/// 稳定性超过上限；设置页编辑权重用的 [`weight_bounds`] 与
+/// [`clip_parameters`] 都从这里取区间，界面上的范围因此就是调度器实际
+/// 生效的范围。
+fn clamp_ranges(
     parameters: &[f64],
     num_relearning_steps: usize,
     enable_short_term: bool,
-) -> Vec<f64> {
+) -> [(f64, f64); 21] {
     let mut clip = clamp_parameters(enable_short_term);
     if num_relearning_steps > 1 {
         // PLS * e^(num_relearning_steps * w17 * w18) <= S
@@ -208,6 +210,18 @@ pub fn clip_parameters(
         clip[17].1 = ceiling;
         clip[18].1 = ceiling;
     }
+    clip
+}
+
+/// 把参数夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
+///
+/// 区间与 [`clamp_ranges`] 同源。
+pub fn clip_parameters(
+    parameters: &[f64],
+    num_relearning_steps: usize,
+    enable_short_term: bool,
+) -> Vec<f64> {
+    let clip = clamp_ranges(parameters, num_relearning_steps, enable_short_term);
     let count = parameters.len().min(clip.len());
     let mut result: Vec<f64> = parameters
         .iter()
@@ -223,6 +237,23 @@ pub fn clip_parameters(
     let defaults = default_w();
     result.extend(defaults.iter().skip(count).copied());
     result
+}
+
+/// 第 `index` 项权重在当前设置下的合法区间。
+///
+/// 供「高级 FSRS」页编辑权重时夹取：重学步数取 [`Fsrs::new`] 的有效值
+/// （空列表按 1 步算），`enable_short_term` 决定 `w[19]` 的下限，因此
+/// 界面显示的区间与调度器实际夹取的结果一致。
+pub fn weight_bounds(parameters: &FsrsParameters, index: usize) -> (f64, f64) {
+    let num_relearning_steps = parameters.relearning_steps.len().max(1);
+    clamp_ranges(
+        &parameters.w,
+        num_relearning_steps,
+        parameters.enable_short_term,
+    )
+    .get(index)
+    .copied()
+    .unwrap_or((0.0, f64::INFINITY))
 }
 
 /// FSRS-6 的 21 项默认权重（与上游 `constant.ts` 一致）。
@@ -1068,5 +1099,42 @@ mod tests {
         let clipped = clip_parameters(&[0.0; 21], 1, true);
         assert_eq!(clipped.len(), 21);
         assert!(clipped[20] >= 0.1 && clipped[20] <= 0.8);
+    }
+
+    /// 设置页显示的权重区间必须与调度器实际夹取用的是同一份表。
+    #[test]
+    fn weight_bounds_match_the_clipping_ranges() {
+        let parameters = FsrsParameters::default();
+        assert_eq!(weight_bounds(&parameters, 0), (S_MIN, INIT_S_MAX));
+        assert_eq!(weight_bounds(&parameters, 16), (1.0, 6.0));
+        assert_eq!(weight_bounds(&parameters, 19), (0.01, 0.8));
+        assert_eq!(weight_bounds(&parameters, 20), (0.1, 0.8));
+        // 关掉短期调度后 w[19] 的下限放宽到 0
+        let long_term = FsrsParameters {
+            enable_short_term: false,
+            ..FsrsParameters::default()
+        };
+        assert_eq!(weight_bounds(&long_term, 19), (0.0, 0.8));
+    }
+
+    /// 多步重学收紧 w[17]/w[18] 的上限：界面区间与 clip 结果必须是同一个数。
+    #[test]
+    fn weight_bounds_tighten_w17_w18_with_two_relearning_steps() {
+        let parameters = FsrsParameters {
+            relearning_steps: vec!["10m".to_string(), "1d".to_string()],
+            ..FsrsParameters::default()
+        };
+        let ceiling = weight_bounds(&parameters, 17).1;
+        assert!(
+            ceiling > 0.01 && ceiling < W17_W18_CEILING,
+            "重学步数 > 1 时上限应被收紧，实际 {ceiling}"
+        );
+        assert_eq!(weight_bounds(&parameters, 18), (0.0, ceiling));
+        let mut w = default_w().to_vec();
+        w[17] = 1.9;
+        w[18] = 1.9;
+        let clipped = clip_parameters(&w, 2, true);
+        assert!((clipped[17] - ceiling).abs() < 1e-12);
+        assert!((clipped[18] - ceiling).abs() < 1e-12);
     }
 }

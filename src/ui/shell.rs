@@ -46,7 +46,7 @@ impl Nav {
             Screen::Flows => Nav::Home,
             Screen::DictPicker => Nav::Dicts,
             Screen::Stats => Nav::Stats,
-            Screen::Settings | Screen::Shortcuts => Nav::Settings,
+            Screen::Settings | Screen::Shortcuts | Screen::AdvFsrs => Nav::Settings,
             Screen::Help => Nav::Help,
         }
     }
@@ -504,6 +504,9 @@ fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
         "切换"
     } else if app.screen == Screen::Help {
         "返回"
+    } else if app.screen == Screen::AdvFsrs {
+        // 这一页的 Enter 永远是「改这一行」（改数值 / 切开关 / 弹重置确认）。
+        "修改"
     } else {
         "触发"
     };
@@ -592,6 +595,7 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("r", "恢复默认"),
             ("esc", "返回"),
         ],
+        Screen::AdvFsrs => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
         Screen::Help => &[("↑↓", "滚动"), ("其它键", "返回")],
         Screen::Practice => &[],
     }

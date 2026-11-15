@@ -23,7 +23,7 @@
 | 文档 | 内容 | 主要读者 |
 | --- | --- | --- |
 | [usage.md](usage.md) | 安装、CLI、日志与崩溃报告、界面导览、10 种练习模式、按键、鼠标、FAQ / 排障 | 使用者 |
-| [settings.md](settings.md) | 设置页 32 行、FSRS 参数、无 UI 的透传字段 | 使用者 / 维护者 |
+| [settings.md](settings.md) | 设置页 33 行、高级 FSRS 页、FSRS 参数、无 UI 的透传字段 | 使用者 / 维护者 |
 | [shortcuts.md](shortcuts.md) | 42 个动作、默认绑定、改绑、TUI 专有键、与上游差异 | 使用者 / 维护者 |
 | [themes.md](themes.md) | 主题模型、6 套内置、13 token、自定义主题格式与校验 | 使用者 / 主题作者 |
 | [persistence.md](persistence.md) | 数据目录、5 份存档与资源 JSON、版本策略、Web 互通、备份 | 贡献者 / 维护者 |

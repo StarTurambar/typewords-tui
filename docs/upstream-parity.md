@@ -11,7 +11,7 @@
 | 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 66 个 Rust 文件、约 2.9 万行，12 个屏幕 + 7 类弹层 |
 | 产物与环境 | `nuxt generate` 静态站；桌面端是 Tauri 安装包（WebView2 载入同一份前端），运行在浏览器或桌面窗口 | 单个 `tw` 二进制 + 只读 `assets/`，运行在终端（最小 60 × 20），无 WebView、无 Node 运行时 |
 | 数据与网络 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1)；在线查词、百度翻译、有道发音、Supabase 同步、umami 埋点 | 数据目录 5 份 JSON：`dict.json`(4)、`setting.json`(23)、`practice-word.json`(2)、`practice-article.json`(1)、`flows.json`（无版本）；默认离线，唯一联网能力是可选的有道发音（系统 `curl` 下载 mp3，外部播放器播放） |
-| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 29 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
+| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 30 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
 
 ### 1.2 对照基线
 
@@ -48,7 +48,7 @@
 | 练习 | 练习内导航（跳阶段 / 上下词 / 重学 / 上下组）与自测选择题 | `usePracticeWordNavigator`、`createRepeatTask` / `createNextTask`、`WordIdentifyPanel.vue` | `domain/flow/navigator.rs` + 键位与结算弹层按钮；`src/domain/question.rs` | 已对齐：键位有别名差异，语义与题目生成一致 |
 | 调度 | 评级阈值、学习步进与到期筛选 | `core/hooks/fsrs.ts`、`core/hooks/dict.ts`、`study-task.ts` | `src/domain/scheduler.rs`、`src/domain/fsrs.rs`、`src/domain/study_task.rs` | 部分：评级 0 / 3 / 6 分档、步进读设置、无到期随机填充一致；上游顺手删除已掌握词的 FSRS 记录，TUI 只忽略不删 |
 | 统计 | 主页统计、本周记录、月历与按日明细、统计口径 | `(words)/words.vue`、`base/Calendar.vue`、`Statistics.vue` | `src/ui/home.rs`、`src/ui/insights.rs`、统计页（月历 + 选中日明细 + `v` 按词典视图）、`src/domain/statistics.rs` | 已对齐：跨天拆分、sessionRole、正确率算法一致 |
-| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 32 行） | 部分：覆盖练习手感与 FSRS 阈值；见 3.3 与 [设置项参考](settings.md) |
+| 设置 | 设置页与分组 | `setting.vue`（10 个 tab） | `src/ui/settings.rs`（7 分区 33 行）+ 高级 FSRS 页 | 部分：覆盖练习手感、FSRS 阈值与全部单值调度参数；见 3.3 与 [设置项参考](settings.md) |
 | 设置 | 自定义快捷键 | `setting.vue` 快捷键 tab、`DefaultShortcutKeyMap`（42 个动作） | 快捷键编辑页，可改绑 / 清除 / 恢复默认 | 已对齐：存 `shortcutKeyMap`，见 [快捷键](shortcuts.md) |
 | 交互 | 键鼠操作 | 浏览器键鼠 + 可配置快捷键 | 可配置键位 + 终端鼠标（点击、滚轮） | 行为不同：终端鼠标没有悬停与拖拽，复制要 `Shift+拖拽` |
 | 断点 | 本地缓存、续练与 v1 升级 | `PracticeSaveWord` v2、`PracticeSaveArticle` v1、`checkAndUpgradePracticeWordCache` | `practice-word.json` v2、`practice-article.json` v1、`try_resume_saved_practice` | 部分：单词缓存同构、主页「上次任务」提示已对齐；v1 缓存不迁移，被下一次保存覆盖；文章断点见 4.3 |
@@ -93,13 +93,12 @@ TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页�
 
 ### 3.3 设置建模范围
 
-上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段、设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：41 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 17 个上游字段落入 `extra` 原样保留。设置页 32 行 = 7 个分区、29 个 `SettingState` 配置项 + 每日词数（写 `dict.json` 的词典元数据）+ 2 个动作项。
+上游 `SettingState`（`app/core/stores/setting.ts`）有 58 个顶层字段、设置页分 10 个 tab。TUI 的 `SettingState` 建模 43 个具名字段：41 个与上游同名（`theme`、`repeatCount`、`fsrsParameters`、`shortcutKeyMap` 等）+ TUI 专有的 `tuiBigWord` / `ttsSource`；其余 17 个上游字段落入 `extra` 原样保留。设置页 33 行 = 7 个分区、29 个 `SettingState` 配置项 + 每日词数（写 `dict.json` 的词典元数据）+ 高级 FSRS 入口行 + 2 个动作项。
 
 | 类别 | 项 |
 | --- | --- |
-| 有 UI 且生效 | 练习模式、主题、音标、大字、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据 |
-| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`enable_short_term`、`learning_steps`、`relearning_steps` 建模但也不生效（学习步进固定 1 / 6 / 10 分钟） |
-| 无 UI 但生效 | `maximum_interval`、`fsrsParameters.w`、`fsrsParameters.enable_fuzz`（手工编辑 `setting.json` 后 `Scheduler` 会读取） |
+| 有 UI 且生效 | 练习模式、主题、音标、大字、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据；高级 FSRS 页另有最大间隔、间隔抖动、短期调度与 21 个权重 |
+| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`learning_steps` / `relearning_steps` 仍只能手改 `setting.json`（练习流程自己的学习步进固定 1 / 6 / 10 分钟，两套互不影响） |
 | 上游有、TUI 完全没有 | 声音音量与语速、键音包、TTS 声色、字号、练习内设置弹层、文章音效、`practiceSentence`、`autoPlayFirstSentence`、侧栏折叠、移动端导航 |
 
 逐项取值与默认值见 [设置项参考](settings.md)，透传规则见 [存档与数据格式](persistence.md)。
@@ -180,7 +179,6 @@ Web 备份 data.json                        TUI 数据目录
 
 | 项 | 差距 | 原因 |
 | --- | --- | --- |
-| FSRS 高级参数 UI | `maximum_interval`、21 个 `w`、`enable_fuzz` 已在调度器生效，但设置页没有编辑入口 | 需要 21 项数值的编辑界面，优先级低于其它项 |
 | xlsx 词库导入导出 | 词库导入导出只走 JSON（`tw import-dict` / `tw export-dict`），不支持 xlsx | xlsx 需要新依赖，与「保持轻量」冲突 |
 | 节点级流程编辑 | 流程页可增删步骤、调乱序与组内巩固，但不能增删节点、不能改节点词表来源 | 终端里编辑多级结构的交互成本高 |
 | 文章逐句音频与课后题 | 没有 LRC 时间轴，无法做逐句高亮；课后题也没有实现 | 不打包 mp3，改用系统 TTS 整句朗读 |

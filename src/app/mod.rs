@@ -56,6 +56,8 @@ pub enum Screen {
     Stats,
     Settings,
     Shortcuts,
+    /// 「高级 FSRS」子屏：从设置页 FSRS 分区的入口行进入。
+    AdvFsrs,
     Help,
 }
 
@@ -208,6 +210,10 @@ pub enum EditTarget {
     WordSoundSpeed,
     /// 新建词典的名字（自由文本）
     DictName,
+    /// FSRS 最大间隔（天，1 ~ 36500）
+    MaximumInterval,
+    /// FSRS 权重 `w[index]`：浮点，按 `fsrs::weight_bounds` 夹取
+    Weight(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -227,6 +233,8 @@ pub enum SettingKind {
     Action(ConfirmAction),
     /// 入口行：按下后进入快捷键编辑页。
     Shortcuts,
+    /// 入口行：按下后进入「高级 FSRS」子屏（最大间隔 / 权重 / 调度开关）。
+    AdvancedFsrs,
     /// 音频来源：系统 TTS / 有道发音
     AudioSource,
 }
@@ -295,6 +303,10 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         "request_retention",
         SettingKind::Number(EditTarget::Retention),
     ),
+    // 高级 FSRS：最大间隔、21 个权重与调度开关。这些参数都在调度器里
+    // 生效，但不适合挤进设置页主列表（21 个权重会把列表撑得太长），
+    // 因此另开一个子屏，入口放在 FSRS 分区的最后一行。
+    ("advanced_fsrs", SettingKind::AdvancedFsrs),
     // 其他
     (
         "reset_practice_progress",
@@ -305,6 +317,121 @@ pub const SETTING_ROWS: &[(&str, SettingKind)] = &[
         SettingKind::Action(ConfirmAction::ClearAllData),
     ),
 ];
+
+/// 「高级 FSRS」子屏的行（顺序即展示顺序）。
+///
+/// 分 4 组：留存率与间隔（2 行）→ 调度开关（2 行）→ 21 个权重 → 恢复默认。
+/// 分组标题由 `src/ui/adv_fsrs.rs` 的 `SECTIONS` 按行下标定位，因此这里的
+/// 顺序必须与它一致；`tests/adv_fsrs.rs` 锁着「26 行、21 个权重」这个形状。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdvFsrsRow {
+    /// 目标留存率（复用设置页的 `EditTarget::Retention`）
+    Retention,
+    /// 间隔上限（天）
+    MaximumInterval,
+    /// 间隔抖动
+    EnableFuzz,
+    /// 是否经过学习步进（关闭后改用长期调度器）
+    EnableShortTerm,
+    /// 第 `index` 个权重
+    Weight(usize),
+    /// 恢复默认参数
+    Reset,
+}
+
+impl AdvFsrsRow {
+    /// FSRS-6 的权重个数。
+    pub const WEIGHT_COUNT: usize = 21;
+
+    /// 全部行：4 个开关 / 数值行 + 21 个权重 + 1 个重置行。
+    pub const ALL: [AdvFsrsRow; 26] = [
+        AdvFsrsRow::Retention,
+        AdvFsrsRow::MaximumInterval,
+        AdvFsrsRow::EnableFuzz,
+        AdvFsrsRow::EnableShortTerm,
+        AdvFsrsRow::Weight(0),
+        AdvFsrsRow::Weight(1),
+        AdvFsrsRow::Weight(2),
+        AdvFsrsRow::Weight(3),
+        AdvFsrsRow::Weight(4),
+        AdvFsrsRow::Weight(5),
+        AdvFsrsRow::Weight(6),
+        AdvFsrsRow::Weight(7),
+        AdvFsrsRow::Weight(8),
+        AdvFsrsRow::Weight(9),
+        AdvFsrsRow::Weight(10),
+        AdvFsrsRow::Weight(11),
+        AdvFsrsRow::Weight(12),
+        AdvFsrsRow::Weight(13),
+        AdvFsrsRow::Weight(14),
+        AdvFsrsRow::Weight(15),
+        AdvFsrsRow::Weight(16),
+        AdvFsrsRow::Weight(17),
+        AdvFsrsRow::Weight(18),
+        AdvFsrsRow::Weight(19),
+        AdvFsrsRow::Weight(20),
+        AdvFsrsRow::Reset,
+    ];
+
+    /// 行名：数值 / 开关行走 i18n，权重行拼成 `w[n] 含义`。
+    pub fn label(self) -> String {
+        match self {
+            Self::Retention => crate::domain::i18n::tr("request_retention"),
+            Self::MaximumInterval => crate::domain::i18n::tr("maximum_interval"),
+            Self::EnableFuzz => crate::domain::i18n::tr("enable_fuzz"),
+            Self::EnableShortTerm => crate::domain::i18n::tr("enable_short_term"),
+            Self::Weight(index) => format!("w[{index}] {}", weight_label(index)),
+            Self::Reset => crate::domain::i18n::tr("reset_fsrs_parameters"),
+        }
+    }
+}
+
+/// 21 个权重各自在 FSRS-6 算法里的角色（与 `src/domain/fsrs.rs` 的参数夹取
+/// 注释一一对应），供「高级 FSRS」页拼行名。
+pub fn weight_label(index: usize) -> &'static str {
+    const LABELS: [&str; AdvFsrsRow::WEIGHT_COUNT] = [
+        "初始稳定性 · Again",
+        "初始稳定性 · Hard",
+        "初始稳定性 · Good",
+        "初始稳定性 · Easy",
+        "初始难度",
+        "初始难度指数",
+        "难度变化率",
+        "难度回归均值",
+        "稳定性增长指数",
+        "稳定性衰减指数",
+        "检索难度系数",
+        "遗忘稳定性基数",
+        "遗忘难度幂",
+        "遗忘稳定性幂",
+        "遗忘系数",
+        "Hard 惩罚",
+        "Easy 加成",
+        "短期稳定性指数",
+        "短期偏移",
+        "短期衰减",
+        "衰减系数",
+    ];
+    LABELS.get(index).copied().unwrap_or("未知权重")
+}
+
+/// 权重的显示 / 编辑文本：最多 6 位小数，去掉末尾的 `0`（`0.2120` → `0.212`）。
+///
+/// 显示与编辑预填共用它：两处格式不一致时，用户一打开输入框再保存就会
+/// 把精度悄悄改掉。
+pub fn weight_text(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
+    }
+    let mut text = format!("{value:.6}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
 
 /// 结算对应的练习类型。
 ///
@@ -396,6 +523,8 @@ pub enum ConfirmAction {
     ResetPractice,
     /// 存档恢复默认：`dict.json` + `setting.json` + 断点缓存，对齐上游「清除所有数据」。
     ClearAllData,
+    /// 只把 `fsrsParameters` 恢复默认（高级 FSRS 页的「恢复默认」行）。
+    ResetFsrs,
 }
 
 /// 确认框文案：与动作一一对应，供键盘与鼠标路径共用。
@@ -404,6 +533,10 @@ pub fn confirm_message(action: ConfirmAction) -> String {
         ConfirmAction::Quit => "确定退出 Type Words 吗？".to_string(),
         ConfirmAction::ResetPractice => "确定清空当前练习进度吗？".to_string(),
         ConfirmAction::ClearAllData => crate::domain::i18n::tr("clear_all_data_confirm"),
+        ConfirmAction::ResetFsrs => {
+            "恢复默认 FSRS 参数？将覆盖目标留存率、最大间隔、调度开关、21 个权重与学习 / 重学步进。"
+                .to_string()
+        }
     }
 }
 
@@ -481,6 +614,8 @@ pub struct App {
     pub quit: bool,
     pub dict_cursor: usize,
     pub settings_cursor: usize,
+    /// 「高级 FSRS」页的光标（`AdvFsrsRow::ALL` 的下标）。
+    pub adv_fsrs_cursor: usize,
     pub edit: Option<EditState>,
     pub confirm: Option<ConfirmState>,
     pub summary: Option<SummaryData>,
@@ -677,6 +812,7 @@ impl App {
             quit: false,
             dict_cursor: 0,
             settings_cursor: 0,
+            adv_fsrs_cursor: 0,
             edit: None,
             confirm: None,
             summary: None,
@@ -3895,6 +4031,153 @@ impl App {
         }
     }
 
+    // ── 高级 FSRS 页 ─────────────────────────────────────────────────────
+
+    /// 「高级 FSRS」页当前选中的行。
+    pub fn adv_fsrs_row(&self) -> AdvFsrsRow {
+        AdvFsrsRow::ALL
+            .get(self.adv_fsrs_cursor)
+            .copied()
+            .unwrap_or(AdvFsrsRow::Retention)
+    }
+
+    pub(crate) fn move_adv_fsrs_cursor(&mut self, delta: i32) {
+        let last = AdvFsrsRow::ALL.len() as i32 - 1;
+        let next = (self.adv_fsrs_cursor as i32 + delta).clamp(0, last);
+        self.adv_fsrs_cursor = next as usize;
+    }
+
+    /// 触发第 `index` 行：键盘 Enter / 空格与鼠标第二次点击共用。
+    pub(crate) fn activate_adv_fsrs(&mut self, index: usize) {
+        let Some(row) = AdvFsrsRow::ALL.get(index).copied() else {
+            return;
+        };
+        self.adv_fsrs_cursor = index;
+        match row {
+            AdvFsrsRow::Retention | AdvFsrsRow::MaximumInterval => {
+                let target = if row == AdvFsrsRow::Retention {
+                    EditTarget::Retention
+                } else {
+                    EditTarget::MaximumInterval
+                };
+                self.edit = Some(EditState {
+                    target,
+                    buffer: self.setting_number_value(target).to_string(),
+                });
+            }
+            AdvFsrsRow::EnableFuzz => {
+                let enabled = {
+                    let parameters = &mut self.boot.settings.fsrs_parameters;
+                    parameters.enable_fuzz = !parameters.enable_fuzz;
+                    parameters.enable_fuzz
+                };
+                self.save_settings_now();
+                self.toast(
+                    NoticeLevel::Info,
+                    format!("间隔抖动 fuzz：{}", if enabled { "开启" } else { "关闭" }),
+                );
+            }
+            AdvFsrsRow::EnableShortTerm => {
+                let enabled = {
+                    let parameters = &mut self.boot.settings.fsrs_parameters;
+                    parameters.enable_short_term = !parameters.enable_short_term;
+                    parameters.enable_short_term
+                };
+                self.save_settings_now();
+                self.toast(
+                    NoticeLevel::Info,
+                    format!("短期调度：{}", if enabled { "开启" } else { "关闭" }),
+                );
+            }
+            AdvFsrsRow::Weight(index) => {
+                self.edit = Some(EditState {
+                    target: EditTarget::Weight(index),
+                    buffer: weight_text(self.adv_fsrs_weight(index)),
+                });
+            }
+            AdvFsrsRow::Reset => {
+                self.confirm = Some(ConfirmState::new(
+                    confirm_message(ConfirmAction::ResetFsrs),
+                    ConfirmAction::ResetFsrs,
+                ));
+            }
+        }
+    }
+
+    /// 调度器实际使用的目标留存率。
+    ///
+    /// `(0, 1)` 之外的值会被 `Fsrs::new` 回退成 0.9（手改 `setting.json` 写成
+    /// `95` 这种百分数时就是这种情况）；界面显示生效值，避免「填 95、显示
+    /// 9500%、实际按 90% 算」三处不一致。
+    pub fn fsrs_request_retention(&self) -> f64 {
+        let value = self.boot.settings.fsrs_parameters.request_retention;
+        if value > 0.0 && value < 1.0 {
+            value
+        } else {
+            0.9
+        }
+    }
+
+    /// 调度器实际使用的最大间隔（天）：小于 1 时 `Fsrs::new` 回退 36500。
+    pub fn fsrs_maximum_interval(&self) -> f64 {
+        let value = self.boot.settings.fsrs_parameters.maximum_interval;
+        if value >= 1.0 { value } else { 36_500.0 }
+    }
+
+    /// 权重行的当前值（显示与编辑预填共用）。
+    pub fn adv_fsrs_weight(&self, index: usize) -> f64 {
+        self.boot
+            .settings
+            .fsrs_parameters
+            .w
+            .get(index)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// 把输入框里的文本写进 `w[index]`，按与调度器同源的区间夹取。
+    ///
+    /// 权重必须恰好 21 项才参与调度（长度不对时 `Fsrs::new` 整组回退默认），
+    /// 因此长度不对时先补成默认的 21 项再写，避免「改一个权重把整组打回默认」。
+    fn apply_weight_text(&mut self, index: usize, text: &str) {
+        if index >= AdvFsrsRow::WEIGHT_COUNT {
+            return;
+        }
+        let parsed = text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite());
+        let Some(parsed) = parsed else {
+            self.toast(NoticeLevel::Warning, "请输入数字：如 0.212");
+            return;
+        };
+        if self.boot.settings.fsrs_parameters.w.len() != AdvFsrsRow::WEIGHT_COUNT {
+            self.boot.settings.fsrs_parameters.w = crate::domain::fsrs::default_w().to_vec();
+        }
+        let bounds = crate::domain::fsrs::weight_bounds(&self.boot.settings.fsrs_parameters, index);
+        let clamped = parsed.clamp(bounds.0, bounds.1);
+        self.boot.settings.fsrs_parameters.w[index] = clamped;
+        self.save_settings_now();
+        if (clamped - parsed).abs() > f64::EPSILON {
+            self.toast(
+                NoticeLevel::Warning,
+                format!(
+                    "w[{index}] 已夹取到 {} ~ {}",
+                    weight_text(bounds.0),
+                    weight_text(bounds.1)
+                ),
+            );
+        }
+    }
+
+    /// 恢复默认 FSRS 参数：只覆盖 `fsrsParameters`，其它设置与学习记录不动。
+    fn reset_fsrs_parameters(&mut self) {
+        self.boot.settings.fsrs_parameters = crate::domain::types::FsrsParameters::default();
+        self.save_settings_now();
+        self.toast(NoticeLevel::Success, "已恢复默认 FSRS 参数");
+    }
+
     pub fn setting_number_value(&self, target: EditTarget) -> i64 {
         let settings = &self.boot.settings;
         match target {
@@ -3922,6 +4205,9 @@ impl App {
             EditTarget::Note => 0,
             EditTarget::WordSoundSpeed => (settings.word_sound_speed * 100.0).round() as i64,
             EditTarget::DictName => 0,
+            EditTarget::MaximumInterval => self.fsrs_maximum_interval().round() as i64,
+            // 权重是浮点，只经 `edit_save` 的浮点分支修改；这里不会用到。
+            EditTarget::Weight(_) => 0,
         }
     }
 
@@ -3955,12 +4241,17 @@ impl App {
                         settings.fsrs_parameters.request_retention =
                             (value.clamp(50, 99) as f64) / 100.0
                     }
+                    EditTarget::MaximumInterval => {
+                        settings.fsrs_parameters.maximum_interval = value.clamp(1, 36_500) as f64
+                    }
                     EditTarget::PerDay => {}
                     EditTarget::Note => {}
                     EditTarget::WordSoundSpeed => {
                         settings.word_sound_speed = (value.clamp(50, 300) as f64) / 100.0
                     }
                     EditTarget::DictName => {}
+                    // 权重走 `edit_save` 的浮点分支（`apply_weight_text`）。
+                    EditTarget::Weight(_) => {}
                 }
                 self.save_settings_now();
             }
@@ -4183,7 +4474,7 @@ fn should_schedule_periodic_save(previous_spend: i64, spend: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::should_schedule_periodic_save;
+    use super::{AdvFsrsRow, should_schedule_periodic_save, weight_label, weight_text};
 
     #[test]
     fn periodic_save_triggers_only_when_spend_advances() {
@@ -4194,5 +4485,40 @@ mod tests {
         // 非整数倍不触发。
         assert!(!should_schedule_periodic_save(30_000, 31_000));
         assert!(!should_schedule_periodic_save(0, 0));
+    }
+
+    /// 行表是「4 个数值 / 开关 + 21 个权重 + 1 个重置」，且权重必须按
+    /// `Weight(0)..Weight(20)` 连续排列：界面的行号、`w[n]` 文案与
+    /// `adv_fsrs_weight(n)` 三处全靠这个顺序对齐。
+    #[test]
+    fn adv_fsrs_rows_cover_every_weight_in_order() {
+        let rows = AdvFsrsRow::ALL;
+        assert_eq!(rows.len(), 4 + AdvFsrsRow::WEIGHT_COUNT + 1);
+        assert_eq!(rows[0], AdvFsrsRow::Retention);
+        assert_eq!(rows[1], AdvFsrsRow::MaximumInterval);
+        assert_eq!(rows[2], AdvFsrsRow::EnableFuzz);
+        assert_eq!(rows[3], AdvFsrsRow::EnableShortTerm);
+        for index in 0..AdvFsrsRow::WEIGHT_COUNT {
+            assert_eq!(rows[4 + index], AdvFsrsRow::Weight(index));
+        }
+        assert_eq!(rows[rows.len() - 1], AdvFsrsRow::Reset);
+        for index in 0..AdvFsrsRow::WEIGHT_COUNT {
+            let label = AdvFsrsRow::Weight(index).label();
+            assert!(label.starts_with(&format!("w[{index}]")), "{label}");
+            assert_ne!(weight_label(index), "未知权重", "w[{index}] 缺少含义");
+        }
+    }
+
+    /// 权重文本最多 6 位小数、去掉末尾 0；显示与编辑预填共用同一份格式，
+    /// 否则一打开输入框再保存就会悄悄改掉精度。
+    #[test]
+    fn weight_text_keeps_precision_without_trailing_zeros() {
+        assert_eq!(weight_text(0.212), "0.212");
+        assert_eq!(weight_text(1.8729), "1.8729");
+        assert_eq!(weight_text(0.001), "0.001");
+        assert_eq!(weight_text(1.0), "1");
+        assert_eq!(weight_text(0.0), "0");
+        assert_eq!(weight_text(f64::NAN), "0");
+        assert_eq!(weight_text(f64::INFINITY), "0");
     }
 }

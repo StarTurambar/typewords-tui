@@ -60,6 +60,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
         Screen::Home => targets.extend(super::home::targets(app, shell.content)),
         Screen::DictPicker => targets.extend(super::dict_picker::targets(app, shell.content)),
         Screen::Settings => targets.extend(super::settings::targets(app, shell.content)),
+        Screen::AdvFsrs => targets.extend(super::adv_fsrs::targets(app, shell.content)),
         Screen::Shortcuts => targets.extend(super::shortcuts::targets(app, shell.content)),
         Screen::Words => targets.extend(super::words::targets(app, shell.content)),
         // 帮助页正文是只读说明，只有右侧的滚动指示器可点。
@@ -108,6 +109,7 @@ pub fn wheel_action(app: &App, area: Rect, column: u16, row: u16, delta: i32) ->
         Screen::Help => Some(Action::HelpScroll(delta)),
         Screen::Words => Some(Action::WordsMove(delta)),
         Screen::Shortcuts => Some(Action::ShortcutMove(delta)),
+        Screen::AdvFsrs => Some(Action::AdvFsrsMove(delta)),
         Screen::Flows => Some(Action::FlowMove(delta)),
         // 左右两栏的语义不同：左栏换书、右栏选文章。在这里一律按「换书」
         // 处理会让右侧列表的滚轮把整本书换掉，文章光标也跟着丢。

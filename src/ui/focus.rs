@@ -63,6 +63,7 @@ pub fn supports_focus(screen: Screen) -> bool {
             | Screen::Words
             | Screen::Flows
             | Screen::Shortcuts
+            | Screen::AdvFsrs
             | Screen::Help
     )
 }
@@ -243,6 +244,14 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .find(|(index, _)| *index == app.shortcut_cursor)?;
             Some(*rect)
         }
+        Screen::AdvFsrs => {
+            let layout = crate::ui::adv_fsrs::layout(app, content);
+            let (_, rect) = layout
+                .rows
+                .iter()
+                .find(|(entry, _)| *entry == Some(app.adv_fsrs_cursor))?;
+            Some(row_rect(*rect, 1))
+        }
         Screen::Words => {
             let layout = crate::ui::words::layout(app, content);
             let total = app.filtered_word_indices().len();
@@ -343,6 +352,9 @@ pub fn page_label(app: &App) -> Option<String> {
             .get(app.settings_cursor)
             .map(|(key, _)| crate::domain::i18n::tr(key)),
         Screen::Stats => Some(format!("统计 {}", app.stats_day.format("%m-%d"))),
+        Screen::AdvFsrs => crate::app::AdvFsrsRow::ALL
+            .get(app.adv_fsrs_cursor)
+            .map(|row| row.label()),
         Screen::Words => {
             let indices = app.filtered_word_indices();
             let index = *indices.get(app.words_cursor)?;

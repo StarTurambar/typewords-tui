@@ -59,6 +59,7 @@ const SUPPORTED_SCREENS: &[&str] = &[
     "stats",
     "settings",
     "shortcuts",
+    "adv-fsrs",
     "help",
     "summary",
     "summary-article",
@@ -297,6 +298,22 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             press(app, KeyCode::Char('?'));
             if app.screen != Screen::Help {
                 bail!("could not open help (screen={:?})", app.screen);
+            }
+        }
+        "adv-fsrs" => {
+            // 走真实入口：设置页 FSRS 分区的「高级 FSRS」行 → Enter。
+            app.screen = Screen::Home;
+            press(app, KeyCode::Char('s'));
+            let row = SETTING_ROWS
+                .iter()
+                .position(|(key, _)| *key == "advanced_fsrs")
+                .ok_or_else(|| anyhow::anyhow!("advanced_fsrs row missing"))?;
+            while app.settings_cursor < row {
+                press(app, KeyCode::Down);
+            }
+            press(app, KeyCode::Enter);
+            if app.screen != Screen::AdvFsrs {
+                bail!("could not open advanced FSRS (screen={:?})", app.screen);
             }
         }
         "confirm" => {
