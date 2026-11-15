@@ -86,8 +86,9 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 ## 文档维护
 
 - 代码区域 → 权威文档：整体分层/生命周期/状态与输入/子系统契约/扩展 → `docs/architecture.md`；用户操作与 CLI → `docs/usage.md`；设置 → `docs/settings.md`；键位 → `docs/shortcuts.md`；主题 → `docs/themes.md`；存档与资源 → `docs/persistence.md`；构建/测试/CI/发布 → `docs/development.md`；上游差异 → `docs/upstream-parity.md`。
-- `cargo test` 会跑 `tests/docs.rs`：README 与 `docs/` 下所有 Markdown 的相对链接必须指向真实文件，`docs/README.md` 必须登记 `docs/` 下每一个 Markdown，文档版本必须与 `Cargo.toml` 一致，文档里引用的 `src/...rs` 路径必须存在。新增文档后忘记登记索引会直接测试失败。
+- `cargo test` 会跑 `tests/docs.rs`：README、`CHANGELOG.md` 与 `docs/` 下所有 Markdown 的相对链接必须指向真实文件，`docs/README.md` 必须登记 `docs/` 下每一个 Markdown，文档版本必须与 `Cargo.toml` 一致，文档里引用的 `src/...rs` 路径必须存在；`CHANGELOG.md` 必须遵循 Keep a Changelog（六分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早的 0.1.0 不缺失），且发布说明只从它提取。新增文档后忘记登记索引会直接测试失败。
 - 用户可见行为（按键、CLI、设置项、存档字段、主题格式）改动时，同步更新 `docs/usage.md`、`docs/settings.md`、`docs/shortcuts.md`、`docs/persistence.md`、`docs/themes.md` 中受影响者；改界面后按 `docs/development.md` 重新生成 `docs/screenshots/`，不要手工截图或缩放。
+- 用户可见改动同时记进根目录 `CHANGELOG.md` 的 `## [Unreleased]`（Keep a Changelog 六分类：新增 / 变更 / 弃用 / 移除 / 修复 / 安全）；发版时移到版本标题下，发布说明由它生成。
 - 文档引用源码只写路径与符号名，不写行号（避免重构后失效）。
 
 ## 上游与资源
@@ -102,4 +103,4 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 - 错误处理：跨层边界用 `anyhow::Result`；启动期不可恢复错误在进入终端前 `bail!`，运行期可恢复错误转 Toast；不用 panic 作控制流。
 - clippy 全目标 `-D warnings`，不要用 `#[allow(...)]` 掩盖可修问题。
 - 保持 TUI 轻量：新增依赖前先确认必要性（不引入 HTTP 客户端或音频库；TTS / 播放器走系统命令），并一并更新 `Cargo.lock`。
-- 发布：改 `Cargo.toml` 的 `version` → 推送 `vX.Y.Z` tag 触发发布。推 tag 不会直接发版：`release.yml` 先 `guard` 校验 tag 与版本、再 `verify` 跑与 CI 同一套 fmt / clippy / Ubuntu+Windows 测试，全绿后才进五平台矩阵打包（Windows x86_64、Linux x86_64 gnu / musl、macOS Apple Silicon / Intel）；每个目标产出 `typewords-tui-vX.Y.Z-<target>.tar.gz`（可执行文件 + `assets/` + `docs/` + README + LICENSE）与同名 `.sha256`，Release 另附聚合 `SHA256SUMS`，旧的 `.zip` 不再产出。
+- 发布：改 `Cargo.toml` 的 `version`，把 `CHANGELOG.md` 的 `[Unreleased]` 条目整段移到新的 `## [X.Y.Z] - 日期` 小节（`[Unreleased]` 必须清空）→ 推送 `vX.Y.Z` tag 触发发布。推 tag 不会直接发版：`release.yml` 先 `guard` 校验 tag、版本与 `CHANGELOG.md` 里该版本的条目、再 `verify` 跑与 CI 同一套 fmt / clippy / Ubuntu+Windows 测试，全绿后才进五平台矩阵打包（Windows x86_64、Linux x86_64 gnu / musl、macOS Apple Silicon / Intel）；每个目标产出 `typewords-tui-vX.Y.Z-<target>.tar.gz`（可执行文件 + `assets/` + `docs/` + README + LICENSE）与同名 `.sha256`，Release 另附聚合 `SHA256SUMS`，旧的 `.zip` 不再产出。GitHub Release 正文由 `scripts/changelog.sh` 从 `CHANGELOG.md` 提取——发布说明只有这一来源，`.github/release-notes/` 已冻结为历史归档。

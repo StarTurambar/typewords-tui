@@ -104,9 +104,9 @@ src/ 共 66 个 Rust 文件，按目录分组：
 - tests/：29 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
-- scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）。
+- scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）、scripts/changelog.sh（从根目录 `CHANGELOG.md` 取某版本的发布说明，发布 workflow 与本地预览共用）。
 - assets/：list/word.json、list/article.json、dicts/en/word/CET4_T.json（2607 词）、dicts/en/article/NCE_1.json（5 篇）。
-- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（`v*` tag 触发：先 `guard` 校验 tag 与版本、`verify` 跑与 ci.yml 同一套 fmt / clippy / 测试，全绿后才打五平台 tar.gz 并发布：Windows x86_64、Linux x86_64 gnu + musl、macOS arm64 与 x86_64）。
+- .github/workflows/ci.yml（fmt / clippy / Ubuntu + Windows 测试）、release.yml（`v*` tag 触发：先 `guard` 校验 tag、版本与 `CHANGELOG.md` 里该版本的小节、`verify` 跑与 ci.yml 同一套 fmt / clippy / 测试，全绿后才打五平台 tar.gz 并发布：Windows x86_64、Linux x86_64 gnu + musl、macOS arm64 与 x86_64；发布说明由 `scripts/changelog.sh` 从 `CHANGELOG.md` 提取）。
 
 ## 5. 进程生命周期
 
@@ -456,4 +456,5 @@ FSRS（fsrs.rs + scheduler.rs）：
 | 5 份存档、资源 JSON、版本策略、Web 互通 | [persistence.md](persistence.md) |
 | 构建、测试、调试、截图、CI、发布 | [development.md](development.md) |
 | 与上游功能矩阵、行为差异、同步方法 | [upstream-parity.md](upstream-parity.md) |
+| 各版本新增 / 变更 / 移除 / 修复、发布日期 | [CHANGELOG.md](../CHANGELOG.md) |
 | 分层、生命周期、状态与输入、子系统契约、扩展 | 本文 |

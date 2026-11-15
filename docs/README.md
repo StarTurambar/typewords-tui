@@ -16,6 +16,7 @@
 | 评估「和网页版比缺什么、差在哪」 | [与上游对照](upstream-parity.md) |
 | 遇到启动失败、乱码、存档损坏 | [使用手册 · 常见问题与排障](usage.md#常见问题与排障) |
 | 程序崩溃 / 想找运行日志与崩溃报告 | [使用手册 · 日志与崩溃报告](usage.md#日志与崩溃报告) |
+| 查某个版本改了什么、什么时候发布的 | [变更日志](../CHANGELOG.md) |
 
 ## 文档地图
 
@@ -29,6 +30,7 @@
 | [architecture.md](architecture.md) | 分层、代码地图、生命周期、状态与输入、子系统契约、扩展指南、技术债 | 贡献者 / 维护者 |
 | [development.md](development.md) | 环境、构建 / 测试、调试、截图、词库同步、CI 与发布、文档维护 | 贡献者 / 维护者 |
 | [upstream-parity.md](upstream-parity.md) | 与上游的功能矩阵、行为差异、数据互通、同步方法 | 决策者 / 贡献者 |
+| [CHANGELOG.md](../CHANGELOG.md) | 全部版本的新增、变更、弃用、移除、修复与安全记录（Keep a Changelog 格式，GitHub Release 正文来源） | 使用者 / 维护者 |
 
 截图在 `screenshots/`，由仓库自带工具生成；方法与清单见 [开发指南 · 截图与视觉检查](development.md#6-截图与视觉检查)。
 
@@ -42,6 +44,7 @@
 
 - **事实来源**：代码 > 测试 > 文档。文档与源码不一致属于缺陷；先改文档，确认是代码缺陷再改代码。
 - **单一权威**：同一事实只在一个文档展开。用户操作在 [usage.md](usage.md)，设置项在 [settings.md](settings.md)，键位在 [shortcuts.md](shortcuts.md)，数据字段在 [persistence.md](persistence.md)，跨层结构与扩展在 [architecture.md](architecture.md)，上游差异在 [upstream-parity.md](upstream-parity.md)。
+- **变更日志**：用户可见改动在根目录 [CHANGELOG.md](../CHANGELOG.md) 的 `[Unreleased]` 下补一条（Keep a Changelog 六分类），发版时移到版本标题下；GitHub Release 正文由它生成，不要再单独写发布说明。
 - **源码引用**：只写路径与符号名，不写行号，避免重构后失效。
 - **链接**：docs/ 内互链用文件名；指向根 README 用 `../README.md`；指向源码用 `../src/...`。新增文档后在本文登记（`cargo test` 会校验索引与相对链接）。
 - **版本**：只在本文写「对应版本」；发版时改这一处，`tests/docs.rs` 会校验它与 `Cargo.toml` 一致。

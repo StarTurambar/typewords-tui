@@ -1,7 +1,7 @@
 name: Release
 
 # 发布链路只由 v* tag 触发，但「推 tag」不再等于「发版」：
-#   guard（tag 与 Cargo.toml 版本一致）
+#   guard（tag、Cargo.toml 版本与 CHANGELOG.md 的版本小节一致）
 #   → verify（fmt + clippy + Ubuntu / Windows 测试，命令与 ci.yml 完全一致）
 #   → package（五平台归档 + 冒烟）
 #   → release（校验和聚合 + 发布）
@@ -17,9 +17,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # 最便宜的一关：tag 与 Cargo.toml 的 version 不一致时立刻失败，不浪费后面的测试与五平台构建。
+  # 最便宜的一关：tag、Cargo.toml 的 version 与 CHANGELOG.md 的版本小节对不上时立刻失败，
+  # 不浪费后面的测试与五平台构建。
   guard:
-    name: guard (tag / version)
+    name: guard (tag / version / changelog)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +34,20 @@ jobs:
             exit 1
           fi
           echo "tag $GITHUB_REF_NAME 与 Cargo.toml 的 version $version 一致"
+      - name: Check CHANGELOG documents this release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # 发布说明只有一个来源：CHANGELOG.md 里该版本的小节。没有小节、或小节里没有条目，直接失败。
+          echo "== ${GITHUB_REF_NAME} 的变更日志（来自 CHANGELOG.md）=="
+          bash scripts/changelog.sh "$version"
+          # 发版提交上 [Unreleased] 必须已经清空：还有未归档条目，说明这些改动没被写进任何版本小节。
+          if bash scripts/changelog.sh unreleased > /tmp/unreleased.md 2>/dev/null; then
+            echo "CHANGELOG.md 的 [Unreleased] 下还有未归档条目，发版前应整段移到「## [$version] - 日期」下：" >&2
+            cat /tmp/unreleased.md >&2
+            exit 1
+          fi
 
   # 与 ci.yml 的 fmt / clippy 同一组命令；改 ci.yml 时这里要跟着改，tests/docs.rs 会校验两边一致。
   verify-lint:
@@ -189,16 +204,22 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          notes=".github/release-notes/${tag}.md"
+          version="${tag#v}"
+          # 发布说明只从 CHANGELOG.md 提取（guard 已校验该小节存在、[Unreleased] 已清空），
+          # 仓库里不再维护第二份发布说明。
+          notes="$(mktemp)"
+          bash scripts/changelog.sh "$version" > "$notes"
+          # 页脚补一条「完整变更」比对链接，URL 直接取 CHANGELOG.md 底部为该版本写的链接定义。
+          link="$(sed -n "s/^\[$version\]: //p" CHANGELOG.md | head -n 1)"
+          if [ -n "$link" ]; then
+            printf '\n**完整变更**：%s\n' "$link" >> "$notes"
+          fi
+          echo "== 发布说明（来自 CHANGELOG.md）=="
+          cat "$notes"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release $tag 已存在，改上传产物（--clobber）"
+            echo "release $tag 已存在，改上传产物（--clobber）并用 CHANGELOG.md 的最新内容刷新正文"
             gh release upload "$tag" --clobber dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS
+            gh release edit "$tag" --title "$tag" --notes-file "$notes"
           else
-            args=(--title "$tag")
-            if [ -f "$notes" ]; then
-              args+=(--notes-file "$notes")
-            else
-              args+=(--generate-notes)
-            fi
-            gh release create "$tag" dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS "${args[@]}"
+            gh release create "$tag" dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS --title "$tag" --notes-file "$notes"
           fi

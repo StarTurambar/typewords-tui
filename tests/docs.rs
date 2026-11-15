@@ -1,5 +1,6 @@
-//! 文档一致性检查：README 与 docs/ 中的相对链接必须指向真实存在的文件，
-//! 且 docs/README.md 必须登记 docs/ 下的全部 Markdown 文档。
+//! 文档一致性检查：README、CHANGELOG.md 与 docs/ 中的相对链接必须指向真实存在的文件，
+//! docs/README.md 必须登记 docs/ 下的全部 Markdown 文档，CHANGELOG.md 必须遵循
+//! Keep a Changelog 且是发布说明的唯一来源。
 //!
 //! 检查只依赖本地文件系统，随 `cargo test` 在所有平台运行，防止文档重构后留下死链。
 
@@ -11,7 +12,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn markdown_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = vec![root.join("README.md")];
+    let mut files = vec![root.join("README.md"), root.join("CHANGELOG.md")];
     collect_markdown(&root.join("docs"), &mut files);
     files.into_iter().filter(|path| path.is_file()).collect()
 }
@@ -450,4 +451,282 @@ fn release_runs_the_ci_suite_before_packaging() {
         job_needs(&publish.1).iter().any(|dep| dep == "package"),
         "release 作业必须 needs: package，不能绕过打包与冒烟"
     );
+}
+
+/// 从 Cargo.toml 的 [package] 段读取 repository，用于核对 CHANGELOG.md 底部的链接定义。
+fn package_repository(root: &Path) -> String {
+    let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml 应存在");
+    let mut in_package = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if in_package && line.starts_with('[') {
+            break;
+        }
+        if in_package && let Some(value) = line.strip_prefix("repository = ") {
+            return value.trim().trim_matches('"').to_string();
+        }
+    }
+    panic!("Cargo.toml 的 [package] 段应有 repository");
+}
+
+/// CHANGELOG.md 的一个版本小节。
+struct ChangelogSection {
+    /// `Unreleased` 或形如 `0.3.3` 的版本号。
+    version: String,
+    /// 发布日期；`[Unreleased]` 为 `None`。
+    date: Option<String>,
+    /// 小节正文（不含标题行与文件底部的链接定义）。
+    body: Vec<String>,
+}
+
+/// 按 `## [版本]` 标题切出小节；文件底部的链接定义（`[0.3.3]: https://…`）不计入正文。
+fn changelog_sections(content: &str) -> Vec<ChangelogSection> {
+    let mut sections: Vec<ChangelogSection> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim_end();
+        let heading = line
+            .strip_prefix("## [")
+            .and_then(|rest| rest.find(']').map(|end| (rest, end)));
+        if let Some((rest, end)) = heading {
+            let tail = rest[end + 1..].trim();
+            let date = tail.strip_prefix('-').map(|date| date.trim().to_string());
+            sections.push(ChangelogSection {
+                version: rest[..end].to_string(),
+                date,
+                body: Vec::new(),
+            });
+            continue;
+        }
+        if let Some(section) = sections.last_mut() {
+            // 底部的链接定义（`[0.3.3]: https://…`）不属于任何版本小节。
+            if line.starts_with('[') && line.contains("]: ") {
+                continue;
+            }
+            section.body.push(line.to_string());
+        }
+    }
+    sections
+}
+
+/// 日历日期：只做格式与取值范围检查，够用即可。
+fn is_iso_date(date: &str) -> bool {
+    if !date.is_ascii() || date.len() != 10 {
+        return false;
+    }
+    let bytes = date.as_bytes();
+    if bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    let Ok(year) = date[0..4].parse::<u32>() else {
+        return false;
+    };
+    let Ok(month) = date[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = date[8..10].parse::<u32>() else {
+        return false;
+    };
+    year >= 2020 && (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+/// 解析 `x.y.z`，用于校验版本严格倒序。
+fn semver_key(version: &str) -> Option<(u64, u64, u64)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+/// CHANGELOG.md 必须遵循 Keep a Changelog：`[Unreleased]` 打头、版本从新到旧、
+/// 日期合法、分类只用标准六类、最新版本与 Cargo.toml 一致、最早版本 0.1.0 不能丢。
+#[test]
+fn changelog_follows_keep_a_changelog() {
+    const CATEGORIES: [&str; 6] = ["新增", "变更", "弃用", "移除", "修复", "安全"];
+
+    let root = repo_root();
+    let content = fs::read_to_string(root.join("CHANGELOG.md")).expect("仓库根应有 CHANGELOG.md");
+
+    let title = content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default()
+        .trim();
+    assert_eq!(title, "# 变更日志", "CHANGELOG.md 的标题应为 `# 变更日志`");
+    assert!(
+        content.contains("Keep a Changelog") && content.contains("keepachangelog.com"),
+        "CHANGELOG.md 应说明格式来自 Keep a Changelog 并链到规范"
+    );
+    assert!(
+        content.contains("语义化版本"),
+        "CHANGELOG.md 应说明版本号遵循语义化版本"
+    );
+
+    let sections = changelog_sections(&content);
+    assert!(
+        sections.len() >= 2,
+        "CHANGELOG.md 应至少有 [Unreleased] 与一个已发布版本"
+    );
+    assert_eq!(
+        sections[0].version, "Unreleased",
+        "[Unreleased] 应排在最前面，新改动先记在这里"
+    );
+    assert!(sections[0].date.is_none(), "[Unreleased] 不带发布日期");
+
+    for section in &sections {
+        for line in &section.body {
+            let Some(heading) = line.strip_prefix("### ") else {
+                continue;
+            };
+            assert!(
+                CATEGORIES.contains(&heading.trim()),
+                "{} 使用了非 Keep a Changelog 的分类「{}」，只能用：{}",
+                section.version,
+                heading.trim(),
+                CATEGORIES.join(" / ")
+            );
+        }
+        if section.version == "Unreleased" {
+            continue;
+        }
+        assert!(
+            section.body.iter().any(|line| line.starts_with("- ")),
+            "{} 下没有任何条目：发版时把 [Unreleased] 里的改动移到这里",
+            section.version
+        );
+        let date = section.date.as_deref().unwrap_or_else(|| {
+            panic!(
+                "{} 缺少发布日期，标题应写成 `## [{}] - YYYY-MM-DD`",
+                section.version, section.version
+            )
+        });
+        assert!(
+            is_iso_date(date),
+            "{} 的发布日期「{}」不是 YYYY-MM-DD",
+            section.version,
+            date
+        );
+    }
+
+    // 版本必须从新到旧排列、没有重复，且最早的一版是 0.1.0（历史不能缺失）。
+    let mut previous_version: Option<(u64, u64, u64)> = None;
+    let mut previous_date: Option<String> = None;
+    let mut versions: Vec<&str> = Vec::new();
+    for section in sections.iter().skip(1) {
+        let version = section.version.as_str();
+        let key =
+            semver_key(version).unwrap_or_else(|| panic!("版本号「{version}」不是 x.y.z 形式"));
+        if let Some(previous) = previous_version {
+            assert!(
+                key < previous,
+                "版本应从新到旧排列：{version} 排在更新的版本之后"
+            );
+        }
+        let date = section.date.clone().unwrap_or_default();
+        if let Some(previous) = previous_date.as_deref() {
+            assert!(
+                date.as_str() <= previous,
+                "{version} 的发布日期 {date} 比更新版本还晚，版本小节应从新到旧"
+            );
+        }
+        previous_version = Some(key);
+        previous_date = Some(date);
+        versions.push(version);
+    }
+
+    let cargo_version = package_version(&root);
+    assert_eq!(
+        versions.first().copied(),
+        Some(cargo_version.as_str()),
+        "CHANGELOG.md 最新的已发布版本应与 Cargo.toml 的 version 一致：发版时先把 [Unreleased] 的条目移到 `## [{cargo_version}]` 下"
+    );
+    assert_eq!(
+        versions.last().copied(),
+        Some("0.1.0"),
+        "CHANGELOG.md 必须保留最早版本 0.1.0 的记录，早期历史不能缺失"
+    );
+
+    // 每个版本小节在文件底部都有一行链接定义：与上一版的比对（最早一版指向 Release 页）。
+    let repository = package_repository(&root);
+    let unreleased = format!("[Unreleased]: {repository}/compare/v{}...HEAD", versions[0]);
+    assert!(
+        content.contains(&unreleased),
+        "CHANGELOG.md 底部缺少链接定义：{unreleased}"
+    );
+    for (index, version) in versions.iter().enumerate() {
+        let expected = match versions.get(index + 1) {
+            Some(previous) => format!("[{version}]: {repository}/compare/v{previous}...v{version}"),
+            None => format!("[{version}]: {repository}/releases/tag/v{version}"),
+        };
+        assert!(
+            content.contains(&expected),
+            "CHANGELOG.md 底部缺少链接定义：{expected}"
+        );
+    }
+}
+
+/// 发布说明只能有一个来源：CHANGELOG.md。release.yml 不得回退到单独目录或
+/// `--generate-notes`，且打包前就要拦住「忘了写变更日志」的 tag。
+#[test]
+fn release_notes_come_from_the_changelog() {
+    let root = repo_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .expect(".github/workflows/release.yml 应存在");
+    assert!(
+        workflow.contains("CHANGELOG.md"),
+        "release.yml 的发布说明应来自 CHANGELOG.md"
+    );
+    assert!(
+        workflow.contains("scripts/changelog.sh"),
+        "release.yml 应调用 scripts/changelog.sh 提取发布说明，避免在 YAML 里再写一份解析逻辑"
+    );
+    assert!(
+        !workflow.contains(".github/release-notes"),
+        "发布说明只允许一个来源：release.yml 不得再读取 .github/release-notes/（该目录已冻结为历史归档）"
+    );
+    assert!(
+        !workflow.contains("--generate-notes"),
+        "发布说明必须来自 CHANGELOG.md，不能退回 --generate-notes"
+    );
+
+    let jobs = workflow_jobs(&workflow);
+    let guard = jobs
+        .iter()
+        .find(|(name, _)| name == "guard")
+        .expect("release.yml 应有 guard 作业");
+    assert!(
+        guard.1.iter().any(|line| line.contains("changelog.sh")),
+        "guard 作业应校验 CHANGELOG.md 里有该版本的条目，否则忘写变更日志也能发版"
+    );
+
+    let script =
+        fs::read_to_string(root.join("scripts/changelog.sh")).expect("scripts/changelog.sh 应存在");
+    assert!(
+        script.starts_with("#!/usr/bin/env bash"),
+        "scripts/changelog.sh 应是 bash 脚本"
+    );
+    assert!(
+        script.contains("set -euo pipefail"),
+        "scripts/changelog.sh 应开启 set -euo pipefail"
+    );
+
+    // 历史公告若还留在仓库里，只能是冻结的归档：必须写明唯一来源是 CHANGELOG.md。
+    let legacy = root.join(".github/release-notes");
+    if legacy.is_dir() {
+        let readme = fs::read_to_string(legacy.join("README.md")).expect(
+            ".github/release-notes/ 只保留历史归档，需要 README.md 说明唯一来源是 CHANGELOG.md",
+        );
+        assert!(
+            readme.contains("CHANGELOG.md"),
+            ".github/release-notes/README.md 应指向 CHANGELOG.md"
+        );
+    }
 }

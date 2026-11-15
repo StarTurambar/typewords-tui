@@ -135,6 +135,10 @@ Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的�
 
 写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename；同一数据目录同时只允许一个写实例。运行日志默认开启并写在 `<home>/logs/`（`--log` / `--no-log` / `--log-level` 可调），panic 时同目录还会生成 `crash-<时间戳>.txt`，报 issue 时附上即可。解析失败的存档会隔离为 `*.corrupt-<时间戳>.json`；版本高于程序支持的 `dict.json` 与 `setting.json` 只读不覆盖。备份、迁移与字段含义见 [存档与数据格式](docs/persistence.md)。
 
+## 版本与变更日志
+
+版本号遵循[语义化版本 2.0.0](https://semver.org/lang/zh-CN/)，每个版本的新增、变更与修复见 [CHANGELOG.md](CHANGELOG.md)（格式参照 Keep a Changelog）；GitHub Release 的发布说明由这份文件生成。升级时替换可执行文件与 `assets/` 即可，数据目录保持原位——存档版本有变化的版本会在条目里写明兼容性。
+
 ## 文档
 
 完整文档在 [docs/](docs/README.md)：
