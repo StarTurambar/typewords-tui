@@ -76,6 +76,22 @@ fn seed_article_cache(fixture: &common::Fixture) -> Paths {
     paths
 }
 
+/// 改写第一篇测试文章（id 11），模拟文章资源更新后的样子。
+fn rewrite_first_article(fixture: &common::Fixture, text: &str, text_translate: &str) {
+    let file = fixture
+        .assets()
+        .join("dicts")
+        .join("en")
+        .join("article")
+        .join("toy.json");
+    let raw = std::fs::read_to_string(&file).expect("读文章文件");
+    let mut articles: serde_json::Value = serde_json::from_str(&raw).expect("解析文章文件");
+    let first = articles.get_mut(0).expect("文章文件里应有一篇测试文章");
+    first["text"] = serde_json::json!(text);
+    first["textTranslate"] = serde_json::json!(text_translate);
+    std::fs::write(&file, serde_json::to_string(&articles).unwrap()).expect("写文章文件");
+}
+
 /// 同时制造两份断点缓存：文章第一句 + 单词练习推进两步。
 fn seed_both_caches(fixture: &common::Fixture) -> Paths {
     let paths = seed_article_cache(fixture);
@@ -404,6 +420,59 @@ fn the_article_list_marks_the_saved_article() {
     press(&mut app, KeyCode::Char('a'));
     let text = render_text(&app, 100, 30);
     assert!(text.contains("上次第 2 句"), "列表应标出断点句: {text}");
+}
+
+/// 资源更新后文章变短：列表上的「上次第 N 句」不能指向已经不存在的句子。
+///
+/// 断点缓存里的 `sentenceIndex` 是保存时那篇文章的下标。文章文件更新后从两句
+/// 变成一句时，旧断点仍记着第二句；列表标记必须按当前句数 clamp（与按 Enter
+/// 续打时把下标 clamp 到当前句数内一致），不能把存档里的旧数字原样显示出来
+/// ——那和书本行写「72 篇」却只列出 5 篇是同一类缺陷。
+#[test]
+fn an_outdated_article_breakpoint_is_clamped_to_the_current_sentence_count() {
+    let fixture = common::Fixture::new();
+    let paths = seed_article_cache(&fixture);
+    // 资源更新：第一篇从两句变成一句。
+    rewrite_first_article(&fixture, "Hello there.", "你好。");
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    let resume = app.article_resume.as_ref().expect("旧断点仍应读入");
+    assert_eq!(resume.sentence_index, 1, "存档里仍是保存时的第二句");
+    assert_eq!(resume.total, 2, "存档里仍是保存时的总句数");
+
+    press(&mut app, KeyCode::Char('a'));
+    let text = render_text(&app, 120, 40);
+    assert!(
+        !text.contains("上次第 2 句"),
+        "文章只剩 1 句，不该标出第 2 句: {text}"
+    );
+    assert!(
+        text.contains("· 上次第 1 句"),
+        "断点应 clamp 到当前最后一句: {text}"
+    );
+
+    // 标记上写的就是 Enter 真正落到的句子。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::ArticlePractice);
+    let practice = app.article_practice.as_ref().expect("跟打状态");
+    assert_eq!(practice.index, 0, "续打应从当前最后一句开始");
+}
+
+/// 文章已经一句都不剩时，列表不显示断点标记：没有任何可续打的句子。
+#[test]
+fn an_article_without_sentences_shows_no_breakpoint_marker() {
+    let fixture = common::Fixture::new();
+    let paths = seed_article_cache(&fixture);
+    rewrite_first_article(&fixture, "", "");
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('a'));
+    let text = render_text(&app, 120, 40);
+    assert!(text.contains("第一篇  0 句"), "文章应如实显示 0 句: {text}");
+    assert!(
+        !text.contains("上次第"),
+        "没有句子的文章不该标出断点: {text}"
+    );
 }
 
 /// 断点属于文章 11；选中另一篇（文章 12）时不能硬套进度。

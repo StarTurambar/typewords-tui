@@ -126,7 +126,7 @@
 
 `try_resume_saved_practice`：主页按 `Enter`（启动后第一次，或同一次运行内退出练习页后）时，若有断点缓存就接着上次的练，而不是重新生成任务。对齐上游 `words.vue` 的 `systemPractice()`——它只在自由模式下 `resetCache=true`，其余模式把现存的 `practiceData` 传给练习页，练习页优先 `applyPracticeCache`。要求断点里的 flow 模式与当前模式一致，否则不恢复（流程阶段对不上）；自由练习显式开新一轮。
 
-文章跟打：`refresh_article_resume` 在启动与 `open_articles` 时读取缓存；文章列表把缓存对应的那一行标成「上次第 N 句」，`start_article_practice` 发现选中文章的 id 与缓存一致时从记录的句子续打（下标会 clamp 到当前句数内），否则从头开始。缓存里的文章 id 在当前书目里找不到时直接忽略，不硬套。
+文章跟打：`refresh_article_resume` 在启动与 `open_articles` 时读取缓存；文章列表把缓存对应的那一行标成「上次第 N 句」，`start_article_practice` 发现选中文章的 id 与缓存一致时从记录的句子续打（下标会 clamp 到当前句数内），否则从头开始。缓存里的文章 id 在当前书目里找不到时直接忽略，不硬套。列表标记也按当前文章的实际句数校验：资源更新后文章变短，旧断点会指到不存在的句子，此时显示 clamp 后的最后一句（与 `start_article_practice` 续打时的下标夹取规则一致）；文章 0 句时不显示标记。存档里的旧下标不直接上屏——那和书本行写「72 篇」却只列出 5 篇是同一类缺陷。
 
 状态不变量：`session` 与 `article_practice` 不会同时为 `Some`；`Screen::ArticlePractice` 只在 `article_practice` 存在时进入。`back()` 从跟打页返回时直接切到 `Screen::Articles`，不经过会被会话拦下的 `navigate_to`；渲染层在缺少状态时也会画出「没有进行中的文章练习 / Esc 返回」而不是空白页。
 
@@ -355,7 +355,7 @@ app.save_all()
 
 文章页有多个入口：主页按 `a`、侧栏 / 顶栏点「文章」、数字键 `2`。**它们必须走同一个方法**——`open_articles`。文章资源是懒加载的（书本在 `assets/list/article.json`、文章在 `assets/dicts/en/article/*.json`），`App` 启动时这两个列表都是空的；`open_articles` 负责载入书本、重置两个光标，再调 `load_selected_book` 载入当前书本的文章。`load_books` 不采信目录里登记的 `length`，篇数直接用每本书文章文件里的实际篇数（文件读不到时该行显示「篇数未知」），所以书本行的「N 篇」和右侧能列出的文章数始终是同一个数字——早期直接渲染 `article.json` 的登记值，出现过「写着 72 篇、只列出 5 篇」。
 
-`open_articles` 还会刷新 `article_resume`：有跟打断点时，缓存对应的那篇文章会标出「上次第 N 句」，选中它按 `Enter` 从断点句子继续；选其他文章则从头开始。启动时不会自动进入跟打页——跟打的恢复只发生在这个显式入口。
+`open_articles` 还会刷新 `article_resume`：有跟打断点时，缓存对应的那篇文章会按当前实际句数校验后标出「上次第 N 句」（旧断点超出当前句数时显示 clamp 到最后一句，0 句文章不显示标记），选中它按 `Enter` 从断点句子继续；选其他文章则从头开始。启动时不会自动进入跟打页——跟打的恢复只发生在这个显式入口。
 
 > 早期只有主页 `a` 那条路径（`Action::OpenArticles` → `open_articles`）会载入资源，侧栏与数字键走 `navigate_to`——那条路径只切了 `screen`，进去是个右栏空空的页面。同一个页面的两个入口给出不同结果，是最难察觉的一类缺陷。
 
