@@ -228,3 +228,79 @@ fn referenced_source_paths_exist() {
         broken.join("\n")
     );
 }
+
+/// 从文本中挑出形如 `x86_64-unknown-linux-musl` 的 Rust target triple。
+fn release_targets(content: &str) -> Vec<String> {
+    let mut targets: Vec<String> = Vec::new();
+    for token in content.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))) {
+        let known_suffix = ["-gnu", "-musl", "-msvc", "-darwin"]
+            .iter()
+            .any(|suffix| token.ends_with(suffix));
+        if known_suffix
+            && token.matches('-').count() >= 2
+            && !targets.iter().any(|known| known.as_str() == token)
+        {
+            targets.push(token.to_string());
+        }
+    }
+    targets
+}
+
+/// 发布矩阵里的每个构建目标都要写进 README 与使用手册的平台支持表，
+/// 并且发布格式统一为 tar.gz + sha256（含聚合的 SHA256SUMS）。
+#[test]
+fn release_targets_and_checksums_are_documented() {
+    let root = repo_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .expect(".github/workflows/release.yml 应存在");
+
+    let targets = release_targets(&workflow);
+    assert!(
+        !targets.is_empty(),
+        "release.yml 应至少声明一个构建目标（target triple）"
+    );
+    assert!(
+        workflow.contains(".tar.gz") && workflow.contains("SHA256SUMS"),
+        "release.yml 应统一产出 tar.gz，并生成聚合校验文件 SHA256SUMS"
+    );
+
+    assert!(
+        !workflow.contains(".zip"),
+        "release.yml 应统一产出 tar.gz，不应再产出 zip 发布包"
+    );
+
+    for document in ["README.md", "docs/usage.md"] {
+        let content = fs::read_to_string(root.join(document)).expect("文档应存在");
+        assert!(
+            content.contains("tar.gz"),
+            "{document} 应说明发布包为 tar.gz"
+        );
+        for target in &targets {
+            assert!(
+                content.contains(target.as_str()),
+                "{document} 未写明发布目标 {target}（见 .github/workflows/release.yml）"
+            );
+            let archive = format!("typewords-tui-vX.Y.Z-{target}.tar.gz");
+            assert!(
+                content.contains(&archive),
+                "{document} 未写明归档名模板 {archive}"
+            );
+        }
+    }
+
+    // 发布流程写在开发指南里，改 matrix 时开发文档不能落后。
+    let development =
+        fs::read_to_string(root.join("docs/development.md")).expect("docs/development.md 应存在");
+    for target in &targets {
+        assert!(
+            development.contains(target.as_str()),
+            "docs/development.md 未写明发布目标 {target}"
+        );
+    }
+
+    let usage = fs::read_to_string(root.join("docs/usage.md")).expect("docs/usage.md 应存在");
+    assert!(
+        usage.contains("SHA256SUMS"),
+        "docs/usage.md 应说明聚合校验文件 SHA256SUMS 的用法"
+    );
+}
