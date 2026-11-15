@@ -329,6 +329,42 @@ pub struct Dict {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+/// 词典学习进度：分子与分母来自同一个口径。
+///
+/// 早期实现分成两套：百分比用 `length.max(words.len())`，`N / M 词` 用
+/// [`Dict::effective_length`]。`length` 比实际词表大时（词库目录元数据
+/// 过旧、导入外部词库、手工裁剪词条文件）同一屏上的百分比与词数会互相
+/// 矛盾，结算推进的「学完判定」也会因为假分母永远到不了。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DictProgress {
+    /// 已学词数：`last_learn_index` 夹在 `[0, total]`。
+    pub learned: usize,
+    /// 有效词数（[`Dict::effective_length`]），即进度分母。
+    pub total: usize,
+    /// 词典是否已学完（结算推进到词表末尾时置位）。
+    pub complete: bool,
+}
+
+impl DictProgress {
+    /// 百分比：已学完固定 100，否则 `learned / total` 四舍五入。
+    pub fn percent(self) -> u32 {
+        if self.complete {
+            return 100;
+        }
+        percent_of(self.learned, self.total)
+    }
+}
+
+/// `done / total` 的整数百分比（四舍五入）；`total == 0` 时记 0。
+///
+/// 所有「进度百分比」都走这里，避免进度条与「N / M」各写一份公式。
+pub fn percent_of(done: usize, total: usize) -> u32 {
+    if total == 0 {
+        return 0;
+    }
+    ((done.min(total) as f64 / total as f64) * 100.0).round() as u32
+}
+
 impl Dict {
     pub fn system(id: &str, name: &str, description: &str) -> Self {
         Self {
@@ -359,6 +395,10 @@ impl Dict {
     }
 
     /// 有效词数（以 words 为准，兼容 length 字段缺省的数据）。
+    ///
+    /// 这是全站**唯一**的「词数 / 进度分母」口径：进度百分比、「N / M 词」、
+    /// 词库页、结算与 `tw task` 都从这里取。任何地方再拿 `length` 当分母，
+    /// 都会在「元数据与实际词表不一致」时和别的显示对不上（见 [`DictProgress`]）。
     pub fn effective_length(&self) -> usize {
         if self.words.is_empty() {
             self.length
@@ -367,15 +407,18 @@ impl Dict {
         }
     }
 
+    /// 学习进度：百分比和「已学 N / M 词」都从这一份快照取。
+    pub fn progress(&self) -> DictProgress {
+        let total = self.effective_length();
+        DictProgress {
+            learned: self.last_learn_index.min(total),
+            total,
+            complete: self.complete,
+        }
+    }
+
     pub fn progress_percent(&self) -> u32 {
-        let length = self.length.max(self.words.len());
-        if length == 0 {
-            return 0;
-        }
-        if self.complete {
-            return 100;
-        }
-        ((self.last_learn_index.min(length) as f64 / length as f64) * 100.0).round() as u32
+        self.progress().percent()
     }
 
     pub fn per_day(&self) -> usize {
@@ -884,7 +927,19 @@ impl BaseState {
             let per_day = dict.per_day_study_number;
             let complete = dict.complete;
             existing.words = words;
-            existing.length = dict.length.max(existing.words.len());
+            // `length` 只服务「词表还没加载」的兜底（存档 shake 后只剩元数据）：
+            // 词表在手里就以它为准，否则存档里会留下比实际词表大的假分母。
+            existing.length = if existing.words.is_empty() {
+                // 词表加载不到时只剩元数据：优先目录里声明的词数，目录也没写才
+                // 沿用存档里的旧值（不用 max——那会把存档里已校正的长度重新抬高）。
+                if dict.length > 0 {
+                    dict.length
+                } else {
+                    existing.length
+                }
+            } else {
+                existing.words.len()
+            };
             existing.last_learn_index = last_learn_index;
             existing.per_day_study_number = per_day;
             existing.complete = complete;
@@ -896,7 +951,10 @@ impl BaseState {
             self.word.study_index = index as i32;
         } else {
             let mut dict = dict;
-            dict.length = dict.length.max(dict.words.len());
+            // 同上：词表在手里时 `length` 就是实际词数，不再另存一份可能过期的计数。
+            if !dict.words.is_empty() {
+                dict.length = dict.words.len();
+            }
             self.word.book_list.push(dict);
             self.word.study_index = (self.word.book_list.len() - 1) as i32;
         }
@@ -986,4 +1044,90 @@ pub struct PracticeCacheCompact {
     pub practice_data: Option<PracticeDataCompact>,
     pub stat_store_data: Option<PracticeState>,
     pub session_snapshot: Option<PracticeSessionSnapshot>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict_with_words(count: usize, length: usize, last_learn_index: usize) -> Dict {
+        Dict {
+            length,
+            last_learn_index,
+            words: (0..count)
+                .map(|index| Word::new(format!("w{index}")))
+                .collect(),
+            ..Dict::default()
+        }
+    }
+
+    /// 百分比与「N / M 词」共用有效词数这个分母：目录元数据比实际词表大时，
+    /// 不能按元数据算百分比。
+    #[test]
+    fn progress_uses_the_effective_word_count_as_denominator() {
+        let dict = dict_with_words(12, 20, 6);
+        assert_eq!(dict.effective_length(), 12);
+        assert_eq!(dict.progress_percent(), 50);
+        assert_eq!(
+            dict.progress(),
+            DictProgress {
+                learned: 6,
+                total: 12,
+                complete: false,
+            }
+        );
+    }
+
+    /// `last_learn_index` 超出有效词数时夹紧，进度不会超过 100%。
+    #[test]
+    fn progress_clamps_learned_to_the_effective_length() {
+        let dict = dict_with_words(12, 20, 18);
+        assert_eq!(dict.progress().learned, 12);
+        assert_eq!(dict.progress_percent(), 100);
+    }
+
+    /// 词表为空（存档 shake 后）时回退到元数据里的词数。
+    #[test]
+    fn empty_word_list_falls_back_to_the_stored_length() {
+        let dict = dict_with_words(0, 20, 5);
+        assert_eq!(dict.effective_length(), 20);
+        assert_eq!(dict.progress_percent(), 25);
+    }
+
+    /// `complete` 优先：学完后固定 100%。
+    #[test]
+    fn completed_dictionary_is_always_full() {
+        let mut dict = dict_with_words(12, 20, 3);
+        dict.complete = true;
+        assert_eq!(dict.progress_percent(), 100);
+    }
+
+    /// 百分比只有一份公式：0 分母记 0，其余四舍五入。
+    #[test]
+    fn percent_of_rounds_and_handles_zero() {
+        assert_eq!(percent_of(0, 0), 0);
+        assert_eq!(percent_of(5, 0), 0);
+        assert_eq!(percent_of(1, 3), 33);
+        assert_eq!(percent_of(2, 3), 67);
+        assert_eq!(percent_of(12, 12), 100);
+        assert_eq!(percent_of(9, 6), 100, "分子大于分母时夹到 100");
+    }
+
+    /// 词表在手里时 `length` 校正为 `words.len()`；词表为空时保留元数据兜底。
+    #[test]
+    fn set_study_dict_keeps_length_in_sync_with_the_word_list() {
+        let mut base = BaseState::default();
+        let mut dict = dict_with_words(12, 20, 0);
+        dict.id = "toy".to_string();
+        base.set_study_dict(dict);
+        let stored = base.study_dict().expect("应设为当前词典");
+        assert_eq!(stored.length, 12, "词表在手里时 length 应校正");
+        assert_eq!(stored.effective_length(), 12);
+
+        // shake 之后词表为空，length 作为元数据保留（下次启动按 id 重新加载词表）。
+        base.shake_common_dict();
+        let stored = base.study_dict().expect("应仍为当前词典");
+        assert!(stored.words.is_empty());
+        assert_eq!(stored.effective_length(), 12);
+    }
 }

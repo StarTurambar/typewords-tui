@@ -125,11 +125,7 @@ pub fn recent_days(base: &BaseState, count: usize) -> Vec<(NaiveDate, DayTotals)
 
 /// 与 Web 的 _getAccomplishDate 一致：today + ceil(剩余词数 / 每日词数)。
 pub fn estimated_finish(dict: &Dict, today: NaiveDate) -> Option<NaiveDate> {
-    let total = if dict.words.is_empty() {
-        dict.length
-    } else {
-        dict.words.len()
-    };
+    let total = dict.effective_length();
     let remaining = total.saturating_sub(dict.last_learn_index);
     if dict.complete || remaining == 0 {
         return None;

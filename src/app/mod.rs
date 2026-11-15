@@ -377,6 +377,17 @@ pub struct SummaryData {
     pub focus: SummaryButton,
 }
 
+impl SummaryData {
+    /// 结算进度条的百分比：分子分母来自同一口径（单词取词典有效词数，
+    /// 文章取句子数），公式与词典进度共用 [`crate::domain::types::percent_of`]。
+    pub fn percent(&self) -> u32 {
+        if self.complete {
+            return 100;
+        }
+        crate::domain::types::percent_of(self.last_learn_index, self.length)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmAction {
     Quit,
@@ -1208,12 +1219,13 @@ impl App {
         } else {
             (((total.saturating_sub(wrong)) as f64 / total as f64) * 100.0).round() as u32
         };
-        let (last_learn_index, length, complete) = self
+        // 结算的进度三件套与主页、`tw task` 同源：分母取有效词数。
+        let progress = self
             .boot
             .base
             .study_dict()
-            .map(|dict| (dict.last_learn_index, dict.length, dict.complete))
-            .unwrap_or((0, 0, false));
+            .map(|dict| dict.progress())
+            .unwrap_or_default();
         // 错词 Top10：按本轮错误次数倒序
         let mut wrong_top: Vec<(String, i64)> = session
             .data
@@ -1238,9 +1250,9 @@ impl App {
             new_words: self.stat.new_word_number,
             review: self.stat.review_word_number,
             wrong,
-            last_learn_index,
-            length,
-            complete,
+            last_learn_index: progress.learned,
+            length: progress.total,
+            complete: progress.complete,
             wrong_top,
             week_days,
             // 新结算的按钮焦点回到默认的「继续」。
@@ -1278,7 +1290,6 @@ impl App {
             &mut self.boot.base,
             &self.boot.settings,
             &mut self.rng,
-            &self.stat,
             was_complete,
         );
         if task.is_empty() {
@@ -1954,6 +1965,15 @@ impl App {
             });
             self.save_dict_now();
         }
+        // 单词测试只复习既有词条、不推进词典进度，结算显示词典的真实进度。
+        // 早期实现填「0 / 题目数 / 已完成」，界面上是「学习进度 0 / 12 已完成」
+        // 加一根 0% 的进度条，和 docs/app.md 描述的口径也不符。
+        let progress = self
+            .boot
+            .base
+            .study_dict()
+            .map(|dict| dict.progress())
+            .unwrap_or_default();
         self.summary = Some(SummaryData {
             kind: SummaryKind::Word,
             spend_ms: spend,
@@ -1961,9 +1981,9 @@ impl App {
             new_words: 0,
             review: total,
             wrong: state.wrong,
-            last_learn_index: 0,
-            length: total,
-            complete: true,
+            last_learn_index: progress.learned,
+            length: progress.total,
+            complete: progress.complete,
             wrong_top: Vec::new(),
             week_days: [None; 7],
             focus: SummaryButton::default(),

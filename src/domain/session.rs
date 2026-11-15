@@ -677,9 +677,14 @@ impl PracticeSession {
     // ── 结算 ─────────────────────────────────────────────────────────────
 
     /// 推进当前词典的学习进度（对应 Web 的 updateCompletedDictProgress）。
+    ///
+    /// 「学完」的判定与进度上限都用有效词数（[`Dict::effective_length`]）：
+    /// 拿存档里的 `length` 当分母时，只要元数据比实际词表大，整本学完也不会
+    /// 置 `complete`，主页与结算永远停在半截。
     pub fn advance_dict_progress(base: &mut BaseState, new_word_number: usize, check_all: bool) {
         let ignore_list = base.known_words();
         if let Some(dict) = base.study_dict_mut() {
+            let total = dict.effective_length();
             dict.last_learn_index = dict.last_learn_index.saturating_add(new_word_number);
             let start = if check_all { 0 } else { dict.last_learn_index };
             let words_to_check: Vec<String> = dict
@@ -692,9 +697,9 @@ impl PracticeSession {
                 .iter()
                 .filter(|key| words_to_check.iter().any(|word| word == *key))
                 .count();
-            if dict.last_learn_index + ignore_count >= dict.length {
+            if dict.last_learn_index + ignore_count >= total {
                 dict.complete = true;
-                dict.last_learn_index = dict.length;
+                dict.last_learn_index = total;
             }
         }
     }
@@ -771,14 +776,18 @@ impl PracticeSession {
         base: &mut BaseState,
         settings: &SettingState,
         rng: &mut Rng,
-        stat: &PracticeState,
         was_complete: bool,
     ) -> TaskWords {
         if self.mode == WordPracticeMode::Shuffle {
             return crate::domain::study_task::create_shuffle_task(base, settings, None, rng);
         }
+        // 进度在 `settle`（上一轮结算）里已经推进过，这里只能复核完成度，
+        // 不能再加一次 `stat.new_word_number`：`stat` 要到下一轮
+        // `initialize_task` 才重置，二次推进会让进度一次跳两组——被跳过的
+        // 词永远不出现，主页百分比却已经越过它们（旧实现实测第 1 组学完
+        // 直接出第 3 组，词表一半没教过）。
         if !was_complete {
-            Self::advance_dict_progress(base, stat.new_word_number, true);
+            Self::advance_dict_progress(base, 0, true);
         }
         crate::domain::study_task::create_study_task(base, settings, rng).task_words
     }
@@ -958,5 +967,26 @@ mod tests {
                 "{mode:?} 是默写流程，不该朗读答案"
             );
         }
+    }
+
+    /// 「学完」判定按有效词数：存档里的 `length` 比实际词表大时，
+    /// 旧实现会把 `last_learn_index` 推到 12 却永远不置 `complete`。
+    #[test]
+    fn advancing_to_the_last_word_completes_the_dictionary() {
+        let mut base = BaseState::default();
+        base.word.book_list.push(Dict {
+            length: 20,
+            last_learn_index: 0,
+            words: (0..12)
+                .map(|index| Word::new(format!("w{index}")))
+                .collect(),
+            ..Dict::default()
+        });
+        // 默认存档里已经有三本内置词典，当前词典是刚追加的那本。
+        base.word.study_index = (base.word.book_list.len() - 1) as i32;
+        PracticeSession::advance_dict_progress(&mut base, 12, false);
+        let dict = base.study_dict().expect("应选中词典");
+        assert!(dict.complete, "词表里的词全学完了应标记完成");
+        assert_eq!(dict.last_learn_index, 12, "进度夹在有效词数内");
     }
 }

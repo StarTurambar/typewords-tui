@@ -90,9 +90,16 @@ pub fn get_current_study_word(
 
     let ignore_set = base.ignore_words_set(settings.ignore_simple_word);
     let per_day = dict.per_day();
-    let start = dict.last_learn_index.min(words.len());
+    // 进度分母与 `per_day()` / 结算推进同源。读作 `length` 时，元数据比实际
+    // 词表大就永远判不出「最后一组」，整本学完也进不了总复习。
+    let total = dict.effective_length();
+    let start = dict.last_learn_index.min(total);
     let complete = dict.complete;
-    let is_end = start >= dict.length.saturating_sub(1) && dict.length != 1;
+    // 「到头」= 新词已经全部学完。不能写成 `total - 1`：只剩最后一个词时
+    // 那样会被判成「已到头」，新词列表恒空、`last_learn_index` 停在 `total - 1`，
+    // 词典永远学不完（词数 ≡ 1 mod 每日词数时必现，例如 21 词 + 每日 20）。
+    // 上游 `dict.ts` 的 `isEnd` 同样是 `length - 1`，这里刻意比上游正确。
+    let is_end = start >= total;
     let review_ratio = settings.word_review_ratio;
 
     let mut new_words: Vec<Word> = Vec::new();
@@ -204,5 +211,47 @@ pub fn create_shuffle_task(
     TaskWords {
         new: Vec::new(),
         review: candidates.into_iter().take(total).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::rng::seeded;
+    use crate::domain::types::{Dict, SettingState};
+
+    fn base_with_words(count: usize, last_learn_index: usize, per_day: usize) -> BaseState {
+        let mut base = BaseState::default();
+        base.word.book_list.push(Dict {
+            length: count,
+            last_learn_index,
+            per_day_study_number: per_day,
+            words: (0..count)
+                .map(|index| Word::new(format!("w{index}")))
+                .collect(),
+            ..Dict::default()
+        });
+        // 默认存档里已经有三本内置词典，当前词典是刚追加的那本。
+        base.word.study_index = (base.word.book_list.len() - 1) as i32;
+        base
+    }
+
+    /// 只剩最后一个词时也要把它出成新词：`is_end` 不能在 `total - 1` 就成立。
+    #[test]
+    fn the_last_word_is_still_offered_as_a_new_word() {
+        let base = base_with_words(2, 1, 1);
+        let mut rng = seeded(7);
+        let task = get_current_study_word(&base, &SettingState::default(), &mut rng);
+        assert_eq!(task.new.len(), 1, "还剩最后一个词，应该出题");
+        assert_eq!(task.new[0].word, "w1");
+    }
+
+    /// 词表学完之后不再出新词，转入复习。
+    #[test]
+    fn a_finished_word_list_offers_no_new_words() {
+        let base = base_with_words(2, 2, 1);
+        let mut rng = seeded(7);
+        let task = get_current_study_word(&base, &SettingState::default(), &mut rng);
+        assert!(task.new.is_empty(), "学完之后不该再出新词");
     }
 }
