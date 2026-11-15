@@ -98,7 +98,7 @@
 | `Word` | `id?`、`custom`、`word`、`phonetic0/1`、`trans`、`sentences`、`phrases`、`synos`、`rel_words`、`etymology` | 词条；`lower()`、`is_usable()`（仅要求 `word` 非空）、`trans_joined()`、`phonetic(uk)` |
 | `Trans` / `WordSubContent` | `pos`、`cn`、`frequency?`；`c`、`cn` | 释义、例句与短语 |
 | `Syno` / `RelGroup` / `RelWords` / `Etymology` | `pos`、`cn`、`ws`；`pos`、`words`；`root`、`rels`；`t`、`d` | 同义词、同根词、词源 |
-| `Dict` | `id`、`en_name`、`name`、`description`、`url`、`length`、`category`、`tags`、`translate_language`、`language`、`last_learn_index`、`per_day_study_number`、`words`、`articles`、`statistics`、`custom`、`system`、`source_id`、`complete`、`cover?`、`extra` | 词库或系统词典；`identity_list`/`matches_id`（id 与 enName 都可作路由）、`effective_length`、`progress_percent`、`per_day` |
+| `Dict` | `id`、`en_name`、`name`、`description`、`url`、`length`、`category`、`tags`、`translate_language`、`language`、`last_learn_index`、`per_day_study_number`、`words`、`articles`、`statistics`、`custom`、`system`、`source_id`、`complete`、`cover?`、`extra` | 词库或系统词典；`identity_list`/`matches_id`（id 与 enName 都可作路由）、`effective_length`（词表实际词数，学完判定与进度的唯一口径）、`progress_percent`、`per_day`、`normalize_progress`（装载校正，见 12.5） |
 | `BookGroup` | `book_list`、`study_index` | `study_index < 0` 表示没有当前词典 |
 | `Card` | `due`、`stability`、`difficulty`、`elapsed_days`、`scheduled_days`、`learning_steps`、`reps`、`lapses`、`state`、`last_review?` | 与 ts-fsrs `Card` 对齐；`state` 取值 0–3 |
 | `Statistics` | `start_date`、`spend`、`total`、`new`、`review`、`wrong`、`title?`、`segments?`、`session_role?` | 一条学习记录；`segments` 为 `[startMs, endMs]` 数组 |
@@ -205,7 +205,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `en_name` | 也可作为路由/切换参数；反序列化兼容 `en_name` |
 | `name`、`description`、`category`、`tags`、`cover?` | 展示元数据 |
 | `url` | 词条文件名，相对 `dicts/<language>/word/` |
-| `length` | 声明词数；`to_dict` 在缺省时回退实际词数 |
+| `length` | 目录登记词数；`to_dict` 在缺省时回退实际词数。它只是登记值：学完判定与进度一律按词表实际词数（`Dict::effective_length`），装载词表后 `normalize_progress` 会把 `length` 校准成实际词数 |
 | `language`、`translate_language` | 缺省语言为 `"en"` |
 | `type` / `kind` | 只有 `word`（或缺省）会被收录 |
 | `version` | 词库资源版本，TUI 不做升级处理 |
@@ -220,7 +220,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | `user_dict_file(name)` | `home/dicts/en/word/<name>` |
 | `read_user_catalog()` | 读 `home/list/word.json`；不存在返回空数组 |
 | `write_user_catalog(value)` | 以 pretty JSON 原子写入用户目录 |
-| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 缺省用实际词数、`custom` 取自目录项的 `custom` 标记 |
+| `DictResource::to_dict(words)` | 生成可持久化 `Dict`：`per_day_study_number: 20`、`name` 缺省用 id、`length` 缺省用实际词数、`custom` 取自目录项的 `custom` 标记；装载词表后由 `Bootstrapped::select_dict` 的进度校正把 `length` 校准成实际词数（见 12.5） |
 
 `import_dict(paths, source)` 的完整行为：
 
@@ -242,7 +242,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 1. 取 `base.study_dict()`；没有词典或词表为空则返回空任务。
 2. 计算忽略集合：`base.ignore_words_set(settings.ignore_simple_word)`，即“已掌握词”的小写集合；开启“忽略简单词”时再并入 `simple_words` 的小写形式。
 3. 计算每日词数 `per_day = dict.per_day()`：词典完成后取 `per_day_study_number.max(1)`，否则 `per_day_study_number` clamp 到 `[1, effective_length]`。
-4. 计算新词：从 `last_learn_index` 开始向后扫描 `dict.words`，跳过忽略集合中的词，收集到 `per_day` 个为止。若 `is_end`（扫描起点 `start >= dict.length - 1` 且 `length != 1`）或词典已完成，则不取新词。
+4. 计算新词：从 `last_learn_index` 开始向后扫描 `dict.words`，跳过忽略集合中的词，收集到 `per_day` 个为止。若 `is_end`（扫描起点之后已没有任何可学的新词：已学到词表末尾，或剩余词全在忽略集合里）或词典已完成，则不取新词。**学完判定只看词表本身**（`words` / `dict.effective_length()`），不看词库目录登记的 `length`：登记值偏大时按它判「是否到末尾」永远到不了；也不能按位置判 `start >= 词数 - 1`，那会让最后一个词永远学不到、`complete` 永远不置位（上游 `words.vue` 的同款边界）。
 5. 计算到期复习：当 `word_review_ratio >= 1` 或词典完成或已到末尾时执行；目标数量 `per_day * ratio`（`is_end` 时 ratio 至少为 1）。从 `base.fsrs_data` 中筛出同时满足以下条件的词：未在忽略集合、卡片按 `Local` 自然日到期（`due.date <= 今天`）、词条存在于当前词典、不属于本轮新词；按 `due` 升序取前 `total_need` 个，再整体洗牌。
 6. 随机填充：若开关开启且到期复习为 0，则 `total_need = per_day * word_review_ratio`（小于 0 按 0），从已学范围 `words[..min(last_learn_index, len)]` 中排除忽略词与本轮新词/复习词后洗牌取前 `total_need` 个。
 
@@ -252,7 +252,7 @@ TUI 对存档模型的扩展是 `SettingState.tui_big_word`（序列化名 `tuiB
 | --- | --- |
 | 没有当前词典/词表为空 | 返回空任务；应用层提示“没有可学习的单词！”并且不进入练习 |
 | 词典已完成或到末尾 | 不再取新词；仍按 `per_day * max(ratio,1)` 取到期复习 |
-| 所有剩余词都在忽略集合 | 新词为空；应用层不启动空任务 |
+| 所有剩余词都在忽略集合 | 视为 `is_end`：新词为空，仍按 `per_day * max(ratio, 1)` 取到期复习（结算时忽略词计入完成判定）；仍为空时应用层不启动空任务 |
 | 无到期复习且随机填充关闭 | 复习为空，只剩新词 |
 | 无到期复习且随机填充开启、`review_ratio = 0` | 填充数量为 0，复习仍为空 |
 | 复习候选不足 | 只返回实际候选数，不补齐 |
@@ -575,7 +575,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 | 已掌握 | 反引号键或自测“已掌握” | `toggle_word_simple_for_current` / `on_word_mastered` |
 | FSRS 卡 | 会话结算 `settle` | `Scheduler::next_card` → `BaseState::fsrs_data` |
 | statistics | 会话结算 `settle` | `flush_stat_to_store` |
-| `last_learn_index` / `complete` | 结算（见 12.5）与继续下一组 | `advance_dict_progress` |
+| `last_learn_index` / `complete` | 结算（见 12.5）与继续下一组；启动装载时按实际词数校正（`normalize_progress`，见 12.5） | `advance_dict_progress` / `bootstrap::load` |
 | 练习缓存 | 应用层的定时/推进/退出保存 | `build_cache` + `cache_to_compact` |
 
 ### 12.4 断点续练缓存
@@ -597,7 +597,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 `settle(base, settings, stat, now)` 的顺序：
 
 1. `stat.wrong = data.all_wrong_words.len()`（本轮仍错的唯一词数）。
-2. 非 Shuffle 模式调用 `advance_dict_progress(base, stat.new_word_number, false)`：`last_learn_index += new_word_number`；从推进后的位置统计“已掌握词”数量并计入完成判断，达到 `length` 时置 `complete = true` 并把下标设为 `length`。
+2. 非 Shuffle 模式调用 `advance_dict_progress(base, stat.new_word_number, false)`：`last_learn_index = min(last_learn_index + new_word_number, 实际词数)`（进度夹在 `[0, 实际词数]` 内，旧存档越过末尾的值顺带夹回）；从推进后的位置统计“已掌握词”数量并计入完成判断，达到实际词数（`Dict::effective_length`，**不是**目录登记的 `length`）时置 `complete = true` 并把下标设为实际词数。
 3. `close_open_segment` 后 `normalize_practice_timer`，把清洗结果写回 `stat`。
 4. `flush_stat_to_store(base.study_dict_mut(), stat)` 写入统计。
 5. 构造 `Scheduler`，遍历 `data.wrong_times_map`：评级优先取 `rating_map`，否则按错误次数映射；用 `scheduler.next_card` 更新 `base.fsrs_data`。`settle` 只在会话完成时调用一次，练习过程中不写 FSRS 卡。
@@ -609,9 +609,11 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 | `spend_ms` | `stat.spend`（归一化后） |
 | `accuracy` | `round((total - wrong) / total * 100)`，`total == 0` 时为 100 |
 | `new_words` / `review` / `wrong` | `stat.new_word_number` / `stat.review_word_number` / `stat.wrong` |
-| `last_learn_index` / `length` / `complete` | 结算后的当前学习词典 |
+| `last_learn_index` / `length` / `complete` | 结算后的当前学习词典；`length` 取 `effective_length()`（词表实际词数） |
 
 后续会话：`create_next_task` 在 Shuffle 模式下重新 `create_shuffle_task`；其他模式若词典尚未完成，会再以 `check_all = true` 调一次 `advance_dict_progress`（与 Web 的 `createNextTask` 行为一致），然后 `create_study_task`。`create_repeat_task` 回滚 `last_learn_index -= stat.new_word_number`（Shuffle 除外），按忽略集合过滤任务词后重学。
+
+> **登记值不等于真实词数**：`dict.length` 来自词库目录，`words` 来自词条文件，两者可能不一致（用户删过词、词库文件被换成更短的版本）。学完判定、进度推进、进度百分比、结算与 `tw task` 的「N 词」都只看词表（`words` / `Dict::effective_length()`，即实际词数）。装载词表后 `Dict::normalize_progress` 会做一次校正：`length = words.len()`；若 `last_learn_index` 已到/越过实际词数，则夹回实际词数并置 `complete = true`，返回「校正过」时应用层丢弃旧断点缓存（对齐上游 `words.vue` init 的 `length = dict.words.length` 与 `lastLearnIndex > length` 分支里的 `resetCacheData()`）。否则「登记值偏大」的旧存档会卡在「进度已到词表末尾但 `complete = false`」：没有新词可取、也进不了总复习阶段。
 
 ### 12.6 模式差异
 

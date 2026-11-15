@@ -92,7 +92,19 @@ pub fn get_current_study_word(
     let per_day = dict.per_day();
     let start = dict.last_learn_index.min(words.len());
     let complete = dict.complete;
-    let is_end = start >= dict.length.saturating_sub(1) && dict.length != 1;
+    // 学完判定只看词表（`words`，即实际词数），不看词库目录里的登记值
+    // `dict.length`：删过词 / 换过更短的词库文件后登记值会大于真实词数，
+    // 按它判「是否到末尾」就永远到不了，`complete` 永远不置位（主页会一直
+    // 停在预计完成日期）。
+    //
+    // 「已到末尾」= 扫描起点之后已没有可学的新词（剩余词全在忽略集合里也算）。
+    // 不能按位置判 `start >= 实际词数 - 1`：词表刚好只剩最后一个词时那个词
+    // 永远取不到，而 `advance_dict_progress` 按「已学词数到实际词数」判完成，
+    // `complete` 也就永远不置位——症状与登记值偏大时一模一样。
+    let has_learnable_new = words[start..]
+        .iter()
+        .any(|word| !ignore_set.contains(&word.lower()));
+    let is_end = !has_learnable_new;
     let review_ratio = settings.word_review_ratio;
 
     let mut new_words: Vec<Word> = Vec::new();
@@ -204,5 +216,103 @@ pub fn create_shuffle_task(
     TaskWords {
         new: Vec::new(),
         review: candidates.into_iter().take(total).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::rng::seeded;
+    use crate::domain::types::{Card, Dict};
+
+    /// 构造一本「目录登记词数」与词表实际词数不一致的学习词典。
+    ///
+    /// 词库目录里的 `length` 只是登记值：用户删过词、或词库文件被换成
+    /// 更短的版本后，登记值会大于词表里的实际词数。
+    fn base_with(length: usize, words: usize, last_learn_index: usize) -> BaseState {
+        let mut base = BaseState::default();
+        let words: Vec<Word> = (0..words)
+            .map(|index| Word::new(format!("word{index:02}")))
+            .collect();
+        base.word.book_list.push(Dict {
+            id: "toy".to_string(),
+            en_name: "toy".to_string(),
+            name: "测试词库".to_string(),
+            words,
+            length,
+            last_learn_index,
+            per_day_study_number: 20,
+            ..Dict::default()
+        });
+        let index = base.word.book_list.len() - 1;
+        base.set_study_index(index);
+        base
+    }
+
+    /// 学完判定按词表实际词数走：登记值偏大时，实际词表已到尾就不再取新词，
+    /// 也不会因为还没追平登记值而把任务判成未完成。
+    #[test]
+    fn study_task_stops_new_words_at_the_actual_word_count() {
+        // 登记 8 词、实际 5 词，5 个实际词都已学完。
+        let base = base_with(8, 5, 5);
+        let settings = SettingState::default();
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert!(
+            task.new.is_empty(),
+            "实际词表已到尾，不应再取新词，实际取了 {:?}",
+            task.new
+                .iter()
+                .map(|word| word.word.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 只剩最后一个实际词时仍要把它当新词取出来：按位置判「末尾」（`start >=
+    /// length - 1`）会跳过它，那个词永远学不到，`complete` 也就永远不置位。
+    #[test]
+    fn the_last_remaining_word_is_still_offered_as_a_new_word() {
+        // 12 词、已学 11 个，只剩最后一个。
+        let base = base_with(12, 12, 11);
+        let settings = SettingState::default();
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert_eq!(task.new.len(), 1, "最后一个词应作为新词出现");
+        assert_eq!(task.new[0].word, "word11");
+    }
+
+    /// 剩余词全在忽略集合里时直接转入复习：不能因为取不到新词就给出空任务，
+    /// 那会让会话无法结算、`complete` 永远不置位。
+    #[test]
+    fn study_task_falls_back_to_review_when_every_remaining_word_is_ignored() {
+        let mut base = base_with(5, 5, 3);
+        let ignored: Vec<Word> = base.study_dict().expect("当前词典").words[3..].to_vec();
+        base.known_mut().expect("已掌握词典").words = ignored;
+        // 已学过的词都到期（`Card::default().due` 是现在），复习分支才有的可抽。
+        for word in ["word00", "word01", "word02"] {
+            base.fsrs_data.insert(word.to_string(), Card::default());
+        }
+        let settings = SettingState {
+            word_review_ratio: 0,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert!(task.new.is_empty(), "剩余词都被忽略，不应再取新词");
+        assert!(
+            !task.review.is_empty(),
+            "剩余词全被忽略时应转入复习，而不是给出空任务"
+        );
+    }
+
+    /// 反过来，登记值偏小时也不能提前停止：学完判定不能被偏小的登记值截断。
+    #[test]
+    fn study_task_ignores_a_length_registry_smaller_than_the_word_list() {
+        // 登记 2 词、实际 5 词，已学 1 个：还剩 4 个实际新词可学。
+        let base = base_with(2, 5, 1);
+        let settings = SettingState::default();
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert_eq!(task.new.len(), 4, "应按实际词表继续取新词");
     }
 }

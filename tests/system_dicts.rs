@@ -205,6 +205,31 @@ fn system_dicts_are_listed_before_resource_dicts() {
     assert!(text.contains("内置"), "内置词典行应标注「内置」");
 }
 
+/// 词库页的「N 词」按词表实际词条数显示：目录登记的 `length` 偏大时不能虚报，
+/// 否则词库页与主页（已学 X / 实际词数）会给出两个不同的词数。
+#[test]
+fn the_dict_page_word_count_uses_the_actual_word_list() {
+    let (_fixture, mut app) = test_app(WIDE);
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.length = 20; // 登记 20 词，文件里实际只有 12 个
+    }
+    let entry = app
+        .dict_entries()
+        .into_iter()
+        .find(|entry| entry.current)
+        .expect("当前词典");
+    assert_eq!(entry.length, 12, "词库页词数应取实际词条数");
+    assert_eq!(
+        entry.percent,
+        app.boot
+            .base
+            .study_dict()
+            .map(typewords_tui::domain::types::Dict::progress_percent)
+            .unwrap_or(0),
+        "词库页百分比应与主页同一口径"
+    );
+}
+
 // ── 词条管理 ─────────────────────────────────────────────────────────────
 
 /// 进入词库页光标停在当前学习词典；上移到内置词典行按 w 打开它的词条页。

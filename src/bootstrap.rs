@@ -50,7 +50,28 @@ impl Bootstrapped {
             dict.per_day_study_number = dict.words.len().max(1);
         }
         self.base.set_study_dict(dict);
+        self.normalize_study_progress();
         Ok(())
+    }
+
+    /// 按词表实际词数校准当前学习词典的词数与进度（对齐上游 `words.vue` init）。
+    ///
+    /// 词库目录里的 `length` 与存档里的 `lastLearnIndex` 都是「登记」性质的值：
+    /// 词表文件删过词、或换成更短的词库后，它们会大于真实词数。学完判定一律按
+    /// 实际词数走（`Dict::effective_length`），装载时先把当前词典校正一次；
+    /// 校正过进度说明旧断点属于校正前的进度，顺手丢弃（上游同一处调
+    /// `resetCacheData()`，否则续练会把夹回的进度再算回去）。
+    ///
+    /// 内置词典（收藏 / 错词 / 已掌握）不参与校正：它们的词条就存在存档里，
+    /// `length` 由词条增删同步维护，上游也不做这一步。
+    fn normalize_study_progress(&mut self) {
+        let repaired = match self.base.study_dict_mut() {
+            Some(dict) if !dict.system => dict.normalize_progress(),
+            _ => false,
+        };
+        if repaired {
+            let _ = self.store.remove_practice();
+        }
     }
 
     /// 确保当前词典已加载词表；为空则按 id 重新加载或选第一本词库。
@@ -147,5 +168,8 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     } else {
         bootstrapped.ensure_study_dict()?;
     }
+    // 自建词典与内置词典不会从资源重载词表，也要按词表实际词数校准一次；
+    // 资源词库在上面的 select_dict 里已经校准过（此处幂等）。
+    bootstrapped.normalize_study_progress();
     Ok(bootstrapped)
 }

@@ -158,16 +158,19 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
     let dict = boot
         .study_dict()
         .ok_or_else(|| anyhow!("没有当前学习词典"))?;
+    // 词数与进度都按词表实际词数显示：目录登记的 `length` 只是登记值，
+    // 删过词的词库里它会大于真实词数（学完判定也不认它）。
+    let length = dict.effective_length();
     println!(
         "词库: {}（{} 词，每日 {} 词）",
         dict.name,
-        dict.length,
+        length,
         dict.per_day()
     );
     println!(
         "学习进度: {}/{} ({}%){}",
         dict.last_learn_index,
-        dict.length,
+        length,
         dict.progress_percent(),
         if dict.complete { "，已完成" } else { "" }
     );

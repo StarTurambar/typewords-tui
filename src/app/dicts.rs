@@ -38,7 +38,8 @@ pub struct DictEntry {
     pub description: String,
     pub category: String,
     pub tags: Vec<String>,
-    /// 词数：内置词典取实际词条数，资源取目录里登记的长度。
+    /// 词数：一律取实际词条数（已装载的词典用 `Dict::effective_length()`），
+    /// 只有从未装载过的资源词库才回退到目录登记的长度。
     pub length: usize,
     /// 学习进度百分比（内置词典平时不推进，界面不给它们画进度条）。
     pub percent: u32,
@@ -101,11 +102,13 @@ impl App {
                 description: resource.description.clone(),
                 category: resource.category.clone(),
                 tags: resource.tags.clone(),
-                length: if resource.length > 0 {
-                    resource.length
-                } else {
-                    owned.map(Dict::effective_length).unwrap_or(0)
-                },
+                // 已经装载过的词典按实际词条数显示：目录里的 `length` 只是
+                // 登记值，删过词 / 换过更短的词库文件后会大于真实词数；主页与
+                // `Dict::progress_percent` 都按实际词数算，两处必须同口径。
+                length: owned
+                    .map(Dict::effective_length)
+                    .filter(|length| *length > 0)
+                    .unwrap_or(resource.length),
                 percent: owned.map(Dict::progress_percent).unwrap_or(0),
                 current,
                 system: false,

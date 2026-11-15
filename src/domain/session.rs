@@ -677,10 +677,19 @@ impl PracticeSession {
     // ── 结算 ─────────────────────────────────────────────────────────────
 
     /// 推进当前词典的学习进度（对应 Web 的 updateCompletedDictProgress）。
+    ///
+    /// 词数取词表实际词数（`Dict::effective_length`），不认词库目录里的登记值
+    /// `dict.length`：删过词 / 换过更短的词库文件后，登记值会大于真实词数，
+    /// 按它判完成会让 `complete` 永远不置位，进度也永远追不上登记值。
+    /// 进度本身也夹在 `[0, 实际词数]` 内，旧存档里已越过末尾的值会被夹回。
     pub fn advance_dict_progress(base: &mut BaseState, new_word_number: usize, check_all: bool) {
         let ignore_list = base.known_words();
         if let Some(dict) = base.study_dict_mut() {
-            dict.last_learn_index = dict.last_learn_index.saturating_add(new_word_number);
+            let length = dict.effective_length();
+            dict.last_learn_index = dict
+                .last_learn_index
+                .saturating_add(new_word_number)
+                .min(length);
             let start = if check_all { 0 } else { dict.last_learn_index };
             let words_to_check: Vec<String> = dict
                 .words
@@ -692,9 +701,9 @@ impl PracticeSession {
                 .iter()
                 .filter(|key| words_to_check.iter().any(|word| word == *key))
                 .count();
-            if dict.last_learn_index + ignore_count >= dict.length {
+            if dict.last_learn_index + ignore_count >= length {
                 dict.complete = true;
-                dict.last_learn_index = dict.length;
+                dict.last_learn_index = length;
             }
         }
     }
@@ -958,5 +967,57 @@ mod tests {
                 "{mode:?} 是默写流程，不该朗读答案"
             );
         }
+    }
+
+    /// 构造一本「目录登记词数」与词表实际词数不一致的学习词典。
+    fn base_with(length: usize, words: usize, last_learn_index: usize) -> BaseState {
+        let mut base = BaseState::default();
+        let words: Vec<Word> = (0..words)
+            .map(|index| Word::new(format!("word{index:02}")))
+            .collect();
+        base.word.book_list.push(Dict {
+            id: "toy".to_string(),
+            en_name: "toy".to_string(),
+            name: "测试词库".to_string(),
+            words,
+            length,
+            last_learn_index,
+            per_day_study_number: 20,
+            ..Dict::default()
+        });
+        let index = base.word.book_list.len() - 1;
+        base.set_study_index(index);
+        base
+    }
+
+    /// 学完判定吃的是词表实际词数，不是词库目录的登记值：
+    /// 登记 8 词、实际 5 词时，学完 5 个词就要标记完成。
+    #[test]
+    fn advance_dict_progress_completes_by_the_actual_word_count() {
+        let mut base = base_with(8, 5, 0);
+        PracticeSession::advance_dict_progress(&mut base, 5, false);
+        let dict = base.study_dict().expect("当前词典");
+        assert!(dict.complete, "实际 5 个词全部学完应标记完成");
+        assert_eq!(dict.last_learn_index, 5, "进度应停在真实词数");
+    }
+
+    /// 结算推进不会把进度推过真实词数（登记值偏大时也不该出现 8/5 这种进度）。
+    #[test]
+    fn advance_dict_progress_never_exceeds_the_actual_word_count() {
+        let mut base = base_with(8, 5, 3);
+        PracticeSession::advance_dict_progress(&mut base, 10, false);
+        let dict = base.study_dict().expect("当前词典");
+        assert_eq!(dict.last_learn_index, 5, "进度不应超过真实词数");
+        assert!(dict.complete);
+    }
+
+    /// 存档里已经被写成登记值的进度（last_learn_index = length）会被夹回实际词数并置完成。
+    #[test]
+    fn advance_dict_progress_repairs_progress_beyond_the_actual_word_count() {
+        let mut base = base_with(8, 5, 8);
+        PracticeSession::advance_dict_progress(&mut base, 0, true);
+        let dict = base.study_dict().expect("当前词典");
+        assert_eq!(dict.last_learn_index, 5, "越过末尾的进度应夹回真实词数");
+        assert!(dict.complete);
     }
 }

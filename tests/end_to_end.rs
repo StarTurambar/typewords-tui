@@ -239,3 +239,102 @@ fn clear_all_data_resets_dict_settings_and_cache() {
     assert_eq!(settings.value.theme, "auto");
     assert_eq!(settings.value.word_review_ratio, 3);
 }
+
+/// 词库目录登记的 length 大于词表文件里的实际词数（用户删过词 / 换过更短的词库）时，
+/// 学完实际词数仍要置 complete：否则主页永远停在「预计完成日期」，进不了总复习阶段。
+#[test]
+fn finishing_every_actual_word_marks_the_dict_complete() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.length = 20; // 登记 20 词，文件里实际只有 12 个
+        dict.per_day_study_number = 12;
+    }
+    app.boot.settings.word_practice_mode = WordPracticeMode::System;
+    app.start_practice();
+    assert!(
+        drive_to_settlement(&mut app, 0, 5000),
+        "整轮 12 个词应能结算"
+    );
+
+    let dict = app.boot.base.study_dict().expect("当前词典");
+    assert!(dict.complete, "实际词表已学完，应标记完成");
+    assert_eq!(dict.last_learn_index, 12, "进度应停在真实词数");
+    assert!(
+        typewords_tui::ui::insights::estimated_finish(dict, typewords_tui::ui::insights::today())
+            .is_none(),
+        "学完后不应再显示预计完成日期"
+    );
+}
+
+/// 旧存档里 lastLearnIndex 已经越过词表实际词数（按登记值推进过）：重启装载要按
+/// 实际词数校正并直接标记完成，否则「继续学习」永远建不出任务，主页停在预计完成日期。
+#[test]
+fn loading_a_save_whose_progress_exceeds_the_word_list_repairs_completion() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    {
+        let dict = app.boot.base.study_dict_mut().expect("toy 是当前词典");
+        dict.length = 20; // 登记值大于 12 个实际词
+        dict.last_learn_index = 20; // 旧版本把进度推到了登记值
+        dict.complete = false;
+    }
+    app.save_dict_now();
+
+    // 校正前的旧断点属于旧进度，装载校正时应被丢弃（对齐上游 resetCacheData）。
+    let store = typewords_tui::store::FileStore::new(fixture.home()).unwrap();
+    store
+        .save_practice(Some(
+            &typewords_tui::domain::types::PracticeCacheCompact::default(),
+        ))
+        .unwrap();
+    assert!(store.practice_exists());
+
+    let app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    let dict = app.boot.base.study_dict().expect("当前词典");
+    assert_eq!(dict.length, 12, "登记词数应被实际词数校准");
+    assert_eq!(dict.last_learn_index, 12, "越过末尾的进度应夹回实际词数");
+    assert!(dict.complete, "进度已到词表末尾应标记完成");
+    assert!(
+        !store.practice_exists(),
+        "校正进度后应丢弃属于旧进度的单词断点"
+    );
+}
+
+/// 只剩最后一个词时也要能学：按位置判「已到末尾」会跳过它，那个词永远学不到，
+/// `complete` 也就永远不置位（主页一直停在预计完成日期）。
+#[test]
+fn the_last_remaining_word_is_still_learned() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    if let Some(dict) = app.boot.base.study_dict_mut() {
+        dict.last_learn_index = 11; // 12 个词，只剩最后一个
+    }
+    app.boot.settings.word_practice_mode = WordPracticeMode::System;
+    app.start_practice();
+    let task_new: Vec<String> = app
+        .session
+        .as_ref()
+        .expect("只剩一个词也应能开始学习")
+        .task_words
+        .new
+        .iter()
+        .map(|word| word.word.clone())
+        .collect();
+    assert_eq!(
+        task_new,
+        vec!["word11".to_string()],
+        "最后一个词应作为新词出现"
+    );
+    assert!(
+        drive_to_settlement(&mut app, 0, 3000),
+        "最后一个词应能走完并结算"
+    );
+
+    let dict = app.boot.base.study_dict().expect("当前词典");
+    assert_eq!(
+        dict.last_learn_index, 12,
+        "学完最后一个词后进度应到真实词数"
+    );
+    assert!(dict.complete, "学完最后一个词应标记完成");
+}

@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **433 个测试**：109 个单元测试 + 324 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **450 个测试**：122 个单元测试 + 328 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -60,6 +60,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/audio/tts.rs` | 7 | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
 | `src/domain/shortcut.rs` | 7 | 键位往返、默认表覆盖全部动作、与上游默认表一致、冲突拒绝、一键反查多动作、方向键往返 |
 | `src/fs.rs` | 6 | 原子写与数据目录锁：临时名唯一且带 PID、不复用残留的旧固定名临时文件、rename 失败清理临时文件、并发写只留某一次的完整内容；`DirLock` 互斥直到守卫释放并记录 PID |
+| `src/domain/types.rs` | 6 | 进度百分比按词表实际词数；装载校正 `normalize_progress`（`length` 校准成实际词数、越过末尾的进度夹回并补完成态、健康词典与空词表不动） |
 | `src/ui/bigtext.rs` | 5 | 字形行数、1×/2× 放大、遮罩空心占位、超长拆行、非 ASCII 回退 |
 | `src/theme/load.rs` | 4 | base 继承、非法文件跳过、保留 id、未知 token 告警 |
 | `src/audio/player.rs` | 3 | 仅整词可发音、缺少播放程序时的报错、脚本参数拼接 |
@@ -73,8 +74,9 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/ui/typing_buttons.rs` | 2 | 按钮条不越界不重叠、最小 60 列下提示行不被裁掉 |
 | `src/domain/scheduler.rs` | 2 | `enable_fuzz` 的开关、最小间隔与 ±5% 抖动范围 |
 | `src/domain/statistics.rs` | 2 | 跨天会话计数去重、single/旧记录兼容 |
+| `src/domain/study_task.rs` | 4 | 取新词与学完判定按词表实际词数（目录登记值偏大/偏小都不影响）、最后一个词仍作为新词取、剩余词全被忽略时转入复习 |
 | `src/app/mod.rs` | 1 | 30 秒周期保存只在时长真正推进时触发 |
-| `src/domain/session.rs` | 1 | 除默写外每种模式换词都自动朗读 |
+| `src/domain/session.rs` | 4 | 除默写外每种模式换词都自动朗读；结算按词表实际词数判完成、进度夹回真实词数 |
 | `src/domain/flow/mod.rs` | 2 | 有内置 flow 的 7 个模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应、两种单词测试与「自定义流程」不在内置列表里且 `get_flow_id_for_mode` 兜底成 `system` |
 
 ### 4.2 集成测试（`tests/`）
@@ -89,11 +91,11 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/ui_snapshots.rs` | 20 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/六套内置主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失、设置页动作项提示按 `ConfirmAction` 分别给文案与配色（不可撤销用危险色 `bad`） |
 | `tests/resume_cache.rs` | 16 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存、资源更新后文章变短的旧断点按当前句数 clamp（与续打时的下标夹取规则一致）、0 句文章不显示断点标记 |
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
-| `tests/system_dicts.rs` | 10 | 内置词典（收藏 / 错词 / 已掌握）：在词库页排在最前且可渲染、`w` 打开词条页、删词只改 `dict.json`（资源文件不变）、`Enter` 设为当前并落盘 `studyIndex`、重启后保持（空词典也不回退）、`--dict` 接受内置词典 id、收藏有词可练习、已掌握不建会话、切回资源词库保留进度、鼠标点行先选中再激活 |
+| `tests/system_dicts.rs` | 11 | 内置词典（收藏 / 错词 / 已掌握）：在词库页排在最前且可渲染、词库页「N 词」取实际词条数而非目录登记值、`w` 打开词条页、删词只改 `dict.json`（资源文件不变）、`Enter` 设为当前并落盘 `studyIndex`、重启后保持（空词典也不回退）、`--dict` 接受内置词典 id、收藏有词可练习、已掌握不建会话、切回资源词库保留进度、鼠标点行先选中再激活 |
 | `tests/shell_nav.rs` | 9 | 外壳导航：宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
 | `tests/flows.rs` | 17 | 自定义练习流程：新建副本、编辑步骤（含步骤光标 h/l）、启用内置流程切换模式与持久化、编辑页底栏提示 `]` 换节点（`Tab` 只换栏）、流程页 `●` 只标「下一轮实际生效」的流程（逐个模式开练比对 `session.flow()`）、已启用但未生效只标「（已启用）」、自定义流程模式未启用时无 `●`、两种单词测试模式没有任何 `●`（页头改说明「不经过流程编排」，60 列下仍看得懂） |
 | `tests/store_roundtrip.rs` | 8 | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除、练习缓存版本不支持（不移动文件）、`tw doctor` 列出全部存档（含 `practice-article.json` 与 `flows.json`） |
-| `tests/end_to_end.rs` | 5 | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；只剩 1 个错词、小组只有 1 个词时巩固阶段不会卡住 |
+| `tests/end_to_end.rs` | 8 | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；只剩 1 个错词、小组只有 1 个词时巩固阶段不会卡住；目录登记词数大于实际词数时学完仍置 `complete`；旧存档进度越过实际词数时装载校正并补完成态；只剩最后一个词时仍会作为新词学完并置完成 |
 | `tests/audio.rs` | 4 | 朗读触发：换词自动朗读、单词测试切题朗读与 `Ctrl+P` 重播（用 `audio::record_speech` 断言） |
 | `tests/backup_roundtrip.rs` | 17 | 网页版备份 `BackupData` v5 的导入导出互通：版本与结构校验、拒绝损坏载荷、覆盖前 `.bak` 备份与失败回滚、文章断点分流 |
 | `tests/flow_parity.rs` | 4 | 7 个内置流程均可推进到结算；错词清空；相位与练习类型一致 |
