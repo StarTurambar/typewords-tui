@@ -54,7 +54,7 @@ main.rs
 | 应用层 | `src/app/` | `App` 状态机、Action、键鼠映射、事件循环、保存时机 | 依赖 `domain`/`store`/`bootstrap`/`cli`/`paths`，渲染入口调用 `ui` |
 | 渲染层 | `src/ui/` | ratatui 布局与绘制、主题→颜色映射、鼠标命中区域 | 读 `app::App` 与 `domain` 数据，**不修改**状态 |
 | 音频层 | `src/audio/` | 终端响铃、系统 TTS、外部播放器 | 只依赖 `domain` 的设置；除 Windows 的常驻 TTS 会话外，子进程即发即忘，都不阻塞事件循环 |
-| 底层原语 | `src/fs.rs` | 原子写（临时文件 + fsync + rename） | 只依赖 `std`，`domain` 与 `store` 都用它，避免两层互相依赖 |
+| 底层原语 | `src/fs.rs` | 原子写（唯一临时名 + fsync + rename，`write_atomic`）与数据目录锁（`try_lock_dir` / `DirLock`，`<home>/.tw.lock`） | 只依赖 `std`（`File::try_lock` 自 Rust 1.89 稳定，项目 MSRV 1.90），`domain` 与 `store` 都用它，避免两层互相依赖 |
 | 入口/装配 | `src/main.rs`、`src/lib.rs`、`src/cli.rs`、`src/paths.rs`、`src/bootstrap.rs` | 解析参数、解析路径、装载初始状态、分发子命令 | 最外层，可依赖所有层 |
 
 有两条值得明确的实际约束：
@@ -209,7 +209,7 @@ Catalog(assets) ───────┘                                      �
 ## 7. 持久化与数据完整性
 
 - 三份存档对应上游 IndexedDB 的三个 key：`dict.json`（v4）、`setting.json`（v23）、`practice-word.json`（v2），外层都是 `SaveEnvelope { val, version, updated_at }`；自建流程另存 `flows.json`（无版本号，对应上游 localStorage 的 `PracticeFlowV2`）。
-- 写入采用**同目录临时文件 + fsync + rename**；解析失败的文件会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；`dict.json` 与 `setting.json` 版本高于程序支持版本时都**只读不覆盖**；练习缓存版本不受支持时忽略（不移动文件），详见 [persistence.md](persistence.md)。
+- 写入采用**同目录唯一临时文件 + fsync + rename**（临时文件为 `.<文件名>.tw-<pid>-<n>.tmp`，用 `create_new` 独占创建，失败时清理）；写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取独占锁，第二个实例直接报错退出，只读入口 `tw doctor` / `tw export-web` 不取锁；解析失败的文件会被重命名为 `*.corrupt-<时间戳>.json` 并回退默认值；`dict.json` 与 `setting.json` 版本高于程序支持版本时都**只读不覆盖**；练习缓存版本不受支持时忽略（不移动文件），详见 [persistence.md](persistence.md)。
 - 练习缓存在练习页内按 500ms 防抖保存、练习时长累计到 30 秒整数倍时触发保存、退出/切页时保存；结算后删除。恢复失败（词库不匹配、版本不符）时丢弃缓存并提示。
 - 存档字段与上游同名，序列化使用 camelCase（`Card` 沿用 ts-fsrs 的 snake_case），因此可以做手工迁移，但**不读写浏览器 IndexedDB**。
 

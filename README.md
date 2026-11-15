@@ -123,7 +123,7 @@ tw task     # 只预览今日任务，不进入界面
   dicts/、list/        # 通过 import-dict 导入的词库
 ```
 
-写入采用临时文件 + fsync + rename；解析失败的存档会被隔离为 `*.corrupt-<时间戳>.json`。版本高于程序支持的 `dict.json` 与 `setting.json` 都只读不覆盖；练习缓存版本不受支持时忽略（见 [存档与数据格式](docs/persistence.md)）。备份、迁移与字段含义见同一文档。
+写入采用唯一临时文件（`.<文件名>.tw-<pid>-<n>.tmp`）+ fsync + rename，并用 `<home>/.tw.lock` 保证同一个数据目录只跑一个写实例；解析失败的存档会被隔离为 `*.corrupt-<时间戳>.json`。版本高于程序支持的 `dict.json` 与 `setting.json` 都只读不覆盖；练习缓存版本不受支持时忽略（见 [存档与数据格式](docs/persistence.md)）。备份、迁移与字段含义见同一文档。
 
 ## 文档
 

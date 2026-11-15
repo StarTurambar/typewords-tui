@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 
+use crate::fs::DirLock;
+
 /// 解析后的运行路径。
 ///
 /// - `home`：可写的数据目录（存档、用户词库、日志）
@@ -32,6 +34,16 @@ impl Paths {
         std::fs::create_dir_all(&self.home)
             .map_err(|err| anyhow!("创建数据目录失败 {}: {err}", self.home.display()))?;
         Ok(())
+    }
+
+    /// 取数据目录的独占锁（`<home>/.tw.lock`）。
+    ///
+    /// 另一个 `tw` 实例正在使用同一个数据目录时返回错误——存档是整份覆盖写，
+    /// 两个实例同时运行必然丢进度。调用方必须让返回的守卫活到进程退出
+    /// （`lib::run` 把守卫放在整个命令分发过程中），否则锁会提前释放。
+    pub fn lock_home(&self) -> Result<DirLock> {
+        self.ensure_home()?;
+        crate::fs::try_lock_dir(&self.home)
     }
 
     /// 用户自定义主题目录：`<home>/themes/*.json`。
@@ -115,6 +127,18 @@ mod tests {
         assert_eq!(picked.as_deref(), Some(first.path()));
 
         assert!(first_assets_root(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn lock_home_creates_missing_data_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            home: root.path().join("home-not-created-yet"),
+            assets: root.path().to_path_buf(),
+        };
+        let lock = paths.lock_home().expect("数据目录应被创建并取到锁");
+        assert!(paths.home.is_dir());
+        assert_eq!(lock.path(), paths.home.join(crate::fs::LOCK_FILE_NAME));
     }
 
     #[test]
