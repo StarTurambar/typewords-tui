@@ -286,7 +286,7 @@ Web 备份 data.json                       TUI 数据目录
 | FSRS 卡片 | `due` 用 ISO 时间字符串、其余字段同名；但学习卡在 TUI 的 `stability` / `difficulty` 可能为 0，Web 继续调度这种卡片的行为未实测 |
 | FSRS 参数 | 参数结构相同、可互拷，但两端调度实现不同，「同一张卡」的后续间隔不可复现 |
 | 笔记 `noteData` | 两端同名字段；TUI 只透传，Web 可编辑 |
-| 文章数据 | 系统「文章收藏」词典的词条会原样保留（`serde_json::Value`）；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游只清非 custom/non-system 更激进），TUI 不读取文章正文 |
+| 文章数据 | 系统「文章收藏」词典的词条会原样保留（`serde_json::Value`）；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游只清非 custom/non-system 更激进）。TUI 不读取存档里的文章正文：跟打用的正文来自资源目录的 `assets/dicts/en/article/*.json`（书目 `assets/list/article.json`） |
 | 练习缓存 | Web 旧缓存若没有 `sessionSnapshot`，TUI 只能恢复词表与统计、无法恢复游标 |
 
 ### 5.4 未来互通建议

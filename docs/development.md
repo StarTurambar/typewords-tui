@@ -48,13 +48,13 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **400 个测试**：98 个单元测试 + 302 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **406 个测试**：101 个单元测试 + 305 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
 | 文件 | 数量 | 覆盖点 |
 | --- | --- | --- |
-| `src/domain/article.rs` | 18 | 断句（数字 / 货币 / 缩写 / 智能引号）、句子与译文对齐、跟打目标与可省略的词间空格、错字落位与退格 |
+| `src/domain/article.rs` | 21 | 断句（数字 / 货币 / 缩写 / 智能引号）、句子与译文对齐、跟打目标与可省略的词间空格、错字落位与退格、`load_books` 以文章文件实际篇数为准（文件读不到时篇数未知） |
 | `src/domain/fsrs.rs` | 14 | FSRS-6：新卡与学习步进、毕业、重学、Hard/Good/Easy 间隔排序、fuzz 确定性与默认关闭、步进单位、参数夹取 |
 | `src/domain/typing.rs` | 10 | 五种练习类型的键入分支、大小写、全角标点、重复次数、自动下一词、错误计数 |
 | `src/audio/tts.rs` | 7 | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
@@ -83,7 +83,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/interaction_fixes.rs` | 28 | 已修复交互缺陷的回归：三个弹层的鼠标命中、主页 `+`/`-` 的像素对齐、滚动指示器不被行 target 抢走、命中矩形与渲染一致 |
 | `tests/overlay_keys.rs` | 13 | 弹层按钮焦点回归：确认 / 结算弹层用 `←`/`→`/`↑`/`↓`/`Tab`/`j`/`k` 移动选中、两端停住、`Enter` 执行选中按钮（焦点在「取消」时只关闭弹层）、`y`/`n`/`Esc`/`r`/`q` 旧快捷键保留、按钮文案去掉键名前缀、选中项高亮（buffer 颜色断言） |
 | `tests/focus_nav.rs` | 48 | 所有标签页的键盘焦点：启动/回主页默认选中主按钮（首帧高亮与底栏）、无焦点落点、主页内容区换带不反向与带内左右、每个标签页落地选中内容区、`Tab`/`←`/`↑` 换栏与跨栏、词库/设置/统计/帮助页各自的页面光标移动、弹层与搜索框让位、resize 让焦点失效时不触发动作、底栏文案、高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
-| `tests/articles.rs` | 22 | 书本/文章列表、断句与整篇跟打（空格可省略、错字落位、文章结算口径） |
+| `tests/articles.rs` | 24 | 书本/文章列表、断句与整篇跟打（空格可省略、错字落位、文章结算口径）、书本「N 篇」等于右侧实际文章数（文章文件读不到时显示「篇数未知」） |
 | `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/六套内置主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
 | `tests/resume_cache.rs` | 14 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
@@ -98,7 +98,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/home_resume.rs` | 3 | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
 | `tests/import_dict.rs` | 3 | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |
 | `tests/layering.rs` | 2 | 分层约束：`src/domain/` 不依赖 `app`/`ui`/`store`/`theme` |
-| `tests/real_assets.rs` | 2 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载 |
+| `tests/real_assets.rs` | 3 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载；内置文章书目 `length` 与文章文件篇数一致（5 篇） |
 | `tests/typing_keys.rs` | 16 | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 1 | 与上游 ts-fsrs 5.4.1 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
 | `tests/docs.rs` | 2 | 文档一致性：README 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown |
@@ -185,8 +185,9 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain
   node scripts/sync-assets.mjs --source ../TypeWords
   ```
 
-  脚本会整体替换 `assets/list/word.json` 与 `assets/dicts/en/word/`，来源为上游仓库的 `public/`。默认源路径为 `../TypeWords`，也可用 `--source` / `TYPEWORDS_SOURCE` 指定。
+  脚本先删掉整个 `assets/` 再从上游 `public/` 复制 `list/word.json`、`list/article.json`、`dicts/en/word/`、`dicts/en/article/`。默认源路径为 `../TypeWords`，也可用 `--source` / `TYPEWORDS_SOURCE` 指定。手工裁剪文章文件时不要忘了同步改 `list/article.json` 的 `length`（运行时以文件篇数为准，但数据本身仍要一致，见下一条与 `tests/real_assets.rs`）。
 - 词库资源已提交进仓库，**运行与测试不需要 Node**；同步后检查词库仍能被 `tw doctor` 与 `tests/real_assets.rs` 正确加载，并在提交信息中说明上游来源与日期。
+- 文章书目 `assets/list/article.json` 的 `length` 要与 `assets/dicts/en/article/<url>` 里的篇数一致：运行时 `load_books` 会用文件里的实际篇数校准它（见 [领域逻辑](domain.md)），但数据本身仍应写对，`tests/real_assets.rs` 会校验这份一致性。
 - 用户侧导入词库走 `tw import-dict`（写入用户数据目录），不要把用户数据提交进仓库。
 - 许可证：词库数据来自上游 TypeWords，遵循 GPL-3.0，与代码一起分发。
 

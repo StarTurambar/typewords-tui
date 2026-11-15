@@ -660,12 +660,46 @@ pub struct ArticleBook {
     pub name: String,
     pub description: String,
     pub url: String,
-    pub length: usize,
+    /// 本书的**实际**文章数；文章文件读不到时为 `None`。
+    ///
+    /// `article.json` 里登记的 `length` 只是上游快照值，可能和资源文件对不上
+    /// （曾出现登记 72 篇、`NCE_1.json` 只有 5 篇）。`load_books` 不采信登记值，
+    /// 一律以文章文件里的篇数为准；文件缺失或解析失败时保持 `None`，界面显示
+    /// 「篇数未知」，而不是把一个没核对过的数字当成真的展示出来。
+    pub length: Option<usize>,
     pub category: String,
     pub tags: Vec<String>,
 }
 
-/// 读取资源目录里的文章书列表。
+/// 文章文件路径（`<assets>/dicts/en/article/<url>`）。
+fn article_file(paths: &Paths, book: &ArticleBook) -> std::path::PathBuf {
+    paths
+        .assets
+        .join("dicts")
+        .join("en")
+        .join("article")
+        .join(&book.url)
+}
+
+/// 数一数文章文件里实际有几篇；文件缺失或解析失败时返回 `None`。
+///
+/// 目录里的 `length` 是上游快照值，可能和资源文件对不上。这里把文件解析成
+/// `serde_json::Value` 只数顶层数组的元素个数，不构造 `Article`、也不断句——
+/// 代价仅是进文章页时每本书多读一次文件。
+fn count_articles(paths: &Paths, book: &ArticleBook) -> Option<usize> {
+    let file = article_file(paths, book);
+    let text = std::fs::read_to_string(&file).ok()?;
+    let articles: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
+    Some(articles.len())
+}
+
+/// 读取资源目录里的文章书列表，篇数一律以文章文件里的实际篇数为准。
+///
+/// 不采信登记值是必要的：`article.json` 的 `length` 由上游快照带过来，可能比
+/// 资源文件里的篇数多（曾出现登记 72 篇、`NCE_1.json` 只有 5 篇）。界面在书本
+/// 行上写「N 篇」、右侧列出这本书的文章，两者必须是同一个数字，否则就是「写着
+/// 72 篇却只列出 5 条」。文件读不到时篇数记为未知（`None`，界面显示「篇数未知」），
+/// 选中这本书时由 `load_articles` 报错并提示。
 pub fn load_books(paths: &Paths) -> Result<Vec<ArticleBook>> {
     let file = paths.assets.join("list").join("article.json");
     if !file.is_file() {
@@ -673,19 +707,17 @@ pub fn load_books(paths: &Paths) -> Result<Vec<ArticleBook>> {
     }
     let text = std::fs::read_to_string(&file)
         .with_context(|| format!("读取文章目录失败: {}", file.display()))?;
-    let books: Vec<ArticleBook> = serde_json::from_str(&text)
+    let mut books: Vec<ArticleBook> = serde_json::from_str(&text)
         .with_context(|| format!("解析文章目录失败: {}", file.display()))?;
+    for book in &mut books {
+        book.length = count_articles(paths, book);
+    }
     Ok(books)
 }
 
 /// 读取一本文章书里的所有文章，并生成段落与句子。
 pub fn load_articles(paths: &Paths, book: &ArticleBook) -> Result<Vec<Article>> {
-    let file = paths
-        .assets
-        .join("dicts")
-        .join("en")
-        .join("article")
-        .join(&book.url);
+    let file = article_file(paths, book);
     let text = std::fs::read_to_string(&file)
         .with_context(|| format!("读取文章失败: {}", file.display()))?;
     let mut articles: Vec<Article> =
@@ -860,4 +892,81 @@ pub struct ArticleCacheEnvelope {
     pub practice_data: ArticleCache,
     /// 与上游同名的统计字段；TUI 只用 `spend`，其余留空。
     pub stat_store_data: Option<crate::domain::types::PracticeState>,
+}
+
+/// 文章资源加载：书目篇数与文章文件里的实际篇数必须一致。
+#[cfg(test)]
+mod resource_tests {
+    use std::fs;
+
+    use super::*;
+
+    /// 两篇文章的最小文章文件。
+    const TWO_ARTICLES: &str = r#"[
+        {"id": 1, "title": "第一篇", "text": "Hello there.", "textTranslate": "你好。"},
+        {"id": 2, "title": "第二篇", "text": "Good night.", "textTranslate": "晚安。"}
+    ]"#;
+
+    /// 造一个只有书目与文章文件的最小资源目录，书目故意写 `declared_length`。
+    fn assets_with(declared_length: usize, articles: &str) -> (tempfile::TempDir, Paths) {
+        let root = tempfile::tempdir().expect("tempdir");
+        let assets = root.path().join("assets");
+        fs::create_dir_all(assets.join("list")).unwrap();
+        fs::create_dir_all(assets.join("dicts").join("en").join("article")).unwrap();
+        let catalog = format!(
+            r#"[{{"enName": "nce1", "name": "新概念英语1", "url": "NCE_1.json", "length": {declared_length}}}]"#
+        );
+        fs::write(assets.join("list").join("article.json"), catalog).unwrap();
+        fs::write(
+            assets
+                .join("dicts")
+                .join("en")
+                .join("article")
+                .join("NCE_1.json"),
+            articles,
+        )
+        .unwrap();
+        let home = root.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        (root, Paths { home, assets })
+    }
+
+    /// 书本行上的「N 篇」必须等于文章文件里真正的篇数，而不是目录登记值。
+    ///
+    /// 曾出现 `article.json` 登记 72 篇、`NCE_1.json` 只有 5 篇：界面写「72 篇」
+    /// 却只列出 5 条。
+    #[test]
+    fn load_books_replaces_the_catalog_length_with_the_real_article_count() {
+        let (_root, paths) = assets_with(72, TWO_ARTICLES);
+        let books = load_books(&paths).expect("应读到书目");
+        assert_eq!(books.len(), 1);
+        assert_eq!(
+            books[0].length,
+            Some(2),
+            "篇数应以文章文件为准，而不是目录登记的 72"
+        );
+        assert_eq!(books[0].name, "新概念英语1", "其它目录字段不受影响");
+        assert_eq!(
+            load_articles(&paths, &books[0]).expect("应读到文章").len(),
+            2,
+            "列出来的文章数应与篇数相同"
+        );
+    }
+
+    /// 登记值本来就对时，结果与文件篇数一致。
+    #[test]
+    fn load_books_reports_the_real_count_when_it_already_matches() {
+        let (_root, paths) = assets_with(2, TWO_ARTICLES);
+        let books = load_books(&paths).unwrap();
+        assert_eq!(books[0].length, Some(2));
+    }
+
+    /// 文章文件损坏时不阻断书目加载，但篇数记为未知：界面显示「篇数未知」，
+    /// 不拿目录里的登记值充数；选中这本书时 `load_articles` 会报错并提示。
+    #[test]
+    fn load_books_reports_an_unknown_length_when_the_article_file_is_unreadable() {
+        let (_root, paths) = assets_with(72, "not json");
+        let books = load_books(&paths).expect("书目仍应加载成功");
+        assert_eq!(books[0].length, None);
+    }
 }
