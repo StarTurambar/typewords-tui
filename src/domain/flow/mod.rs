@@ -527,6 +527,21 @@ pub fn get_flow_id_for_mode(mode: WordPracticeMode) -> &'static str {
     }
 }
 
+/// 有内置流程的 7 个练习模式（与 `builtin_flow` 的 7 个 id 一一对应）。
+///
+/// 单词测试（`ShuffleWordsTest` / `ReviewWordsTest`）走 4 选 1 答题，`Custom`
+/// 用已启用的自建流程，它们都没有内置 flow——流程页因此只列这 7 条，
+/// 「启用」时也只会把这里对应的模式写回设置。
+pub const BUILTIN_FLOW_MODES: [WordPracticeMode; 7] = [
+    WordPracticeMode::System,
+    WordPracticeMode::Free,
+    WordPracticeMode::IdentifyOnly,
+    WordPracticeMode::DictationOnly,
+    WordPracticeMode::ListenOnly,
+    WordPracticeMode::Shuffle,
+    WordPracticeMode::Review,
+];
+
 /// 按模式取内置流程。
 pub fn flow_for_mode(mode: WordPracticeMode) -> PracticeFlowConfig {
     get_flow_config(get_flow_id_for_mode(mode))
@@ -923,5 +938,31 @@ pub fn display_state(
         status,
         stages,
         show_skip_step: nodes.len() > 1 || nodes[0].steps.len() > 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 流程页只列 BUILTIN_FLOW_MODES 这 7 个模式，它们必须与内置流程表一一对应。
+    ///
+    /// 对不上时流程页会列出没有 flow 的模式（早期把两个单词测试模式也列了进去，
+    /// 它们的配置退化成 system，启用时写回的是 system 模式）。
+    #[test]
+    fn builtin_flow_modes_match_the_builtin_flow_table() {
+        assert_eq!(BUILTIN_FLOW_MODES.len(), 7);
+        let mut ids: Vec<String> = Vec::new();
+        for mode in BUILTIN_FLOW_MODES {
+            let config = flow_for_mode(mode);
+            assert_eq!(
+                config.mode, mode,
+                "内置流程 {:?} 配置里的 mode 应与来源模式一致",
+                mode
+            );
+            assert_eq!(get_flow_id_for_mode(mode), config.id);
+            assert!(!ids.contains(&config.id), "内置流程 id 重复: {}", config.id);
+            ids.push(config.id);
+        }
     }
 }

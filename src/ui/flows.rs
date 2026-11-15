@@ -83,10 +83,12 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
+    // 「当前」与列表的 ● 同一个来源：自建流程启用时是它，否则是当前模式的内置流程。
     let active = app
-        .flow_store
-        .active()
-        .map(|flow| flow.name.clone())
+        .flow_entries()
+        .into_iter()
+        .find(|entry| entry.active)
+        .map(|entry| entry.name)
         .unwrap_or_else(|| "内置流程".to_string());
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -209,7 +211,7 @@ fn render_footer(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
         return;
     }
     let text = if app.flow_editing {
-        " Tab 换节点 · a 加步骤 · d 删步骤 · s 乱序 · g 组内巩固 · Esc 返回"
+        " ] 换节点 · h/l 换步骤 · a 加步骤 · d 删步骤 · s 乱序 · g 组内巩固 · Esc 返回"
     } else {
         " ↑↓ 选择 · Enter 启用 · n 新建副本 · e 编辑 · Delete 删除 · Esc 返回"
     };

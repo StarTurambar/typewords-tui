@@ -366,6 +366,9 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             KeyCode::Char('n') => Some(Action::FlowDuplicate),
             KeyCode::Char('e') => Some(Action::FlowEdit),
             KeyCode::Delete => Some(Action::FlowDelete),
+            // h / l：在当前节点内左右移动步骤光标（节点光标由 ↑/↓ 移动）。
+            KeyCode::Char('h') if app.flow_editing => Some(Action::FlowStepMove(-1)),
+            KeyCode::Char('l') if app.flow_editing => Some(Action::FlowStepMove(1)),
             KeyCode::Char('a') if app.flow_editing => Some(Action::FlowAddStep),
             KeyCode::Char('d') if app.flow_editing => Some(Action::FlowRemoveStep),
             KeyCode::Char('s') if app.flow_editing => Some(Action::FlowToggleShuffle),

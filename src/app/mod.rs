@@ -110,7 +110,7 @@ pub struct FlowEntry {
     pub config: crate::domain::flow::PracticeFlowConfig,
     /// 是否是自建流程
     pub custom: bool,
-    /// 是否正在使用
+    /// 是否是当前选中的流程：内置流程看练习模式，自建流程看启用位
     pub active: bool,
 }
 
@@ -1975,21 +1975,26 @@ impl App {
 
     // ── 自定义练习流程 ─────────────────────────────────────────────────────
 
-    /// 流程列表：先列内置流程，再列自建流程。
+    /// 流程列表：先列 7 个内置流程，再列自建流程。
+    ///
+    /// 内置流程的「正在使用」由 **当前练习模式** 决定：模式与内置 flow 一一
+    /// 对应，所以只有当前模式那一行是 `●`。早期把「当前模式的 flow id」和
+    /// 「按模式取到的配置 id」比较——后者恒等于前者，于是没有自建流程时
+    /// 七行全是 `●`，用户看不出当前用哪条。
+    ///
+    /// 存在已启用的自建流程时内置行不再标 `●`：此时「当前流程」是那条自建
+    /// 流程，它在练习模式选「自定义流程」时生效。
     pub fn flow_entries(&self) -> Vec<FlowEntry> {
+        let mode = self.boot.settings.word_practice_mode;
+        let active_builtin_id = crate::domain::flow::get_flow_id_for_mode(mode);
+        let custom_active = self.flow_store.active().is_some();
         let mut entries: Vec<FlowEntry> = Vec::new();
-        for mode in crate::domain::constants::PRACTICE_MODES {
-            // `Custom` 不是内置流程，它对应下面列出的已启用自建流程。
-            if mode == WordPracticeMode::Custom {
-                continue;
-            }
-            let config = crate::domain::flow::flow_for_mode(mode);
+        for flow_mode in crate::domain::flow::BUILTIN_FLOW_MODES {
+            let config = crate::domain::flow::flow_for_mode(flow_mode);
             entries.push(FlowEntry {
                 id: config.id.clone(),
-                name: crate::domain::constants::practice_mode_name(mode).to_string(),
-                active: self.flow_store.active_id.is_empty()
-                    && self.flow_store.active().is_none()
-                    && config.id == crate::domain::flow::get_flow_id_for_mode(mode),
+                name: crate::domain::constants::practice_mode_name(flow_mode).to_string(),
+                active: !custom_active && config.id == active_builtin_id,
                 config,
                 custom: false,
             });
@@ -2026,6 +2031,9 @@ impl App {
     }
 
     /// 启用选中的流程。
+    ///
+    /// 内置流程就是它对应的练习模式：启用它必须把模式写回设置并落盘，
+    /// 否则界面说「已切回内置流程」、实际练习仍按旧模式跑。
     fn activate_flow(&mut self) {
         let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
             return;
@@ -2034,14 +2042,18 @@ impl App {
             self.flow_store.activate(&entry.id);
             self.save_flow_store();
             self.toast(NoticeLevel::Success, format!("已启用「{}」", entry.name));
-        } else {
-            self.flow_store.activate("");
-            self.save_flow_store();
-            self.toast(
-                NoticeLevel::Success,
-                format!("已切回内置流程「{}」", entry.name),
-            );
+            return;
         }
+        // 切回内置流程 = 清掉自建流程的启用位，并把该流程对应的模式写回设置。
+        self.flow_store.activate("");
+        self.save_flow_store();
+        self.boot.settings.word_practice_mode = entry.config.mode;
+        self.save_settings_now();
+        self.refresh_task_preview();
+        self.toast(
+            NoticeLevel::Success,
+            format!("已启用内置流程「{}」", entry.name),
+        );
     }
 
     /// 以选中的流程为模板新建一份自建副本。
@@ -2115,6 +2127,30 @@ impl App {
         self.flow_node_cursor = node;
         let step_count = entry.config.nodes[node].steps.len() as i32;
         self.flow_step_cursor = self.flow_step_cursor.min(step_count.max(1) as usize - 1);
+    }
+
+    /// 编辑模式下移动「当前节点里的步骤光标」。
+    ///
+    /// 节点光标走 ↑/↓（`move_flow_edit_cursor`），步骤光标走 `h` / `l`：
+    /// 没有它，`d` / `s` / `g` 永远作用在 0 号或刚新增的那一步上。
+    fn move_flow_step_cursor(&mut self, delta: i32) {
+        if !self.flow_editing {
+            return;
+        }
+        let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
+            return;
+        };
+        let node = self
+            .flow_node_cursor
+            .min(entry.config.nodes.len().saturating_sub(1));
+        let Some(node) = entry.config.nodes.get(node) else {
+            return;
+        };
+        if node.steps.is_empty() {
+            return;
+        }
+        let last = node.steps.len() as i32 - 1;
+        self.flow_step_cursor = (self.flow_step_cursor as i32 + delta).clamp(0, last) as usize;
     }
 
     /// 编辑模式下切换节点。

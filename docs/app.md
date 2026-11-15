@@ -263,7 +263,7 @@ app.save_all()
 | 词库页 | `Esc`/`q`→`Back`；`+`/`-`→`AdjustDaily(±5)`；`w`→`OpenSelectedWords`（先把选中条目设为当前词典，再进词条页）；`a`→`OpenArticles`；`n`→`WordsNewDict` |
 | 统计页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`→`StatsScroll(∓5)`；`,`/`.`→`StatsMonthMove(∓1)`；`v`→`StatsToggleView` |
 | 设置页 | `Esc`/`q`→`Back`；`Space`→`SelectActivate` |
-| 流程页 | `Esc`→`Back`（编辑中→`FlowEdit`）；`]`→`FlowNextNode`；`n`→`FlowDuplicate`；`e`→`FlowEdit`；`Delete`→`FlowDelete`；编辑中 `a`/`d`/`s`/`g`→加步骤 / 删步骤 / 乱序 / 组内巩固 |
+| 流程页 | `Esc`→`Back`（编辑中→`FlowEdit`）；`]`→`FlowNextNode`；`n`→`FlowDuplicate`；`e`→`FlowEdit`；`Delete`→`FlowDelete`；编辑中 `h`/`l`→`FlowStepMove(∓1)`（节点内移动步骤光标）、`a`/`d`/`s`/`g`→加步骤 / 删步骤 / 乱序 / 组内巩固 |
 | 文章页 | `Esc`/`q`→`Back` |
 | 词条页 | 搜索框聚焦时输入搜索词，`Esc` 退出搜索；否则 `Esc`/`q`→`Back`、`PgUp`/`PgDn` 翻 10 行、`Home`/`End` 到首/末、`Space`→勾选当前词、`/`→搜索、`a`/`d`/`n`/`o`/`c` 与 `1`/`2`/`3` 是词条操作（见第 8 节与使用手册） |
 | 快捷键页 | `Esc`/`q`→`Back`；`PgUp`/`PgDn`、`Home`/`End`；`Space`→`SelectActivate`；`Delete` 清除绑定；`r`/`R` 恢复当前 / 全部默认 |

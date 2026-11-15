@@ -89,7 +89,7 @@
 | | 12 | `Shuffle` | 随机复习 |
 | | 13 | `Complete` | 完成学习 |
 
-说明：内置流程只使用 0–6 七种模式；7–9 在 `get_flow_id_for_mode` 中兜底为 `system`，且 `PRACTICE_MODE_NAMES` 只登记 7 种，其余名称回退为“学习”。`WordPracticeStage` 仅作为 `PracticeState.stage` 的存档字段保留：TUI 从不更新该字段（始终保持默认值 `FollowWriteNewWord`），流程位置由 `PracticeFlowCursor` 表达。名称映射由 `practice_mode_name`（7 种）与 `stage_name`（全部 10 个阶段值）提供，名称到 i18n 键的对应见第 14 节。
+说明：内置流程只使用 0–6 七种模式（有内置 flow 的模式由 `flow::BUILTIN_FLOW_MODES` 列出，流程页只列这 7 条）；7–9 在 `get_flow_id_for_mode` 中兜底为 `system`，且 `PRACTICE_MODE_NAMES` 只登记 7 种，其余名称回退为“学习”。`WordPracticeStage` 仅作为 `PracticeState.stage` 的存档字段保留：TUI 从不更新该字段（始终保持默认值 `FollowWriteNewWord`），流程位置由 `PracticeFlowCursor` 表达。名称映射由 `practice_mode_name`（7 种）与 `stage_name`（全部 10 个阶段值）提供，名称到 i18n 键的对应见第 14 节。
 
 ### 2.3 核心结构
 
@@ -672,7 +672,7 @@ new(mode) ─▶ initialize_task（重置 stat、开启计时）─▶ 键入/�
 
 ### 15.2 新增一个内置流程
 
-按顺序修改：`src/domain/types.rs`（若需新 `WordPracticeMode` 值，编号必须与 Web 枚举一致）→ `src/domain/constants.rs`（补 `PRACTICE_MODE_NAMES`）→ `src/domain/flow/mod.rs`（`builtin_flow` 增加配置、`get_flow_id_for_mode` 增加映射）→ `src/app/mod.rs` 的 `practice_modes()` → `src/cli.rs` 的 `parse_mode` 与帮助文案 → `src/domain/i18n.rs`（新 label 键）→ `tests/flow_parity.rs`（把模式加入遍历数组）。若流程引入新的 `PracticeWordsSource`/`PracticeEndAction`，还需扩展 `navigator.rs` 的解析分支。
+按顺序修改：`src/domain/types.rs`（若需新 `WordPracticeMode` 值，编号必须与 Web 枚举一致）→ `src/domain/constants.rs`（补 `PRACTICE_MODE_NAMES`）→ `src/domain/flow/mod.rs`（`builtin_flow` 增加配置、`get_flow_id_for_mode` 增加映射、`BUILTIN_FLOW_MODES` 追加该模式）→ `src/app/mod.rs` 的 `practice_modes()` → `src/cli.rs` 的 `parse_mode` 与帮助文案 → `src/domain/i18n.rs`（新 label 键）→ `tests/flow_parity.rs`（把模式加入遍历数组）。若流程引入新的 `PracticeWordsSource`/`PracticeEndAction`，还需扩展 `navigator.rs` 的解析分支。
 
 ### 15.3 新增一个设置项
 

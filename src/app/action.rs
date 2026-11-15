@@ -61,6 +61,8 @@ pub enum Action {
     FlowEdit,
     FlowDelete,
     FlowNextNode,
+    /// 编辑流程时在当前节点内左右移动步骤光标（h / l）。
+    FlowStepMove(i32),
     FlowAddStep,
     FlowRemoveStep,
     FlowToggleShuffle,
@@ -209,6 +211,7 @@ impl App {
             Action::FlowEdit => self.toggle_flow_edit(),
             Action::FlowDelete => self.delete_flow(),
             Action::FlowNextNode => self.flow_next_node(),
+            Action::FlowStepMove(delta) => self.move_flow_step_cursor(delta),
             Action::FlowAddStep => self.flow_add_step(),
             Action::FlowRemoveStep => self.flow_remove_step(),
             Action::FlowToggleShuffle => self.flow_toggle_shuffle(),

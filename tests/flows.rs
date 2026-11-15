@@ -4,6 +4,8 @@ mod common;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
+use typewords_tui::domain::flow::PracticeStepTemplateId;
+use typewords_tui::domain::types::WordPracticeMode;
 
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
@@ -14,6 +16,210 @@ fn ctrl(app: &mut app::App, character: char) {
         KeyCode::Char(character),
         KeyModifiers::CONTROL,
     ));
+}
+
+/// 流程列表里标 `●` 的流程 id。
+fn active_flow_ids(app: &app::App) -> Vec<String> {
+    app.flow_entries()
+        .into_iter()
+        .filter(|entry| entry.active)
+        .map(|entry| entry.id)
+        .collect()
+}
+
+/// 用 TestBackend 渲染一帧，返回带空格的文本（顶部模式标签等断言用）。
+fn render_text(app: &app::App, width: u16, height: u16) -> String {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use unicode_width::UnicodeWidthStr;
+
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut out = String::new();
+    for y in 0..height {
+        let mut skip_cells = 0usize;
+        for x in 0..width {
+            if skip_cells > 0 {
+                skip_cells -= 1;
+                continue;
+            }
+            if let Some(cell) = buffer.cell((x, y)) {
+                let symbol = cell.symbol();
+                out.push_str(symbol);
+                let display_width = UnicodeWidthStr::width(symbol);
+                if display_width > 1 {
+                    skip_cells = display_width - 1;
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// 流程页的 `●` 必须跟着当前练习模式走。
+///
+/// 早期实现拿「当前模式的流程 id」和「按模式取到的流程配置 id」比较——后者
+/// 恒等于前者，于是没有自建流程时七行内置流程全是 `●`，用户看不出当前用哪条。
+#[test]
+fn the_flow_page_marks_only_the_current_practice_mode_as_active() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    assert_eq!(app.screen, app::Screen::Flows);
+
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["system".to_string()],
+        "默认「学习」模式下只有「学习」这一行是 ●"
+    );
+
+    let entries = app.flow_entries();
+    let builtin: Vec<_> = entries.iter().filter(|entry| !entry.custom).collect();
+    assert_eq!(
+        builtin.len(),
+        7,
+        "流程页只列七个内置流程（单词测试与自定义流程没有内置 flow）"
+    );
+    let mut ids: Vec<&str> = builtin.iter().map(|entry| entry.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), 7, "七个内置流程的 id 不应重复: {ids:?}");
+    for entry in &builtin {
+        assert_eq!(
+            typewords_tui::domain::flow::get_flow_id_for_mode(entry.config.mode),
+            entry.id,
+            "内置流程「{}」的 mode 与 id 不对应，启用时就会写回错误的模式",
+            entry.name
+        );
+    }
+}
+
+/// 在内置流程上按 Enter 必须真的切换练习模式，并把模式写回设置。
+#[test]
+fn activating_a_builtin_flow_switches_the_practice_mode() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+
+    // 先建一个自建流程并启用：此时 ● 落在自建流程上，内置行都不标。
+    press(&mut app, KeyCode::Char('n'));
+    let custom_id = app.flow_store.active_id.clone();
+    assert!(!custom_id.is_empty(), "新建副本应启用它");
+    assert_eq!(
+        active_flow_ids(&app),
+        vec![custom_id.clone()],
+        "启用自建流程后 ● 应在它上面"
+    );
+    assert_eq!(
+        app.boot.settings.word_practice_mode,
+        WordPracticeMode::System
+    );
+
+    // 光标上移一行到「复习」（自建流程排在最后），按 Enter 切回内置流程。
+    let review = app
+        .flow_entries()
+        .iter()
+        .position(|entry| entry.id == "review")
+        .expect("应有「复习」内置流程");
+    while app.flow_cursor > review {
+        press(&mut app, KeyCode::Up);
+    }
+    press(&mut app, KeyCode::Enter);
+
+    assert_eq!(
+        app.boot.settings.word_practice_mode,
+        WordPracticeMode::Review,
+        "启用「复习」后练习模式应切到 Review"
+    );
+    assert!(
+        app.flow_store.active_id.is_empty(),
+        "启用内置流程应清掉自建流程的启用位"
+    );
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["review".to_string()],
+        "● 应随模式移到「复习」这一行"
+    );
+
+    // 模式要落盘：重启后仍然是「复习」。
+    let store = typewords_tui::store::FileStore::new(fixture.home()).expect("store");
+    assert_eq!(
+        store.load_settings().value.word_practice_mode,
+        WordPracticeMode::Review,
+        "模式应写回 setting.json"
+    );
+
+    // 主页顶栏的「模式」标签同步变化。
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, app::Screen::Home);
+    let text = render_text(&app, 120, 40);
+    assert!(
+        text.contains("模式 复习"),
+        "主页顶栏模式标签应显示「复习」: {text}"
+    );
+}
+
+/// 编辑流程时步骤光标要能单独移动，删除的才是选中的那一步。
+///
+/// 早期实现只有节点光标（↑/↓）能移动，步骤光标写死在 0 号或刚新增的那一步，
+/// 于是 `d` / `s` / `g` 永远作用在错误的位置。
+#[test]
+fn the_flow_editor_moves_the_step_cursor() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+    // 复制「学习」流程：第一个节点「新词」有 跟写 → 听写 → 默写 三个步骤。
+    press(&mut app, KeyCode::Char('n'));
+    let flow_id = app.flow_entries().last().expect("新流程").id.clone();
+    press(&mut app, KeyCode::Char('e'));
+    assert!(app.flow_editing, "应进入编辑模式");
+    assert_eq!(app.flow_step_cursor, 0);
+
+    let templates = |app: &app::App| -> Vec<PracticeStepTemplateId> {
+        app.flow_store
+            .flows
+            .get(&flow_id)
+            .expect("流程")
+            .config
+            .nodes[0]
+            .steps
+            .iter()
+            .map(|step| step.template_id)
+            .collect()
+    };
+    assert_eq!(
+        templates(&app),
+        vec![
+            PracticeStepTemplateId::FollowWrite,
+            PracticeStepTemplateId::Listen,
+            PracticeStepTemplateId::Dictation
+        ],
+        "复制来的节点应有三个步骤"
+    );
+
+    press(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.flow_step_cursor, 1, "l 应把步骤光标移到第 2 步");
+    press(&mut app, KeyCode::Char('d'));
+    assert_eq!(
+        templates(&app),
+        vec![
+            PracticeStepTemplateId::FollowWrite,
+            PracticeStepTemplateId::Dictation
+        ],
+        "删除的应是第 2 步（听写），而不是 0 号步骤"
+    );
+    assert_eq!(app.flow_step_cursor, 0, "删完光标回落到前一步");
+
+    press(&mut app, KeyCode::Char('h'));
+    assert_eq!(app.flow_step_cursor, 0, "h 在首步停住");
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.flow_step_cursor, 1, "l 在末步停住");
+    press(&mut app, KeyCode::Char('h'));
+    assert_eq!(app.flow_step_cursor, 0, "h 移回上一步");
 }
 
 #[test]

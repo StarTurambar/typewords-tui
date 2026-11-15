@@ -48,7 +48,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 
 ## 4. 测试体系
 
-当前共 **382 个测试**：97 个单元测试 + 285 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
+当前共 **400 个测试**：98 个单元测试 + 302 个集成测试。全部通过是提交的最低要求；数量随测试增删变化，可用 `cargo test --locked -- --list` 复核。
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
@@ -73,6 +73,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `src/domain/statistics.rs` | 2 | 跨天会话计数去重、single/旧记录兼容 |
 | `src/app/mod.rs` | 1 | 30 秒周期保存只在时长真正推进时触发 |
 | `src/domain/session.rs` | 1 | 除默写外每种模式换词都自动朗读 |
+| `src/domain/flow/mod.rs` | 1 | 有内置 flow 的 7 个模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应 |
 
 ### 4.2 集成测试（`tests/`）
 
@@ -84,11 +85,11 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/focus_nav.rs` | 48 | 所有标签页的键盘焦点：启动/回主页默认选中主按钮（首帧高亮与底栏）、无焦点落点、主页内容区换带不反向与带内左右、每个标签页落地选中内容区、`Tab`/`←`/`↑` 换栏与跨栏、词库/设置/统计/帮助页各自的页面光标移动、弹层与搜索框让位、resize 让焦点失效时不触发动作、底栏文案、高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
 | `tests/articles.rs` | 22 | 书本/文章列表、断句与整篇跟打（空格可省略、错字落位、文章结算口径） |
 | `tests/ui_snapshots.rs` | 19 | TestBackend 渲染：主页/练习大字/默写占位/全部屏幕/终端过小/60×20 紧凑布局/CJK 宽度/正确输入着色/六套内置主题/弹层/鼠标命中区域与渲染文本一致/关闭使用提示后提示行消失 |
-| `tests/resume_cache.rs` | 13 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
+| `tests/resume_cache.rs` | 14 | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮自己的缓存 |
 | `tests/words_manage.rs` | 11 | 词条管理页：搜索、编辑、批量标记与自定义词典 |
 | `tests/system_dicts.rs` | 10 | 内置词典（收藏 / 错词 / 已掌握）：在词库页排在最前且可渲染、`w` 打开词条页、删词只改 `dict.json`（资源文件不变）、`Enter` 设为当前并落盘 `studyIndex`、重启后保持（空词典也不回退）、`--dict` 接受内置词典 id、收藏有词可练习、已掌握不建会话、切回资源词库保留进度、鼠标点行先选中再激活 |
 | `tests/shell_nav.rs` | 9 | 外壳导航：宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
-| `tests/flows.rs` | 8 | 自定义练习流程：新建副本、编辑步骤、启用与持久化 |
+| `tests/flows.rs` | 11 | 自定义练习流程：新建副本、编辑步骤（含步骤光标 h/l）、启用内置流程切换模式与持久化、流程页 `●` 跟随当前模式 |
 | `tests/store_roundtrip.rs` | 7 | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除、练习缓存版本不支持（不移动文件） |
 | `tests/end_to_end.rs` | 5 | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；只剩 1 个错词、小组只有 1 个词时巩固阶段不会卡住 |
 | `tests/audio.rs` | 4 | 朗读触发：换词自动朗读、单词测试切题朗读与 `Ctrl+P` 重播（用 `audio::record_speech` 断言） |
@@ -98,6 +99,7 @@ cargo build --release --locked    # target/release/tw(.exe)
 | `tests/import_dict.rs` | 3 | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝 |
 | `tests/layering.rs` | 2 | 分层约束：`src/domain/` 不依赖 `app`/`ui`/`store`/`theme` |
 | `tests/real_assets.rs` | 2 | 使用仓库内置 CET-4 真实词库（2607 词）装载、建任务、保存并重载 |
+| `tests/typing_keys.rs` | 16 | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 1 | 与上游 ts-fsrs 5.4.1 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
 | `tests/docs.rs` | 2 | 文档一致性：README 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown |
 
