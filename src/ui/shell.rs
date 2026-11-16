@@ -497,18 +497,18 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
 /// 选中项名称在主页是按钮名、在导航栏是页面名、在其它页面由页面自己的
 /// 光标决定（词库名 / 设置项名 / 日期……），所以这里返回 String。
 fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
-    // 帮助页进入时默认就有 Page 焦点，焦点提示会一直盖住「←→ 分页」：
-    // 分页键是帮助页唯一的横向操作，比「选中 帮助」更值得占底栏。
-    if app.screen == Screen::Help {
+    // 帮助页进入时默认就有 Page 焦点，而 Page 没有可高亮的选中项：焦点提示
+    // 会一直盖住「←→ 分页」，此时让位给帮助页自己的键位提示。焦点在导航栏
+    // 时仍显示焦点提示——方向键这时操作的是导航栏，不是帮助正文，页面键位
+    // 提示（「↑↓ 滚动」）会是错的。
+    let pane = crate::ui::focus::pane(app);
+    if app.screen == Screen::Help && pane != Some(crate::ui::focus::Pane::Nav) {
         return None;
     }
     let label = crate::ui::focus::focused_label(app, area)?;
-    let pane = crate::ui::focus::pane(app);
     let home = app.screen == Screen::Home;
     let enter = if pane == Some(crate::ui::focus::Pane::Nav) {
         "切换"
-    } else if app.screen == Screen::Help {
-        "返回"
     } else if app.screen == Screen::AdvFsrs {
         // 这一页的 Enter 永远是「改这一行」（改数值 / 切开关 / 弹重置确认）。
         "修改"

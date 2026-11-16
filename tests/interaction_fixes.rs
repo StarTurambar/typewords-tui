@@ -478,13 +478,17 @@ fn the_settings_scroll_indicator_is_not_a_row_target() {
 fn the_two_column_help_page_can_scroll_to_the_bottom() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    // 滚动上限按 viewport 现算；先同步成渲染尺寸，测试才真正覆盖两栏上限，
+    // 而不是拿默认 80×24 的单栏上限再去渲染时 clamp。
+    app.set_viewport(Rect::new(0, 0, 120, 26));
     press(&mut app, KeyCode::Char('?'));
     assert_eq!(app.screen, Screen::Help);
 
-    // 120 列 → content 宽 90 ≥ 78 → 两栏；26 行 → content 高 22 < 25 → 左栏放不下
+    // 120 列 → content 宽 90 ≥ 78 → 两栏；26 行 → 正文高 20，左栏 32 行 → 上限 12。
     for _ in 0..40 {
         press(&mut app, KeyCode::Down);
     }
+    assert_eq!(app.help_scroll, 12, "两栏滚到底应停在上限 12");
     let rows = logical_rows(&app, 120, 26);
     let text: String = rows
         .iter()
@@ -527,25 +531,32 @@ fn clicking_the_help_scroll_indicator_scrolls_instead_of_exiting() {
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     press(&mut app, KeyCode::Char('?'));
     let area = Rect::new(0, 0, 80, 24);
+
+    // 从命中目标取 ↓ 指示器，而不是在整屏里找最后一个 '↓'：底栏提示
+    // 「↑↓ 滚动」里也有一个 ↓，按文字搜索会点到页脚（那里没有目标）。
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::HelpScroll(1))
+        .expect("帮助页应有 ↓ 滚动命中区");
     let rows = logical_rows(&app, 80, 24);
-    let indicator = rows
+    let symbol = rows[target.rect.y as usize]
         .iter()
-        .enumerate()
-        .filter_map(|(y, row)| {
-            row.iter()
-                .position(|(c, _)| *c == '↓')
-                .map(|index| (row[index].1, y as u16))
-        })
-        .next_back();
-    let Some((column, row)) = indicator else {
-        return;
-    };
-    let action = typewords_tui::ui::hit::action_at(&app, area, column, row);
-    assert_ne!(
-        action,
-        Some(Action::HelpBack),
-        "点 ↓ 滚动指示器不该退出帮助页"
+        .find(|(_, x)| *x == target.rect.x)
+        .map(|(c, _)| *c)
+        .expect("滚动指示器所在列应存在");
+    assert_eq!(symbol, '↓', "↓ 命中区应画在正文的滚动指示器上");
+
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
     );
+    assert_eq!(app.screen, Screen::Help, "点滚动指示器不该退出帮助页");
+    assert_eq!(app.help_scroll, 1, "点 ↓ 应向下滚动一行");
 }
 
 /// 帮助页三个分页：`←` / `→`（`h` / `l` 别名）切换，到边停住，换页回到顶部。
@@ -611,6 +622,36 @@ fn clicking_a_help_tab_switches_pages() {
     );
     assert_eq!(app.help_tab, HelpTab::About);
     assert_eq!(app.screen, Screen::Help, "点分页标签不该退出帮助页");
+}
+
+/// 点已高亮的「帮助」导航项不是「重新打开帮助」，不应把当前分页踢回快捷键。
+///
+/// 键盘在导航栏按 Enter 时只会提示「已在「帮助」页」；鼠标点击走同一条
+/// 导航语义，行为应一致。
+#[test]
+fn clicking_the_active_help_nav_entry_keeps_the_current_tab() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::Faq);
+
+    let area = Rect::new(0, 0, 120, 40);
+    let target = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::Navigate(Screen::Help))
+        .expect("帮助导航项应可点击");
+    app.on_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: target.rect.x + target.rect.width / 2,
+            row: target.rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(app.screen, Screen::Help);
+    assert_eq!(app.help_tab, HelpTab::Faq, "点击当前帮助导航项不应重置分页");
 }
 
 /// 重新打开帮助总是从「快捷键」分页开始，不沿用上次停留的分页。

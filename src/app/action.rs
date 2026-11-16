@@ -417,9 +417,11 @@ impl App {
             }
             Screen::Help => {
                 // 进帮助页总是从「快捷键」分页开始：上一次停在哪一页不该
-                // 影响下一次打开；分页与滚动也一起回到起点。
-                self.help_tab = HelpTab::Shortcuts;
-                self.help_scroll = 0;
+                // 影响下一次打开；分页与滚动也一起回到起点。已经在帮助页上
+                // （例如点击当前高亮的侧栏项）时保持现状，与 Enter 的行为一致。
+                if self.screen != Screen::Help {
+                    self.reset_help_state();
+                }
                 self.set_screen(Screen::Help);
             }
             Screen::Practice => {}
@@ -803,6 +805,12 @@ impl App {
         self.settings_cursor = next as usize;
     }
 
+    /// 帮助页回到默认分页并滚回顶部（重新打开帮助时用）。
+    pub(crate) fn reset_help_state(&mut self) {
+        self.help_tab = HelpTab::Shortcuts;
+        self.help_scroll = 0;
+    }
+
     /// 切换帮助页分页；换页回到顶部，不把上一页的滚动位置带过去。
     fn select_help_tab(&mut self, tab: HelpTab) {
         if self.help_tab == tab {
@@ -813,12 +821,15 @@ impl App {
     }
 
     fn scroll_help(&mut self, delta: i32) {
-        let next = (self.help_scroll as i32 + delta).max(0);
         // 上限按当前分页、当前终端尺寸下的实际屏幕行数算，而不是写死 80——
         // 写死的值在条目变多时会截断，条目变少时又会滚过头。三个分页长度
         // 不同、正文还会折行，必须现算。
         let max = crate::ui::help::max_scroll(self) as i32;
-        self.help_scroll = next.min(max) as u16;
+        // 从「实际生效的偏移」开始加减：窗口变高后 max 会变小，旧偏移可能
+        // 已经越界；若直接从旧值加减，第一次 ↑ 会被 clamp 回原位，看起来像
+        // 按键失灵。
+        let current = (self.help_scroll as i32).min(max);
+        self.help_scroll = (current + delta).clamp(0, max) as u16;
     }
 
     fn scroll_stats(&mut self, delta: i32) {

@@ -969,6 +969,59 @@ fn help_page_scrolls_and_returns() {
     assert_eq!(app.focus, Some(FocusId::Content(ContentId::Start)));
 }
 
+/// 帮助页的 `←` / `→` 只在内容区焦点下切分页；Tab 进导航栏后仍属于焦点模型。
+///
+/// 窄屏顶栏的横向选中就靠 `←` / `→`：若帮助页无条件拦截，进导航栏后
+/// 方向键既不能换页签也不能切页，帮助页里的键盘导航会被卡死。
+#[test]
+fn help_nav_arrows_stay_with_focus_navigation() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, Screen::Help);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, app::HelpTab::Faq, "内容区 → 应切分页");
+
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    assert_eq!(label(&app).as_deref(), Some("帮助"));
+    press(&mut app, KeyCode::Right);
+    assert_eq!(
+        label(&app).as_deref(),
+        Some("设置"),
+        "导航栏 → 应移动顶栏选中"
+    );
+    assert_eq!(
+        app.help_tab,
+        app::HelpTab::Faq,
+        "导航栏焦点下 → 不应再切分页"
+    );
+    press(&mut app, KeyCode::Left);
+    assert_eq!(label(&app).as_deref(), Some("帮助"));
+    assert_eq!(app.help_tab, app::HelpTab::Faq);
+}
+
+/// 帮助页底栏跟随焦点：内容区显示分页提示，进导航栏后回到焦点提示。
+#[test]
+fn help_footer_follows_the_focused_pane() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Char('?'));
+    let content_footer = last_line(&app, WIDE);
+    assert!(
+        content_footer.contains("分页"),
+        "内容区焦点应提示分页键: {content_footer:?}"
+    );
+
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    let nav_footer = last_line(&app, WIDE);
+    assert!(
+        nav_footer.contains("选中") && nav_footer.contains("帮助"),
+        "导航栏焦点应显示焦点提示: {nav_footer:?}"
+    );
+}
+
 /// Esc 在其它页面仍是返回上一层，并回到主页默认选中。
 #[test]
 fn escape_on_a_tab_returns_home() {

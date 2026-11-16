@@ -533,6 +533,31 @@ fn help_screen_scrolls_without_losing_any_key() {
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.screen, app::Screen::Home);
 }
+
+/// 窗口变高后滚动上限变小：第一次 ↑ 应以**实际生效的偏移**为基准。
+///
+/// 旧实现从保存的旧偏移（可能已越界）加减再 clamp，第一次按键会被
+/// clamp 回原位、画面不动，看起来像帮助页滚动失灵。
+#[test]
+fn help_scroll_responds_immediately_after_the_terminal_grows() {
+    use ratatui::layout::Rect;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 26));
+    press(&mut app, KeyCode::Char('?'));
+    for _ in 0..40 {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.help_scroll, 12, "120 × 26 时两栏左栏应能滚 12 行");
+
+    app.set_viewport(Rect::new(0, 0, 120, 32));
+    press(&mut app, KeyCode::Up);
+    assert_eq!(
+        app.help_scroll, 5,
+        "一次 ↑ 应从当前实际底部（6）上移一行，而不是被旧偏移吃掉"
+    );
+}
 #[test]
 fn newer_setting_version_is_not_overwritten() {
     let fixture = common::Fixture::new();

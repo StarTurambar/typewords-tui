@@ -200,6 +200,53 @@ fn practice_help_switches_tabs_without_leaving_the_practice() {
     assert_eq!(session.current_word().word, word, "帮助页不该动练习进度");
 }
 
+/// 最小支持宽度（60 列）下整屏帮助也要给出分页键提示：没有底栏可退，
+/// 提示放不下分页条右侧时要落到下一行，而不是直接消失。
+#[test]
+fn practice_help_hint_fits_at_the_minimum_width() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(ratatui::layout::Rect::new(0, 0, 60, 20));
+    app.start_practice();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, app::Screen::Help);
+
+    let text = render_text(&app, 60, 20);
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines.get(1).is_some_and(|line| {
+            line.contains("快捷键")
+                && line.contains("常见问题")
+                && line.contains("关于与反馈")
+                && !line.contains("分页")
+        }),
+        "60 列下三个分页标签应完整可见，且不能被提示覆盖: \n{text}"
+    );
+    assert!(
+        lines
+            .get(2)
+            .is_some_and(|line| line.contains("←→ 分页 · ↑↓ 滚动 · esc 返回")),
+        "完整提示应落在分页条下一行: \n{text}"
+    );
+}
+
+/// 整屏帮助仍是「任意键返回」：带 Alt 的 ← / → 不是分页键，应回到练习页。
+#[test]
+fn practice_help_modified_arrows_return_to_the_practice() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.start_practice();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, app::Screen::Help);
+
+    app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
+    assert_eq!(
+        app.screen,
+        app::Screen::Practice,
+        "Alt+← 是练习页的上一组键，帮助页应把它当「任意键返回」"
+    );
+}
+
 /// 跟打页的 `Ctrl+Z` 切换当前句译文（与练习页的「切换翻译」同一个键）。
 #[test]
 fn article_practice_toggles_the_translation_panel_on_ctrl_z() {

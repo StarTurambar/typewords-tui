@@ -168,7 +168,7 @@ Web 备份 data.json                        TUI 数据目录
 | --- | --- | --- |
 | 自定义主题 | `src/theme/` | 13 个颜色 token、6 套内置、`<home>/themes/*.json`、base 继承与校验告警；Web 用 CSS 变量，两端不共享主题文件 |
 | 内置词典可设为当前词典 | `src/app/dicts.rs`、`src/ui/dict_picker.rs` | 收藏 / 错词 / 已掌握与资源词库并列，`Enter` 设为当前学习词典（写 `studyIndex`，重启保持）、`w` 打开词条管理页；上游 `dict-list.vue` 只列资源目录 |
-| 终端交互：鼠标与键盘焦点导航 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs`、`src/ui/focus.rs`、`src/app/focus.rs` | 侧栏 / 按钮 / 列表点击与滚轮，练习页与跟打页可点底部动作按钮，鼠标捕获后需 `Shift+拖拽` 复制；套外壳的页面共用两栏焦点（宽屏侧栏竖向 / 窄屏顶栏横向，`Tab` 换栏，内容区按视觉行分带），进入页面默认选中内容区、底栏显示「选中 X」。上游只有鼠标 / 触屏 |
+| 终端交互：鼠标与键盘焦点导航 | `src/app/mouse.rs`、`src/ui/hit.rs`、`src/ui/target.rs`、`src/ui/focus.rs`、`src/app/focus.rs` | 侧栏 / 按钮 / 列表点击与滚轮，练习页与跟打页可点底部动作按钮，鼠标捕获后需 `Shift+拖拽` 复制；套外壳的页面共用两栏焦点（宽屏侧栏竖向 / 窄屏顶栏横向，`Tab` 换栏，内容区按视觉行分带），进入页面默认选中内容区、底栏显示「选中 X」（帮助页内容区显示分页提示）。上游只有鼠标 / 触屏 |
 | 终端响应式外壳 | `src/ui/shell.rs` | < 100 列切窄屏顶栏标签，≥ 120 列侧栏 26 列；小于 60 × 20 只渲染提示 |
 | 点阵大字 | `src/ui/bigtext.rs`、`src/ui/practice.rs` | 5×7 点阵字体，空间足够时按本轮最长单词整体放大 2 倍；非 ASCII 回退普通文本 |
 | 单二进制与命令行工具 | `src/cli.rs`、`scripts/package.ps1`、`scripts/package.sh`、`.github/workflows/release.yml` | `tw doctor` / `tw task` / `tw import-dict` / `tw export-dict` / `tw import-web` / `tw export-web`；发布包为 tar.gz（可执行文件 + assets + docs + LICENSE + sha256），没有 Node 与 WebView 运行时 |

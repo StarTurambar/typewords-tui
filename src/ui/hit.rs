@@ -57,7 +57,7 @@ pub fn targets(app: &App, area: Rect) -> Vec<Target> {
         Screen::AdvFsrs => targets.extend(super::adv_fsrs::targets(app, shell.content)),
         Screen::Shortcuts => targets.extend(super::shortcuts::targets(app, shell.content)),
         Screen::Words => targets.extend(super::words::targets(app, shell.content)),
-        // 帮助页正文是只读说明，只有右侧的滚动指示器可点。
+        // 帮助页正文是只读说明，只有分页标签与右侧的滚动指示器可点。
         //
         // 早期实现把整块内容区注册成 `HelpBack`：点终端窗口聚焦、点空白、
         // 点文字都会直接跳回主页，帮助页根本留不住——鼠标点击应当只作用于
