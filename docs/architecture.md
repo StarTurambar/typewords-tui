@@ -86,7 +86,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 
 ## 4. 代码地图
 
-src/ 共 66 个 Rust 文件，按目录分组：
+src/ 共 67 个 Rust 文件，按目录分组：
 
 | 目录 | 文件与职责 |
 | --- | --- |
@@ -97,11 +97,11 @@ src/ 共 66 个 Rust 文件，按目录分组：
 | src/domain/flow/（3） | mod.rs 内置流程 / 游标 / 相位 / 展示；navigator.rs 推进器与快照恢复；store.rs 自建流程数据结构 |
 | src/store/（1） | mod.rs 5 份存档的读写、信封、版本、隔离、原子写 |
 | src/theme/（3） | mod.rs 主题模型与注册表；builtin.rs 6 套内置主题；load.rs 用户主题加载与校验 |
-| src/ui/（22） | mod.rs 渲染入口与弹层顺序；theme.rs token → Color；shell.rs 响应式外壳；home.rs；practice.rs；word_test.rs；words.rs；articles.rs；flows.rs；dict_picker.rs；stats.rs；settings.rs；shortcuts.rs；help.rs；bigtext.rs 5x7 点阵；typing_buttons.rs；overlays.rs；widgets.rs；focus.rs 焦点几何 / 分带；insights.rs 统计聚合；target.rs Target / FocusId / ContentId；hit.rs 命中检测 |
+| src/ui/（23） | mod.rs 渲染入口与弹层顺序；theme.rs token → Color；shell.rs 响应式外壳；home.rs；practice.rs；word_test.rs；words.rs；articles.rs；flows.rs；dict_picker.rs；stats.rs；settings.rs；shortcuts.rs；adv_fsrs.rs 高级 FSRS 编辑页；help.rs；bigtext.rs 5x7 点阵；typing_buttons.rs；overlays.rs；widgets.rs；focus.rs 焦点几何 / 分带；insights.rs 统计聚合；target.rs Target / FocusId / ContentId；hit.rs 命中检测 |
 
 测试与辅助：
 
-- tests/：30 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
+- tests/：31 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
 - scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）、scripts/changelog.sh（从根目录 `CHANGELOG.md` 取某版本的发布说明，发布 workflow 与本地预览共用）。
@@ -174,7 +174,7 @@ panic 钩子的组合顺序不能变：crash 的钩子在 main 里最先安装�
 
 App 是唯一的状态持有者。输入分两条路径：
 
-- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行；Action 目前有 100 个变体。
+- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行；Action 目前有 103 个变体。
 - 练习页键盘（以及文章跟打页键盘）：App::on_practice_key / on_article_practice_key 直接调用键入状态机与会话方法，不经过 Action。这里是输入频率最高、状态迁移最复杂的路径。
 
 此外 App::bootstrap 与 App::on_tick 也直接更新状态。因此更准确的约束是：domain 提供受控迁移函数，app 是唯一修改状态的地方，ui 只读。

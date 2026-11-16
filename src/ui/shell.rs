@@ -497,18 +497,18 @@ fn render_footer(app: &App, frame: &mut Frame, shell: &ShellLayout, theme: &Them
 /// 选中项名称在主页是按钮名、在导航栏是页面名、在其它页面由页面自己的
 /// 光标决定（词库名 / 设置项名 / 日期……），所以这里返回 String。
 fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
-    // 帮助页进入时默认就有 Page 焦点，焦点提示会一直盖住「←→ 分页」：
-    // 分页键是帮助页唯一的横向操作，比「选中 帮助」更值得占底栏。
-    if app.screen == Screen::Help {
+    // 帮助页进入时默认就有 Page 焦点，而 Page 没有可高亮的选中项：焦点提示
+    // 会一直盖住「←→ 分页」，此时让位给帮助页自己的键位提示。焦点在导航栏
+    // 时仍显示焦点提示——方向键这时操作的是导航栏，不是帮助正文，页面键位
+    // 提示（「↑↓ 滚动」）会是错的。
+    let pane = crate::ui::focus::pane(app);
+    if app.screen == Screen::Help && pane != Some(crate::ui::focus::Pane::Nav) {
         return None;
     }
     let label = crate::ui::focus::focused_label(app, area)?;
-    let pane = crate::ui::focus::pane(app);
     let home = app.screen == Screen::Home;
     let enter = if pane == Some(crate::ui::focus::Pane::Nav) {
         "切换"
-    } else if app.screen == Screen::Help {
-        "返回"
     } else if app.screen == Screen::AdvFsrs {
         // 这一页的 Enter 永远是「改这一行」（改数值 / 切开关 / 弹重置确认）。
         "修改"
@@ -516,10 +516,23 @@ fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
         "触发"
     };
     let esc = if home { "取消" } else { "返回" };
+    // 统计页内容区的方向键是在日历里选日期，不是通用的「移动」；按词典
+    // 视图没有日历，↑ / ↓ 仍是滚动正文。提示跟着页面语义走，用户才知道
+    // 方向键当前作用在什么上。焦点在导航栏时仍是「移动」。
+    let move_label = if app.screen == Screen::Stats && pane == Some(crate::ui::focus::Pane::Content)
+    {
+        if app.stats_by_dict {
+            "滚动"
+        } else {
+            "选日期"
+        }
+    } else {
+        "移动"
+    };
     // tab 放在末尾：底栏太窄时从尾部丢弃，先保住「选中 / 移动 / enter / esc」。
     let mut hints = vec![
         ("选中", label),
-        ("↑↓←→", "移动".to_string()),
+        ("↑↓←→", move_label.to_string()),
         ("enter", enter.to_string()),
         ("esc", esc.to_string()),
     ];
@@ -561,7 +574,10 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("+/-", "每日词数"),
             ("esc", "返回"),
         ],
-        Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
+        // 方向键在日历里选日期、按词典视图滚动正文；有焦点时底栏走
+        // focus_hints，这一份是「没有选中项」时的回退提示，不能写死成
+        // 「↑↓ 滚动」。
+        Screen::Stats => &[("↑↓←→", "选日期 / 滚动"), ("滚轮", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
         Screen::WordTest => &[
             ("1~4", "选择"),

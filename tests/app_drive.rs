@@ -2,6 +2,7 @@
 
 mod common;
 
+use chrono::Datelike;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
 
@@ -532,6 +533,31 @@ fn help_screen_scrolls_without_losing_any_key() {
     assert_eq!(app.help_scroll, 6);
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.screen, app::Screen::Home);
+}
+
+/// 窗口变高后滚动上限变小：第一次 ↑ 应以**实际生效的偏移**为基准。
+///
+/// 旧实现从保存的旧偏移（可能已越界）加减再 clamp，第一次按键会被
+/// clamp 回原位、画面不动，看起来像帮助页滚动失灵。
+#[test]
+fn help_scroll_responds_immediately_after_the_terminal_grows() {
+    use ratatui::layout::Rect;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 26));
+    press(&mut app, KeyCode::Char('?'));
+    for _ in 0..40 {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.help_scroll, 12, "120 × 26 时两栏左栏应能滚 12 行");
+
+    app.set_viewport(Rect::new(0, 0, 120, 32));
+    press(&mut app, KeyCode::Up);
+    assert_eq!(
+        app.help_scroll, 5,
+        "一次 ↑ 应从当前实际底部（6）上移一行，而不是被旧偏移吃掉"
+    );
 }
 #[test]
 fn newer_setting_version_is_not_overwritten() {
@@ -1143,15 +1169,36 @@ fn stats_page_switches_views_and_navigates_the_calendar() {
     press(&mut app, KeyCode::Char('t'));
     assert_eq!(app.screen, app::Screen::Stats);
 
-    let day = app.stats_day;
+    // 方向键按日历格子走：先挑本月第二周一个左右都有日期的日子。
+    let (year, month) = app.stats_month;
+    let date = (8..=14)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
+        .expect("本月第二周应有左右都有日期的日子");
+    app.select_stats_day(date);
     press(&mut app, KeyCode::Right);
-    assert_eq!(app.stats_day, day + chrono::Duration::days(1));
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(1),
+        "→ 应选右边一天"
+    );
     press(&mut app, KeyCode::Left);
-    assert_eq!(app.stats_day, day);
+    assert_eq!(app.stats_day, date, "← 应选回左边一天");
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(7),
+        "↓ 应选下面一周的同一天"
+    );
 
     let (year, month) = app.stats_month;
+    let next_month = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
     press(&mut app, KeyCode::Char('.'));
-    assert_eq!(app.stats_month, (year, month + 1), "应翻到下个月");
+    assert_eq!(app.stats_month, next_month, "应翻到下个月");
 
     assert!(!app.stats_by_dict);
     press(&mut app, KeyCode::Char('v'));

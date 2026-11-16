@@ -449,7 +449,10 @@ fn help_scrolls_at_min_size() {
     let scrolled = render_text(&app, 80, 24);
     assert!(scrolled.contains("Shift+拖拽") || scrolled.contains("Shift"));
     assert!(scrolled.contains("导航/查看"));
-    assert!(scrolled.contains("↓") || scrolled.contains("↑"));
+    assert!(
+        scrolled.contains('█'),
+        "滚动后正文右侧应出现滚动条的滑块: {scrolled}"
+    );
 }
 
 /// 帮助页覆盖上游的 FAQ / 关于 / 反馈三个页面。
@@ -478,21 +481,97 @@ fn help_tabs_cover_faq_and_about_feedback() {
     assert!(!faq.contains("Ctrl+I"), "FAQ 分页不该还渲染快捷键表: {faq}");
 
     app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    // 「关于」分页显示的是 App::paths 里的真实数据目录；换一个短而唯一的
+    // 路径，既避免临时路径折行，也能识别「固定显示默认路径 / 回退文案」。
+    if let Some(paths) = app.paths.as_mut() {
+        paths.home = std::path::PathBuf::from("D:/tw-about-home");
+    }
     let about = render_text(&app, 120, 40);
     assert!(
         about.contains("https://github.com/StarTurambar/typewords-tui"),
         "关于分页应给出项目仓库地址: {about}"
     );
     assert!(
-        about.contains(env!("CARGO_PKG_VERSION")),
-        "关于分页应显示版本号"
+        about.contains(&format!("Type Words TUI v{}", env!("CARGO_PKG_VERSION"))),
+        "关于分页应显示版本号（侧栏的 v 号不算）: {about}"
     );
-    assert!(about.contains("数据目录"), "关于分页应显示当前数据目录");
+    assert!(
+        about.contains("数据目录：D:/tw-about-home"),
+        "关于分页应显示 App::paths 里的真实数据目录: {about}"
+    );
+    assert!(
+        !about.contains("未解析"),
+        "关于分页不该回退到「数据目录未解析」: {about}"
+    );
     assert!(
         about.contains("tw doctor"),
         "反馈分页应说明提 issue 要附的诊断信息"
     );
     assert!(about.contains("上游"), "关于分页应说明与上游项目的关系");
+}
+
+/// 帮助页分页标签的命中矩形必须与绘制同源：画在哪就能点在哪。
+#[test]
+fn help_tab_targets_match_rendered_labels() {
+    use typewords_tui::app::Action;
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    let buffer = terminal.backend().buffer();
+
+    for tab in app::HelpTab::ALL {
+        let target = targets
+            .iter()
+            .find(|target| target.action == Action::HelpSelectTab(tab))
+            .unwrap_or_else(|| panic!("{tab:?} 应有命中区"));
+        // 标签文字从 rect.x + 1 开始（两侧各留 1 列）。
+        let first = tab.label().chars().next().expect("label");
+        let symbol = buffer
+            .cell((target.rect.x + 1, target.rect.y))
+            .map(|cell| cell.symbol())
+            .unwrap_or("");
+        assert!(
+            symbol.starts_with(first),
+            "{tab:?} 的命中区与绘制文字漂移: rect={:?}, cell={symbol:?}",
+            target.rect
+        );
+    }
+}
+
+/// FAQ 是折行后的长文：滚动上限必须按屏幕行算，最后一条答案要能滚出来。
+#[test]
+fn faq_scrolls_to_the_last_answer() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    // 80×24 单栏：FAQ 折行后远超一屏；PgDn 连按到上限。
+    for _ in 0..12 {
+        app.on_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    }
+    let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+    assert!(
+        !typewords_tui::ui::hit::targets(&app, area)
+            .iter()
+            .any(|target| target.action == app::Action::HelpScroll(1)),
+        "滚到底后不应再注册 ↓ 命中区"
+    );
+    let text = render_text(&app, 80, 24);
+    assert!(
+        text.contains("手机 / 平板能用吗"),
+        "FAQ 最后一条问题应能滚到: {text}"
+    );
+    assert!(
+        text.contains("触屏没有对应的输入方式"),
+        "FAQ 最后一条答案应能滚到: {text}"
+    );
 }
 
 /// 词条编辑弹层打开时，鼠标点击不能穿透到下层页面。

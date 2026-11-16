@@ -19,11 +19,13 @@ use crate::ui::widgets::{self, fit_text};
 pub struct FlowsLayout {
     pub header: Rect,
     pub list: Rect,
+    /// 流程列表的滚动偏移（跟随 `flow_cursor`）。
+    pub offset: usize,
     pub detail: Rect,
     pub footer: Rect,
 }
 
-pub fn layout(_app: &App, content: Rect) -> FlowsLayout {
+pub fn layout(app: &App, content: Rect) -> FlowsLayout {
     let header = Rect::new(content.x, content.y, content.width, content.height.min(1));
     let columns = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
@@ -37,9 +39,16 @@ pub fn layout(_app: &App, content: Rect) -> FlowsLayout {
             content.width,
             content.height.saturating_sub(2),
         ));
+    let list = columns[0];
+    let offset = widgets::list_offset(
+        app.flow_cursor,
+        app.flow_entry_count(),
+        list.height as usize,
+    );
     FlowsLayout {
         header,
-        list: columns[0],
+        list,
+        offset,
         detail: columns[1],
         footer: Rect::new(
             content.x,
@@ -56,13 +65,14 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     let layout = layout(app, content);
     let entries = app.flow_entries();
     let mut result = Vec::new();
-    for (index, _) in entries.iter().enumerate() {
-        let y = layout.list.y + index as u16;
+    for (index, _) in entries.iter().enumerate().skip(layout.offset) {
+        let y = layout.list.y + (index - layout.offset) as u16;
         if y >= layout.list.bottom() {
             break;
         }
+        // 让出最右一列：滚动条画在那里，点它不该选中某个流程。
         result.push(Target::new(
-            Rect::new(layout.list.x, y, layout.list.width, 1),
+            Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1),
             crate::app::Action::FlowMove(index as i32 - app.flow_cursor as i32),
         ));
     }
@@ -73,7 +83,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Home, |frame, content| {
         let layout = layout(app, content);
         render_header(app, frame, layout.header, theme);
-        render_list(app, frame, layout.list, theme);
+        render_list(app, frame, layout.list, layout.offset, theme);
         render_detail(app, frame, layout.detail, theme);
         render_footer(app, frame, layout.footer, theme);
     });
@@ -128,13 +138,14 @@ fn render_header(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(spans)), rect);
 }
 
-fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
+fn render_list(app: &App, frame: &mut Frame, rect: Rect, offset: usize, theme: &Theme) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
     let entries = app.flow_entries();
-    for (index, entry) in entries.iter().enumerate() {
-        let y = rect.y + index as u16;
+    let row_width = rect.width.saturating_sub(1);
+    for (index, entry) in entries.iter().enumerate().skip(offset) {
+        let y = rect.y + (index - offset) as u16;
         if y >= rect.bottom() {
             break;
         }
@@ -166,18 +177,24 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {
         } else {
             entry.name.clone()
         };
-        let row = Rect::new(rect.x, y, rect.width, 1);
+        let row = Rect::new(rect.x, y, row_width, 1);
         if selected {
             widgets::paint_rect(frame, row, theme.selection);
         }
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                fit_text(&format!("{marker} {label}"), rect.width as usize),
+                fit_text(&format!("{marker} {label}"), row_width as usize),
                 style,
             ))),
             row,
         );
     }
+    widgets::scrollbar(
+        frame,
+        Rect::new(rect.right().saturating_sub(1), rect.y, 1, rect.height),
+        widgets::ScrollbarState::new(offset, entries.len(), rect.height as usize),
+        theme,
+    );
 }
 
 fn render_detail(app: &App, frame: &mut Frame, rect: Rect, theme: &Theme) {

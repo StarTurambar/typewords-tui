@@ -49,10 +49,9 @@ pub enum Action {
     // 统计
     StatsScroll(i32),
     StatsToggleView,
-    StatsDayMove(i32),
     /// 选中指定日期（日历里点某一天）。
     ///
-    /// `StatsDayMove` 是相对移动，鼠标点的是具体某一天，需要绝对值。
+    /// 键盘在日历里按格子移动，最终也落到「选中某一天」这个绝对动作上。
     StatsSelectDay(chrono::NaiveDate),
     StatsMonthMove(i32),
     // 收藏到指定词典
@@ -218,7 +217,6 @@ impl App {
             }
             Action::StatsScroll(delta) => self.scroll_stats(delta),
             Action::StatsToggleView => self.toggle_stats_view(),
-            Action::StatsDayMove(delta) => self.move_stats_day(delta),
             Action::StatsSelectDay(date) => self.select_stats_day(date),
             Action::StatsMonthMove(delta) => self.move_stats_month(delta),
             Action::CollectMove(delta) => self.move_collect_cursor(delta),
@@ -417,9 +415,11 @@ impl App {
             }
             Screen::Help => {
                 // 进帮助页总是从「快捷键」分页开始：上一次停在哪一页不该
-                // 影响下一次打开；分页与滚动也一起回到起点。
-                self.help_tab = HelpTab::Shortcuts;
-                self.help_scroll = 0;
+                // 影响下一次打开；分页与滚动也一起回到起点。已经在帮助页上
+                // （例如点击当前高亮的侧栏项）时保持现状，与 Enter 的行为一致。
+                if self.screen != Screen::Help {
+                    self.reset_help_state();
+                }
                 self.set_screen(Screen::Help);
             }
             Screen::Practice => {}
@@ -627,7 +627,6 @@ impl App {
     pub(crate) fn move_selection(&mut self, delta: i32) {
         match self.screen {
             Screen::DictPicker => self.move_dict_cursor(delta),
-            Screen::Stats => self.scroll_stats(delta),
             Screen::Settings => self.move_settings_cursor(delta),
             Screen::AdvFsrs => self.move_adv_fsrs_cursor(delta),
             Screen::Flows => self.move_flow_edit_cursor(delta),
@@ -670,7 +669,8 @@ impl App {
     /// 非主页内容区一次方向移动；返回页面自己的光标是否真的动了。
     ///
     /// 动不了的那次由调用方按几何决定是否跨到导航栏：宽屏内容区 ←、窄屏内容区
-    /// 最顶部 ↑。统计页左右键在月初 / 月末停住，正好把跨栏机会留给 ←。
+    /// 最顶部 ↑。统计页日历的左边缘（行首没有日期）也停住，正好把跨栏机会
+    /// 留给 ←。
     pub(crate) fn move_selection_page(&mut self, direction: FocusDir) -> bool {
         let forward = matches!(direction, FocusDir::Down | FocusDir::Right);
         match (self.screen, direction) {
@@ -747,24 +747,7 @@ impl App {
                 self.move_selection(if forward { 1 } else { -1 });
                 before != self.shortcut_cursor
             }
-            (Screen::Stats, FocusDir::Up | FocusDir::Down) => {
-                let before = self.stats_scroll;
-                self.scroll_stats(if forward { 1 } else { -1 });
-                before != self.stats_scroll
-            }
-            (Screen::Stats, FocusDir::Left | FocusDir::Right) => {
-                // 日历里 ±1 天；到本月的 1 号 / 最后一天就停住，让 ← 有机会跨栏。
-                let last = month_last_day(self.stats_month);
-                let day = self.stats_day.day();
-                if direction == FocusDir::Left && day <= 1 {
-                    return false;
-                }
-                if direction == FocusDir::Right && day >= last {
-                    return false;
-                }
-                self.move_stats_day(if forward { 1 } else { -1 });
-                true
-            }
+            (Screen::Stats, direction) => self.move_stats_page(direction),
             (Screen::Help, FocusDir::Up | FocusDir::Down) => {
                 let before = self.help_scroll;
                 self.scroll_help(if forward { 1 } else { -1 });
@@ -772,6 +755,48 @@ impl App {
             }
             _ => false,
         }
+    }
+
+    /// 统计页内容区的一次方向移动：在日历里按视觉位置选日期。
+    ///
+    /// 日历每一格就是一个日期，方向键跟着格子走而不是「日期 ±1」：
+    ///
+    /// - ← / →：同一行相邻的一天。行首（周一）与 1 号左边没有格子，
+    ///   停住的那一次由调用方跨到导航栏的「统计」页签；
+    /// - ↑ / ↓：同一列的上 / 下一周（±7 天）。第一周上面、最后一周下面
+    ///   没有格子，同样停住；
+    /// - 不跨月也不回绕：翻月是 `,` / `.` 的职责，方向键只在当前月历里移动。
+    ///
+    /// 按词典视图没有日历，↑ / ↓ 保持「滚动正文」的旧语义（那里只有一列
+    /// 累计数据，没有上下的日期可跳）；左右键无事可做。
+    fn move_stats_page(&mut self, direction: FocusDir) -> bool {
+        if self.stats_by_dict {
+            return match direction {
+                FocusDir::Up | FocusDir::Down => {
+                    let before = self.stats_scroll;
+                    self.scroll_stats(if direction == FocusDir::Down { 1 } else { -1 });
+                    before != self.stats_scroll
+                }
+                FocusDir::Left | FocusDir::Right => false,
+            };
+        }
+        let day = self.stats_day;
+        let last = month_last_day((day.year(), day.month()));
+        let column = day.weekday().num_days_from_monday();
+        let target = match direction {
+            FocusDir::Left if column > 0 && day.day() > 1 => day.pred_opt(),
+            FocusDir::Right if column < 6 && day.day() < last => day.succ_opt(),
+            FocusDir::Up if day.day() > 7 => day.checked_sub_signed(chrono::Duration::days(7)),
+            FocusDir::Down if day.day() + 7 <= last => {
+                day.checked_add_signed(chrono::Duration::days(7))
+            }
+            _ => None,
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        self.select_stats_day(target);
+        true
     }
 
     /// 非主页内容区 Enter：执行页面当前选中项。
@@ -803,6 +828,12 @@ impl App {
         self.settings_cursor = next as usize;
     }
 
+    /// 帮助页回到默认分页并滚回顶部（重新打开帮助时用）。
+    pub(crate) fn reset_help_state(&mut self) {
+        self.help_tab = HelpTab::Shortcuts;
+        self.help_scroll = 0;
+    }
+
     /// 切换帮助页分页；换页回到顶部，不把上一页的滚动位置带过去。
     fn select_help_tab(&mut self, tab: HelpTab) {
         if self.help_tab == tab {
@@ -813,19 +844,19 @@ impl App {
     }
 
     fn scroll_help(&mut self, delta: i32) {
-        let next = (self.help_scroll as i32 + delta).max(0);
         // 上限按当前分页、当前终端尺寸下的实际屏幕行数算，而不是写死 80——
         // 写死的值在条目变多时会截断，条目变少时又会滚过头。三个分页长度
-        // 不同、正文还会折行，必须现算。
-        let max = crate::ui::help::max_scroll(self) as i32;
-        self.help_scroll = next.min(max) as u16;
+        // 不同、正文还会按折行，必须现算。
+        let max = crate::ui::help::max_scroll(self);
+        self.help_scroll = scroll_by(self.help_scroll, delta, max);
     }
 
     fn scroll_stats(&mut self, delta: i32) {
-        let count = crate::ui::stats::body_line_count(self);
-        let max = count.saturating_sub(1) as i32;
-        let next = (self.stats_scroll as i32 + delta).clamp(0, max.max(0));
-        self.stats_scroll = next as u16;
+        // 上限 = 总行数 - 视口行数：内容不足一屏时是 0，按不出任何滚动。
+        // 旧实现用「总行数 - 1」，没有溢出也能一直按 ↓ 把正文滚成只剩最后
+        // 一行；而且行数按写死的 80 列算，窗口一变上限就错。
+        let max = crate::ui::stats::max_scroll(self);
+        self.stats_scroll = scroll_by(self.stats_scroll, delta, max);
     }
 
     /// 切换统计页的视图：日历 / 按词典。
@@ -834,46 +865,29 @@ impl App {
         self.stats_scroll = 0;
     }
 
-    /// 移动日历选中的日期。
-    fn move_stats_day(&mut self, delta: i32) {
-        let Some(next) = self
-            .stats_day
-            .checked_add_signed(chrono::Duration::days(delta as i64))
-        else {
-            return;
-        };
-        self.stats_day = next;
-        self.stats_month = (next.year(), next.month());
-    }
-
-    /// 选中日历里的某一天。
+    /// 选中日历里的某一天（键盘移动与鼠标点击共用）。
+    ///
+    /// 月份跟着日期走；滚轮可能已经把日历滚出视野，选中后顺手把它滚回来。
     pub fn select_stats_day(&mut self, date: chrono::NaiveDate) {
         self.stats_day = date;
         self.stats_month = (date.year(), date.month());
+        let scroll = crate::ui::stats::scroll_to_selected_day(self);
+        self.stats_scroll = scroll;
     }
 
-    /// 翻到上 / 下一个月。
+    /// 翻到上 / 下一个月（选中的日期落到新月份的同一天，越界取月末）。
     fn move_stats_month(&mut self, delta: i32) {
         let (year, month) = self.stats_month;
         let total = year as i64 * 12 + (month as i64 - 1) + delta as i64;
         let year = total.div_euclid(12) as i32;
         let month = total.rem_euclid(12) as u32 + 1;
-        self.stats_month = (year, month);
-        // 选中的日期跟着落到新月份的同一天，越界则取该月最后一天
         let day_number = self.stats_day.day();
         let Some(first) = chrono::NaiveDate::from_ymd_opt(year, month, 1) else {
             return;
         };
-        let next_month = if month == 12 {
-            chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
-        } else {
-            chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
-        };
-        let last_day = next_month
-            .and_then(|d| d.pred_opt())
-            .map(|d| d.day())
-            .unwrap_or(day_number);
-        self.stats_day = first.with_day(day_number.min(last_day)).unwrap_or(first);
+        let last_day = month_last_day((year, month));
+        let next = first.with_day(day_number.min(last_day)).unwrap_or(first);
+        self.select_stats_day(next);
     }
 
     /// 把词库页第 `position` 行设为当前学习词典。
@@ -970,6 +984,15 @@ impl App {
         let index = ids.iter().position(|id| *id == current).unwrap_or(0);
         self.boot.settings.theme = ids[(index + 1) % ids.len()].clone();
     }
+}
+
+/// 以**实际生效的偏移**为基准做一次滚动：窗口变高后 max 会变小，旧偏移
+/// 可能已经越界；若直接从旧值加减，第一次按键会被 clamp 回原位，看起来
+/// 像按键失灵。帮助页与统计页共用这一条。
+fn scroll_by(current: u16, delta: i32, max: u16) -> u16 {
+    let max = max as i32;
+    let current = (current as i32).min(max);
+    (current + delta).clamp(0, max) as u16
 }
 
 /// 某年某月的最后一天（统计页日历边界用）。

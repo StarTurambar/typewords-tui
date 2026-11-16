@@ -27,6 +27,7 @@ struct StatsLayout {
     tiles: Rect,
     section: Rect,
     list: Rect,
+
     tile_columns: usize,
     tile_height: u16,
     visible: usize,
@@ -56,11 +57,9 @@ fn layout(_app: &App, content: Rect) -> StatsLayout {
         1,
     );
 
-    let mut list_height = content.bottom().saturating_sub(section.bottom());
-    // 底部留一行放滚动提示
-    if list_height > 1 {
-        list_height -= 1;
-    }
+    // 正文占满分区标题以下全部行：滚动条画在右侧一列，不再用底部一行
+    // 写「还有 N 行」。
+    let list_height = content.bottom().saturating_sub(section.bottom());
     let list = Rect::new(content.x, section.bottom(), content.width, list_height);
 
     StatsLayout {
@@ -74,9 +73,75 @@ fn layout(_app: &App, content: Rect) -> StatsLayout {
     }
 }
 
-/// 下方内容区的行数（滚动边界用）。
-pub fn body_line_count(app: &App) -> usize {
-    body_lines(app, 80, &app.theme()).len()
+/// 统计页的内容区（外壳里正文所在区域）。
+///
+/// 以 `app.viewport` 为几何来源：事件循环在每次处理输入前同步它，测试 /
+/// `examples/shot` 用 `set_viewport` 显式设置。渲染与命中另有一份调用方
+/// 传入的 `content`，两者必须来自同一尺寸。
+fn content_rect(app: &App) -> Rect {
+    shell::layout(app.viewport, Nav::Stats).content
+}
+
+/// 下方内容区的最大滚动量（单位：屏幕行）。
+///
+/// 上限必须按**当前视口高度**现算：早期实现用「总行数 - 1」，内容不足
+/// 一屏时也能滚，滚下去只剩最后一行、后面全是空白；窗口变高后上限也不跟
+/// 着缩小。现在内容放得下就是 0——没有溢出不能滚。
+pub fn max_scroll(app: &App) -> u16 {
+    let content = content_rect(app);
+    if content.width == 0 || content.height == 0 {
+        return 0;
+    }
+    let layout = layout(app, content);
+    body_scroll_state(app, &layout).max_offset() as u16
+}
+
+/// 下方内容区的行数（滚动上限、滚动条命中与自动滚回选中日用）。
+/// 正文右侧留 1 列给滚动条。
+fn body_line_count(app: &App, list_width: u16) -> usize {
+    body_lines(app, list_width.saturating_sub(1) as usize, &app.theme()).len()
+}
+
+/// 日历里选中日期在正文中的行号：月份标题与星期表头各占一行，
+/// 之后每一行是一周。
+fn selected_day_row(app: &App) -> Option<usize> {
+    let (year, month) = app.stats_month;
+    let day = app.stats_day;
+    if day.year() != year || day.month() != month {
+        return None;
+    }
+    let grid = calendar_grid(year, month)?;
+    let cell = grid.leading + day.day() as usize - 1;
+    Some(2 + cell / 7)
+}
+
+/// 让日历里选中的那天落在可视范围内时应设的滚动偏移。
+///
+/// 统计页的方向键只移动选中日期、不再滚动正文，但滚轮可能已经把日历滚出
+/// 视野；每次移动或翻月后用它把选中的那一行滚回来，避免「选中了却看不见」。
+/// 按词典视图没有日历，返回当前偏移。
+pub fn scroll_to_selected_day(app: &App) -> u16 {
+    if app.stats_by_dict {
+        return app.stats_scroll;
+    }
+    let shell = shell::layout(app.viewport, Nav::Stats);
+    let layout = layout(app, shell.content);
+    let Some(row) = selected_day_row(app) else {
+        return app.stats_scroll;
+    };
+    if layout.visible == 0 {
+        return app.stats_scroll;
+    }
+    let current = app.stats_scroll as usize;
+    let next = if row < current {
+        row
+    } else if row >= current + layout.visible {
+        row + 1 - layout.visible
+    } else {
+        // 选中行已经在视口里：多数方向键走这里，不必重算整页行数。
+        return current as u16;
+    };
+    next.min(body_scroll_state(app, &layout).max_offset()) as u16
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -159,7 +224,10 @@ fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("    ", Style::default().fg(theme.dim)),
-        Span::styled("← → 选日期   , . 翻月", Style::default().fg(theme.dim)),
+        Span::styled(
+            "↑↓←→ 选日期   滚轮滚动   , . 翻月",
+            Style::default().fg(theme.dim),
+        ),
     ]));
 
     // 表头与日期列同宽（5 列），按显示宽度右对齐，避免中文表头错位
@@ -427,11 +495,53 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     if let Some(rect) = header_right_rect(&toggle, layout.header) {
         result.push(Target::new(rect, crate::app::Action::StatsToggleView));
     }
+    // 正文右侧的滚动条：点滑块上下的轨道各滚一行。
+    let state = body_scroll_state(app, &layout);
+    for (rect, delta) in widgets::scrollbar_click_rows(state, scrollbar_rect(&layout)) {
+        result.push(Target::new(rect, crate::app::Action::StatsScroll(delta)));
+    }
     // 日历里的每一天
     if !app.stats_by_dict {
-        result.extend(calendar_targets(app, &layout));
+        result.extend(calendar_targets(app, &layout, state.offset));
     }
     result
+}
+
+/// 正文的滚动状态（偏移、总行数、可见行数），滚动上限与滚动条命中共用。
+fn body_scroll_state(app: &App, layout: &StatsLayout) -> widgets::ScrollbarState {
+    widgets::ScrollbarState::new(
+        app.stats_scroll as usize,
+        body_line_count(app, layout.list.width),
+        layout.visible,
+    )
+}
+
+/// 正文滚动条所在的最右一列（绘制与命中共用）。
+fn scrollbar_rect(layout: &StatsLayout) -> Rect {
+    Rect::new(
+        layout.list.right().saturating_sub(1),
+        layout.list.y,
+        1,
+        layout.list.height,
+    )
+}
+
+/// 日历视图里选中日期的矩形（每帧焦点高亮用）。
+///
+/// 只读日历几何，不构建正文行；`stats_scroll` 由 `set_viewport` 与滚动 /
+/// 选日期动作保持夹取，因此与 `render_body` 实际生效的偏移一致。
+pub fn selected_day_rect(app: &App, content: Rect) -> Option<Rect> {
+    if app.stats_by_dict {
+        return None;
+    }
+    let layout = layout(app, content);
+    calendar_targets(app, &layout, app.stats_scroll as usize)
+        .into_iter()
+        .find(|target| match &target.action {
+            crate::app::Action::StatsSelectDay(date) => *date == app.stats_day,
+            _ => false,
+        })
+        .map(|target| target.rect)
 }
 
 /// 顶栏里右侧提示文字的矩形。
@@ -449,7 +559,14 @@ fn header_right_rect(line: &Line<'_>, rect: Rect) -> Option<Rect> {
 }
 
 /// 日历里每一天的命中矩形。
-fn calendar_targets(app: &App, layout: &StatsLayout) -> Vec<crate::ui::target::Target> {
+///
+/// `offset` 必须是实际生效的滚动偏移（`ScrollbarState` 夹取后的值），与
+/// `render_body` 绘制时使用的偏移同源。
+fn calendar_targets(
+    app: &App,
+    layout: &StatsLayout,
+    offset: usize,
+) -> Vec<crate::ui::target::Target> {
     use crate::ui::target::Target;
     let mut result = Vec::new();
     let (year, month) = app.stats_month;
@@ -472,8 +589,8 @@ fn calendar_targets(app: &App, layout: &StatsLayout) -> Vec<crate::ui::target::T
                 continue;
             }
             let line = first_week_row + week;
-            // 滚动偏移
-            let Some(visible_row) = line.checked_sub(app.stats_scroll as usize) else {
+            // 实际生效的滚动偏移（与绘制同源）
+            let Some(visible_row) = line.checked_sub(offset) else {
                 continue;
             };
             if visible_row >= layout.visible {
@@ -499,7 +616,7 @@ fn calendar_targets(app: &App, layout: &StatsLayout) -> Vec<crate::ui::target::T
 /// 下方内容区：日历视图渲染「日历 + 选中日明细 + 最近 14 天」，
 /// 词典视图渲染各词典累计。整体按行滚动。
 fn render_body(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme) {
-    let lines = body_lines(app, layout.list.width as usize, theme);
+    let lines = body_lines(app, layout.list.width.saturating_sub(1) as usize, theme);
     if layout.section.height > 0 {
         let title = if app.stats_by_dict {
             "按词典统计"
@@ -519,37 +636,19 @@ fn render_body(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme
     if layout.list.height == 0 {
         return;
     }
-    let total = lines.len();
-    let offset = (app.stats_scroll as usize).min(total.saturating_sub(1));
-    let end = (offset + layout.visible).min(total);
+    let state =
+        widgets::ScrollbarState::new(app.stats_scroll as usize, lines.len(), layout.visible);
+    let offset = state.offset;
+    let end = (offset + state.visible).min(lines.len());
+    // 右侧 1 列留给滚动条，正文行只画到它左边。
+    let row_width = layout.list.width.saturating_sub(1);
     for (row, line) in lines[offset..end].iter().enumerate() {
         frame.render_widget(
             Paragraph::new(line.clone()),
-            Rect::new(
-                layout.list.x,
-                layout.list.y + row as u16,
-                layout.list.width,
-                1,
-            ),
+            Rect::new(layout.list.x, layout.list.y + row as u16, row_width, 1),
         );
     }
-    if total > layout.visible {
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!(
-                    "↓ 还有 {} 行",
-                    total.saturating_sub(offset + layout.visible)
-                ),
-                Style::default().fg(theme.dim),
-            )),
-            Rect::new(
-                layout.list.x,
-                layout.list.bottom().saturating_sub(1),
-                layout.list.width,
-                1,
-            ),
-        );
-    }
+    widgets::scrollbar(frame, scrollbar_rect(layout), state, theme);
 }
 
 /// 下方内容区的全部行。

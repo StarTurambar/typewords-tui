@@ -336,15 +336,9 @@ fn prepare(app: &mut App, screen: &str) -> Result<()> {
             }
             // 「关于」分页会显示当前数据目录。截图里换成稳定的示例路径，
             // 否则每台机器 / 每次临时目录名都不同，截图无法比对。
-            let assets = app
-                .paths
-                .as_ref()
-                .map(|paths| paths.assets.clone())
-                .unwrap_or_default();
-            app.paths = Some(Paths {
-                home: std::path::PathBuf::from(r"C:\Users\you\AppData\Local\typewords-tui"),
-                assets,
-            });
+            if let Some(paths) = app.paths.as_mut() {
+                paths.home = std::path::PathBuf::from(r"C:\Users\you\AppData\Local\typewords-tui");
+            }
         }
         "confirm" => {
             // 主页按 q 请求退出 → 确认弹层（不构造 ConfirmState）。

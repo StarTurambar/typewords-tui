@@ -1,8 +1,12 @@
 //! 帮助页：快捷键 / 常见问题 / 关于与反馈三个分页。
 //!
-//! 分页条固定在内容区顶部：`←` / `→`（`h` / `l` 别名）切换，鼠标点标签也可；
+//! 分页条固定在内容区顶部：内容区焦点下 `←` / `→`（`h` / `l` 别名）切换，
+//! 分页到边的那一下放行给焦点模型（宽屏内容区最左再 `←` 回侧栏，与其它
+//! 页面同一套语义），焦点在导航栏时方向键仍归焦点模型，鼠标点标签也可；
+//! 当前分页整块强调色高亮，与全站「当前选中项」同一套语言。
 //! 「快捷键」宽屏分两栏（练习 / 导航），其余分页单栏，`↑` / `↓`、PgUp / PgDn
-//! 与滚轮滚动。高度不足时优先显示前面的内容，右侧给出 `↑` / `↓` 指示器。
+//! 与滚轮滚动。高度不足时优先显示前面的内容，正文右侧画滚动条（点滑块
+//! 上下的轨道可上下滚动）。
 //!
 //! 正文是成段的说明文字，逻辑条目与屏幕行数不是一一对应：滚动按**屏幕行**
 //! 计算（`build_rows` 先把条目按当前宽度折成行），否则段落比视口长时滚不到底。
@@ -18,7 +22,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthChar;
 
-use crate::app::{App, HelpTab};
+use crate::app::{App, HelpTab, Screen};
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
 use crate::ui::widgets::{self, display_width, fit_text};
@@ -105,7 +109,10 @@ const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Key("a", "文章背诵"),
     HelpEntry::Key("Ctrl+F", "练习流程"),
     HelpEntry::Key("m", "切换练习模式"),
-    HelpEntry::Key("↑ ↓ ← →", "所有页面：移动选中 / 到边跨栏（Esc 取消或返回）"),
+    HelpEntry::Key(
+        "↑ ↓ ← →",
+        "页面焦点导航：移动选中 / 到边跨栏（Esc 取消或返回）",
+    ),
     HelpEntry::Key("Tab", "导航栏 ↔ 内容区换栏"),
     HelpEntry::Key("Enter", "触发选中项（主页 = 开始学习）"),
     HelpEntry::Key("f", "自由练习"),
@@ -113,8 +120,10 @@ const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Key("Ctrl+←", "上一个词"),
     HelpEntry::Key("Ctrl+→", "下一个词"),
     HelpEntry::Key(", / .", "统计页翻月"),
-    HelpEntry::Key("↑ / ↓", "列表滚动 / 词库与设置选择"),
-    HelpEntry::Key("← / →", "文章页换栏 / 统计页选日期 / 帮助页切分页"),
+    HelpEntry::Key("↑ / ↓", "列表滚动 / 词库与设置选择 / 统计换周"),
+    HelpEntry::Key("← / →", "文章页换栏 / 统计页换天 / 帮助页分页"),
+    HelpEntry::Key("统计页 ←", "日历行首回「统计」页签"),
+    HelpEntry::Key("h / l", "帮助页上一分页 / 下一分页"),
     HelpEntry::Key("鼠标点击", "侧栏 / 按钮 / 列表 / 帮助分页"),
     HelpEntry::Key("滚轮", "滚动列表"),
     HelpEntry::Key("Shift+拖拽", "选择文本"),
@@ -306,53 +315,77 @@ fn render_body(app: &App, frame: &mut Frame, content: Rect, theme: &Theme) {
         return;
     }
     let layout = layout(content);
+    // 键盘在本页内容区（含练习中打开的整屏帮助，那里没有焦点模型）时，
+    // 当前分页与全站其它页面的「当前选中项」一样整块强调色高亮；焦点进
+    // 导航栏后让位成 selection 底色——和设置页的当前行、侧栏的当前项同一套。
+    let focused = crate::ui::focus::pane(app) != Some(crate::ui::focus::Pane::Nav);
     // 整屏帮助没有底栏，按键提示只能画在分页条右侧；套外壳时底栏已经有一份
     // 同样的提示（`hints_for(Screen::Help)`），不重复占位。
-    render_tabs(frame, &layout, app.help_tab, theme, app.in_typing_session());
+    render_tabs(
+        frame,
+        &layout,
+        app.help_tab,
+        focused,
+        theme,
+        app.in_typing_session(),
+    );
     let body = layout.body;
     if body.height == 0 {
         return;
     }
-    let visible = body.height as usize;
-    let (offset, max_offset) = match two_column_rows(app, body) {
-        Some((left, right)) => {
-            let left_max = left.len().saturating_sub(visible);
-            let right_max = right.len().saturating_sub(visible);
-            let max_offset = left_max.max(right_max);
-            let offset = (app.help_scroll as usize).min(max_offset);
+    let rows = body_rows(app, body);
+    let state =
+        widgets::ScrollbarState::new(app.help_scroll as usize, rows.total(), body.height as usize);
+    let offset = state.offset;
+    match &rows {
+        Rows::Two(left, right) => {
+            let left_max = left.len().saturating_sub(state.visible);
+            let right_max = right.len().saturating_sub(state.visible);
             render_columns(
                 frame,
                 body,
-                &left,
-                &right,
+                left,
+                right,
                 theme,
                 offset.min(left_max),
                 offset.min(right_max),
             );
-            (offset, max_offset)
         }
-        None => {
-            let rows = single_rows(app, body);
-            let max_offset = rows.len().saturating_sub(visible);
-            let offset = (app.help_scroll as usize).min(max_offset);
+        Rows::Single(rows) => {
             let list = Rect::new(
                 body.x,
                 body.y,
                 body.width.saturating_sub(1).max(1),
                 body.height,
             );
-            render_rows(frame, list, &rows, theme, offset);
-            (offset, max_offset)
+            render_rows(frame, list, rows, theme, offset);
         }
-    };
-    render_scroll_indicators(frame, body, theme, offset > 0, offset < max_offset);
+    }
+    widgets::scrollbar(frame, scrollbar_rect(body), state, theme);
 }
 
-/// 分页条：当前分页高亮（selection 底色）；整屏帮助时右侧给出按键提示。
+/// 滚动条所占的列：正文最右侧 1 列。
+fn scrollbar_rect(body: Rect) -> Rect {
+    Rect::new(body.right().saturating_sub(1), body.y, 1, body.height)
+}
+
+/// 分页条：当前分页高亮；整屏帮助时右侧给出按键提示。
+///
+/// 高亮用全站统一的两档语言（见 `ui::focus`）：
+///
+/// - `focused`（键盘在本页）：强调色整块 + 反色文字，和设置页当前行、侧栏
+///   当前项一模一样。早期这里只铺 `selection` 底色，深色主题下与背景几乎同色、
+///   高对比主题下更是同色，用户看不出当前停在哪一页。
+/// - 键盘进导航栏后：退回 `selection` 底色，页面自己的高亮让位给导航栏。
+///
+/// 两档底色都必须**画在文字之后**：`focus::paint` / `paint_rect` 用
+/// `Buffer::set_style` 只改样式、不动字形；先铺底色再画字，宽字符后面的
+/// 续接格会被 `set_stringn` 重置成默认色，块面上出现一道道空洞。
 fn render_tabs(
     frame: &mut Frame,
     layout: &HelpLayout,
     active: HelpTab,
+    focused: bool,
     theme: &Theme,
     show_hint: bool,
 ) {
@@ -361,21 +394,36 @@ fn render_tabs(
             continue;
         }
         let selected = *tab == active;
-        if selected {
-            widgets::paint_rect(frame, *rect, theme.selection);
-        }
         let text = fit_text(&format!(" {} ", tab.label()), rect.width as usize);
         let mut style = Style::default().fg(if selected { theme.fg } else { theme.muted });
         if selected {
             style = style.add_modifier(Modifier::BOLD);
         }
         frame.render_widget(Paragraph::new(Span::styled(text, style)), *rect);
+        // 底色必须**画在文字之后**：先铺底色再画字，宽字符后面的续接格会被
+        // `Buffer::set_stringn` 的 `reset()` 清掉背景，块面上出现一道道空洞。
+        // `paint_rect` / `focus::paint` 都只改样式、不动字形，后画不会吃掉文字。
+        if selected {
+            if focused {
+                crate::ui::focus::paint(frame, *rect, theme);
+            } else {
+                widgets::paint_rect(frame, *rect, theme.selection);
+            }
+        }
     }
     if !show_hint {
         return;
     }
-    let hint = "←→ 分页 · ↑↓ 滚动 · Esc 返回";
-    let hint_width = display_width(hint) as u16;
+    // 提示与底栏共用同一份键位定义，避免两处文案（包括大小写）漂移。
+    let hint = shell::hints_for(Screen::Help)
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let hint_width = display_width(&hint) as u16;
+    if hint_width == 0 || layout.body.width < hint_width {
+        return;
+    }
     let last_tab_right = layout
         .tabs
         .iter()
@@ -383,12 +431,19 @@ fn render_tabs(
         .max()
         .unwrap_or(0);
     let x = layout.body.right().saturating_sub(hint_width);
-    if hint_width > 0 && x > last_tab_right && layout.body.width > hint_width {
-        frame.render_widget(
-            Paragraph::new(Span::styled(hint, Style::default().fg(theme.dim))),
-            Rect::new(x, layout.tabs[0].y, hint_width, 1),
-        );
-    }
+    // 60~64 列时分页条右侧放不下：落到分页条与正文之间的留白行，保证
+    // 最小支持宽度也有「←→ 分页」提示（整屏帮助没有底栏可退）。
+    let y = if x > last_tab_right {
+        layout.tabs[0].y
+    } else if layout.tabs[0].y.saturating_add(TAB_BAR_GAP) < layout.body.y {
+        layout.tabs[0].y.saturating_add(TAB_BAR_GAP)
+    } else {
+        return;
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(hint, Style::default().fg(theme.dim))),
+        Rect::new(x, y, hint_width, 1),
+    );
 }
 
 fn two_columns(tab: HelpTab, body: Rect) -> bool {
@@ -397,17 +452,22 @@ fn two_columns(tab: HelpTab, body: Rect) -> bool {
         && body.height >= TWO_COLUMN_MIN_HEIGHT
 }
 
+/// 两栏的列宽（左栏 / 右栏）：中间 1 列分隔线 + 1 列留白，最右 1 列留给
+/// 滚动条。折行与绘制必须用同一组宽度。
+fn column_widths(body: Rect) -> (u16, u16) {
+    let left = body.width.saturating_sub(3) / 2;
+    (left, body.width.saturating_sub(left + 3))
+}
+
 /// 快捷键分页的两栏行；其它分页或宽度不够时返回 `None`（走单栏）。
 fn two_column_rows(app: &App, body: Rect) -> Option<(Vec<Row>, Vec<Row>)> {
     if !two_columns(app.help_tab, body) {
         return None;
     }
-    // 两栏之间：1 列分隔线 + 1 列留白；最右 1 列留给滚动指示器。
-    let left_width = body.width.saturating_sub(3) / 2;
+    let (left_width, right_width) = column_widths(body);
     if left_width < 26 {
         return None;
     }
-    let right_width = body.width.saturating_sub(left_width + 3);
     let data_dir = data_dir_line(app);
     Some((
         build_rows(&typing_entries(), left_width as usize, data_dir.as_deref()),
@@ -425,7 +485,7 @@ fn data_dir_line(app: &App) -> Option<String> {
     })
 }
 
-/// 单栏分页的行（正文右侧留 1 列给滚动指示器）。
+/// 单栏分页的行（正文右侧留 1 列给滚动条）。
 fn single_rows(app: &App, body: Rect) -> Vec<Row> {
     let width = body.width.saturating_sub(1).max(1) as usize;
     build_rows(
@@ -435,20 +495,42 @@ fn single_rows(app: &App, body: Rect) -> Vec<Row> {
     )
 }
 
-/// 当前分页的滚动状态：实际生效的偏移量与最大偏移量。
+/// 当前分页的滚动状态：实际生效的偏移量、内容总行数与视口行数。
 ///
 /// 偏移量以**屏幕行**为单位；两栏时以更长的一栏为准，否则右栏最后几行
 /// 永远滚不出来。
-fn scroll_limits(app: &App, body: Rect) -> (usize, usize) {
+fn scroll_state(app: &App, body: Rect) -> widgets::ScrollbarState {
     if body.height == 0 {
-        return (0, 0);
+        return widgets::ScrollbarState::new(0, 0, 0);
     }
-    let visible = body.height as usize;
-    let max_offset = match two_column_rows(app, body) {
-        Some((left, right)) => left.len().max(right.len()).saturating_sub(visible),
-        None => single_rows(app, body).len().saturating_sub(visible),
-    };
-    ((app.help_scroll as usize).min(max_offset), max_offset)
+    let total = body_rows(app, body).total();
+    widgets::ScrollbarState::new(app.help_scroll as usize, total, body.height as usize)
+}
+
+/// 当前分页的屏幕行：两栏时左 / 右各一份，否则单栏一份。
+///
+/// 绘制、滚动上限与点击轨道都要用同一份折行结果；分开算一次会多画一遍折行，
+/// 也容易出现「上限按这一份算、绘制按那一份算」的漂移。
+enum Rows {
+    Two(Vec<Row>, Vec<Row>),
+    Single(Vec<Row>),
+}
+
+impl Rows {
+    /// 内容总行数：两栏取更长的一栏。
+    fn total(&self) -> usize {
+        match self {
+            Rows::Two(left, right) => left.len().max(right.len()),
+            Rows::Single(rows) => rows.len(),
+        }
+    }
+}
+
+fn body_rows(app: &App, body: Rect) -> Rows {
+    match two_column_rows(app, body) {
+        Some((left, right)) => Rows::Two(left, right),
+        None => Rows::Single(single_rows(app, body)),
+    }
 }
 
 fn render_columns(
@@ -460,14 +542,13 @@ fn render_columns(
     left_offset: usize,
     right_offset: usize,
 ) {
-    // 两栏之间：1 列分隔线 + 1 列留白；最右 1 列留给滚动指示器。
-    let left_width = body.width.saturating_sub(3) / 2;
+    let (left_width, right_width) = column_widths(body);
     let left = Rect::new(body.x, body.y, left_width, body.height);
     let divider_x = body.x + left_width;
     let right = Rect::new(
         divider_x.saturating_add(2),
         body.y,
-        body.width.saturating_sub(left_width + 3),
+        right_width,
         body.height,
     );
     render_rows(frame, left, left_rows, theme, left_offset);
@@ -480,37 +561,7 @@ fn render_columns(
     }
 }
 
-/// 右侧的 `↑` / `↓` 滚动指示器。
-fn render_scroll_indicators(
-    frame: &mut Frame,
-    body: Rect,
-    theme: &Theme,
-    can_scroll_up: bool,
-    can_scroll_down: bool,
-) {
-    if body.width == 0 || body.height == 0 {
-        return;
-    }
-    if can_scroll_up {
-        frame.render_widget(
-            Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
-            Rect::new(body.right().saturating_sub(1), body.y, 1, 1),
-        );
-    }
-    if can_scroll_down {
-        frame.render_widget(
-            Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
-            Rect::new(
-                body.right().saturating_sub(1),
-                body.bottom().saturating_sub(1),
-                1,
-                1,
-            ),
-        );
-    }
-}
-
-/// 帮助页的鼠标目标：分页标签 + 正文右侧的滚动指示器。
+/// 帮助页的鼠标目标：分页标签 + 正文右侧滚动条的可点轨道。
 ///
 /// 正文是只读文本，点哪里都不产生动作——早期实现把整块内容区映射成
 /// `HelpBack`，任何一次点击（聚焦窗口、点空白、选文字）都会退出帮助页。
@@ -534,23 +585,10 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     if layout.body.width == 0 || layout.body.height == 0 {
         return result;
     }
-    let (offset, max_offset) = scroll_limits(app, layout.body);
-    if offset > 0 {
-        result.push(Target::new(
-            Rect::new(layout.body.right().saturating_sub(1), layout.body.y, 1, 1),
-            crate::app::Action::HelpScroll(-1),
-        ));
-    }
-    if offset < max_offset {
-        result.push(Target::new(
-            Rect::new(
-                layout.body.right().saturating_sub(1),
-                layout.body.bottom().saturating_sub(1),
-                1,
-                1,
-            ),
-            crate::app::Action::HelpScroll(1),
-        ));
+    // 滚动条上滑块上下各有一段轨道：点一次滚一行。滑块本身不产生动作。
+    let state = scroll_state(app, layout.body);
+    for (rect, delta) in widgets::scrollbar_click_rows(state, scrollbar_rect(layout.body)) {
+        result.push(Target::new(rect, crate::app::Action::HelpScroll(delta)));
     }
     result
 }
@@ -565,7 +603,7 @@ pub fn max_scroll(app: &App) -> u16 {
         return 0;
     }
     let layout = layout(content);
-    scroll_limits(app, layout.body).1 as u16
+    scroll_state(app, layout.body).max_offset() as u16
 }
 
 /// 两个练习页的键位分区（练习 + 文章跟打），快捷键分页的左栏。
@@ -744,29 +782,14 @@ fn wrap_prose(text: &str, width: usize) -> Vec<String> {
                     line.push(' ');
                     line_width += 1;
                 }
-                ProseUnit::Word(word) => {
-                    let word_width = display_width(&word);
-                    if line_width + word_width > width && !line.is_empty() {
-                        push_line(&mut lines, &mut line);
-                        line_width = 0;
-                    }
-                    if word_width > width {
-                        // 超长单词：逐字符折，保证不会画出界。
-                        for character in word.chars() {
-                            push_char(&mut lines, &mut line, &mut line_width, character, width);
-                        }
-                    } else {
-                        line.push_str(&word);
-                        line_width += word_width;
-                    }
-                }
-                ProseUnit::Char(text) => {
+                ProseUnit::Atom(text) => {
                     let unit_width = display_width(&text);
                     if line_width + unit_width > width && !line.is_empty() {
                         push_line(&mut lines, &mut line);
                         line_width = 0;
                     }
                     if unit_width > width {
+                        // 超长单位（单词 / 字符）：逐字符折，保证不会画出界。
                         for character in text.chars() {
                             push_char(&mut lines, &mut line, &mut line_width, character, width);
                         }
@@ -787,10 +810,9 @@ fn wrap_prose(text: &str, width: usize) -> Vec<String> {
 
 enum ProseUnit {
     Space,
-    /// 连续 ASCII 非空白字符（单词、路径、URL、组合键）。
-    Word(String),
-    /// CJK 字符 / 标点等逐字可折的单位；行尾标点会粘到前一个单位上。
-    Char(String),
+    /// 不可再拆的显示单位：连续 ASCII 非空白字符（单词、路径、URL、组合键），
+    /// 或单个 CJK 字符 / 标点。行尾标点会粘到前一个单位上。
+    Atom(String),
 }
 
 /// 把段落切成「尽量不拆的 ASCII 单词 + 可逐字折的字符」。
@@ -803,31 +825,31 @@ fn prose_units(paragraph: &str) -> Vec<ProseUnit> {
     for character in paragraph.chars() {
         if character == ' ' {
             if !word.is_empty() {
-                units.push(ProseUnit::Word(std::mem::take(&mut word)));
+                units.push(ProseUnit::Atom(std::mem::take(&mut word)));
             }
             units.push(ProseUnit::Space);
         } else if character.is_ascii() {
             word.push(character);
         } else {
             if !word.is_empty() {
-                units.push(ProseUnit::Word(std::mem::take(&mut word)));
+                units.push(ProseUnit::Atom(std::mem::take(&mut word)));
             }
             if is_trailing_punctuation(character)
                 && let Some(last) = units.last_mut()
             {
                 match last {
-                    ProseUnit::Word(text) | ProseUnit::Char(text) => {
+                    ProseUnit::Atom(text) => {
                         text.push(character);
                         continue;
                     }
                     ProseUnit::Space => {}
                 }
             }
-            units.push(ProseUnit::Char(character.to_string()));
+            units.push(ProseUnit::Atom(character.to_string()));
         }
     }
     if !word.is_empty() {
-        units.push(ProseUnit::Word(word));
+        units.push(ProseUnit::Atom(word));
     }
     units
 }

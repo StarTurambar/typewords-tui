@@ -10,8 +10,9 @@
 //! （横向）/ 下方内容区。方向键按栏的主轴工作：
 //!
 //! - 内容区：主页按视觉行分带（带内左右移动，带间上下移动），方向永不反转；
-//!   其它页面的内容区就是页面自己的光标（列表行 / 日历日期 / 滚动位置），
-//!   上下键移动它，左右键执行页面自己的横向操作（文章页换栏、统计页选日期）。
+//!   其它页面的内容区就是页面自己的光标（列表行 / 日历日期 / 滚动位置）：
+//!   列表页上下键移动光标、左右键执行页面横向操作（文章页换栏）；统计页的
+//!   四个方向键都按日历格子选日期（↑/↓ 换周、←/→ 换天）。
 //! - 宽屏侧栏：上/下选导航项，右回内容区；窄屏顶栏：左/右选标签，下回内容区。
 //! - 跨栏：宽屏内容区在左边缘再按 ←、窄屏内容区在最顶部再按 ↑；
 //!   另外 Tab / Shift+Tab 在所有页面都能直接换栏。跨栏时内容区状态原样保留。
@@ -226,7 +227,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(index, _)| *index == app.dict_cursor)?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Settings => {
             let layout = crate::ui::settings::layout(app, content);
@@ -234,7 +235,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(entry, _)| *entry == Some(app.settings_cursor))?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Shortcuts => {
             let layout = crate::ui::shortcuts::layout(app, content);
@@ -250,7 +251,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(entry, _)| *entry == Some(app.adv_fsrs_cursor))?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Words => {
             let layout = crate::ui::words::layout(app, content);
@@ -260,62 +261,49 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
             }
             let row = app.words_cursor.saturating_sub(layout.offset) as u16;
             let y = layout.list.y.saturating_add(row);
-            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+            // 最右 1 列是滚动条，选中高亮不覆盖它。
+            (y < layout.list.bottom())
+                .then(|| Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1))
         }
         Screen::Flows => {
             let layout = crate::ui::flows::layout(app, content);
-            if app.flow_cursor >= app.flow_entries().len() || layout.list.height == 0 {
+            if app.flow_cursor >= app.flow_entry_count() || layout.list.height == 0 {
                 return None;
             }
-            let y = layout.list.y.saturating_add(app.flow_cursor as u16);
-            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+            let row = app.flow_cursor.saturating_sub(layout.offset) as u16;
+            let y = layout.list.y.saturating_add(row);
+            (y < layout.list.bottom())
+                .then(|| Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1))
         }
         Screen::Articles => {
-            let layout = crate::ui::articles::layout(content);
+            let layout = crate::ui::articles::layout(app, content);
             let (pane, cursor, count) = if app.article_pane_left {
                 (
-                    layout.books,
+                    &layout.books_list,
                     app.article_book_cursor,
                     app.article_books.len(),
                 )
             } else {
-                (layout.articles, app.article_cursor, app.article_list.len())
+                (
+                    &layout.articles_list,
+                    app.article_cursor,
+                    app.article_list.len(),
+                )
             };
-            if count == 0 || cursor >= count || pane.width < 2 || pane.height < 3 {
+            if count == 0 || cursor >= count || pane.list.width == 0 || pane.list.height == 0 {
                 return None;
             }
-            // 列表有边框：行从边框内侧开始，最后一行同样让出下边框。
-            let y = pane.y.saturating_add(1).saturating_add(cursor as u16);
-            if y >= pane.bottom().saturating_sub(1) {
-                return None;
-            }
-            Some(Rect::new(
-                pane.x.saturating_add(1),
-                y,
-                pane.width.saturating_sub(2),
-                1,
-            ))
+            // 行从边框内侧开始，滚动后跟着偏移走；最右一列是滚动条。
+            let y = pane.list.y.saturating_add((cursor - pane.offset) as u16);
+            (y < pane.list.bottom()).then(|| Rect::new(pane.list.x, y, pane.list.width, 1))
         }
         Screen::Stats => {
             // 按词典视图没有日历选中项；日历视图高亮选中那一天（含记录点）。
-            if app.stats_by_dict {
-                return None;
-            }
-            crate::ui::stats::targets(app, content)
-                .into_iter()
-                .find(|target| match &target.action {
-                    Action::StatsSelectDay(date) => *date == app.stats_day,
-                    _ => false,
-                })
-                .map(|target| target.rect)
+            // 只算日历几何，不走完整 targets——后者要重算整页正文行数。
+            crate::ui::stats::selected_day_rect(app, content)
         }
         _ => None,
     }
-}
-
-/// 缩到行内、并让出右侧的滚动指示列（词库页 / 设置页用）。
-fn row_rect(rect: Rect, reserved_right: u16) -> Rect {
-    Rect::new(rect.x, rect.y, rect.width.saturating_sub(reserved_right), 1)
 }
 
 /// 当前焦点的提示文案（底栏「选中 X」）。

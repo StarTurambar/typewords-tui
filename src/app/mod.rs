@@ -781,8 +781,30 @@ impl App {
     ///
     /// 主循环每帧调用一次；测试与 `examples/shot` 在按键前显式设置，
     /// 保证「按键时算出的布局」与「实际渲染的布局」是同一个尺寸。
+    ///
+    /// 视口变化后滚动上限也跟着变：旧的 `stats_scroll` / `help_scroll` 可能
+    /// 已经越界（窗口变高、内容一屏放得下）。这里立刻夹取，命中区、焦点
+    /// 高亮与绘制才能继续读同一个偏移，而不是等下一次按键才纠正。
     pub fn set_viewport(&mut self, area: ratatui::layout::Rect) {
+        if self.viewport == area {
+            return;
+        }
         self.viewport = area;
+        self.clamp_page_scroll();
+    }
+
+    fn clamp_page_scroll(&mut self) {
+        match self.screen {
+            Screen::Stats => {
+                let max = crate::ui::stats::max_scroll(self);
+                self.stats_scroll = self.stats_scroll.min(max);
+            }
+            Screen::Help => {
+                let max = crate::ui::help::max_scroll(self);
+                self.help_scroll = self.help_scroll.min(max);
+            }
+            _ => {}
+        }
     }
 
     /// 当前视口是否达到可交互下限（与渲染层「终端太小」判定同源）。
@@ -2225,6 +2247,14 @@ impl App {
             return None;
         }
         Some(self.active_flow(mode).id)
+    }
+
+    /// 流程条目数（与 `flow_entries().len()` 相同，但不构造条目）。
+    ///
+    /// 滚动偏移与越界判断只需要条数：每帧都重建 7 份内置流程配置（含
+    /// nodes / steps 的 Vec 与 String）没有意义。
+    pub fn flow_entry_count(&self) -> usize {
+        crate::domain::flow::BUILTIN_FLOW_MODES.len() + self.flow_store.flows.len()
     }
 
     /// 流程列表：先列 7 个内置流程，再列自建流程。
@@ -4034,8 +4064,7 @@ impl App {
 
     /// 打开键入练习中的整屏帮助；返回时由 `help_back` 回到对应练习页。
     fn open_typing_help(&mut self) {
-        self.help_tab = HelpTab::Shortcuts;
-        self.help_scroll = 0;
+        self.reset_help_state();
         self.set_screen(Screen::Help);
     }
 
@@ -4423,7 +4452,8 @@ impl App {
             terminal.draw(|frame| self.render(frame))?;
             self.on_tick(timer::now_ms());
             // 键盘焦点导航按布局算几何：先同步终端区域再处理事件。
-            self.viewport = terminal_area();
+            // `set_viewport` 在尺寸变化时会把滚动偏移夹回新上限。
+            self.set_viewport(terminal_area());
             if self.quit {
                 break;
             }
@@ -4436,7 +4466,7 @@ impl App {
                         Event::Mouse(mouse) => self.on_mouse(mouse, terminal_area()),
                         Event::Resize(_, _) => {
                             // 缩放后立刻同步尺寸，后面的按键不再按旧布局算焦点。
-                            self.viewport = terminal_area();
+                            self.set_viewport(terminal_area());
                         }
                         _ => {}
                     }
