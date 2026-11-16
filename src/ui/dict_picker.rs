@@ -23,6 +23,8 @@ pub const DETAIL_MIN_WIDTH: u16 = 72;
 pub struct DictPickerLayout {
     pub list: Rect,
     pub rows: Vec<(usize, Rect)>,
+    /// 列表的滚动偏移（条目下标）。
+    pub offset: usize,
     pub detail: Option<Rect>,
     pub activate: Option<Rect>,
 }
@@ -54,12 +56,18 @@ pub fn layout(app: &App, content: Rect) -> DictPickerLayout {
 
     let total = app.dict_entry_count();
     let visible = list.height as usize;
-    let offset = scroll_offset(app.dict_cursor, total, visible);
+    let offset = widgets::list_offset(app.dict_cursor, total, visible);
+    // 行矩形让出最右 1 列：那里画滚动条，选中高亮与点击都只覆盖内容列。
     let rows = (offset..total.min(offset.saturating_add(visible)))
         .map(|index| {
             (
                 index,
-                Rect::new(list.x, list.y + (index - offset) as u16, list.width, 1),
+                Rect::new(
+                    list.x,
+                    list.y + (index - offset) as u16,
+                    list.width.saturating_sub(1),
+                    1,
+                ),
             )
         })
         .collect();
@@ -68,17 +76,10 @@ pub fn layout(app: &App, content: Rect) -> DictPickerLayout {
     DictPickerLayout {
         list,
         rows,
+        offset,
         detail,
         activate,
     }
-}
-
-/// 让光标始终落在可视区域内的滚动偏移。
-fn scroll_offset(cursor: usize, total: usize, visible: usize) -> usize {
-    if total == 0 || visible == 0 {
-        return 0;
-    }
-    cursor.min(total - 1).saturating_sub(visible - 1)
 }
 
 fn detail_inner(detail: Rect) -> Rect {
@@ -114,11 +115,8 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
             } else {
                 Action::SelectDict(*index)
             };
-            // 行矩形要避开最右一列——那里画着滚动指示器 `↑` / `↓`。
-            // 早期实现铺满整行，命中测试用 `find` 取第一个，于是点 `↓`
-            // 反而选中了别的词库。
-            let width = rect.width.saturating_sub(1);
-            Target::new(Rect::new(rect.x, rect.y, width, rect.height), action)
+            // 行矩形已让出最右一列（滚动条），铺满会让点滚动条选中别的词库。
+            Target::new(*rect, action)
         })
         .collect();
     if let Some(activate) = layout.activate {
@@ -185,25 +183,18 @@ fn render_list(
         }
     }
 
-    // 列表被裁切时在右侧提示还有更多词库（最后一列不参与行内容）。
-    let total = entries.len();
-    let indicator_x = layout.list.right().saturating_sub(1);
-    if let (Some(first), Some(last)) = (layout.rows.first(), layout.rows.last())
-        && layout.list.width > 0
-    {
-        if first.0 > 0 {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
-                Rect::new(indicator_x, first.1.y, 1, 1),
-            );
-        }
-        if last.0 + 1 < total {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
-                Rect::new(indicator_x, last.1.y, 1, 1),
-            );
-        }
-    }
+    // 列表被裁切时在右侧画滚动条（最后一列不参与行内容）。
+    widgets::scrollbar(
+        frame,
+        Rect::new(
+            layout.list.right().saturating_sub(1),
+            layout.list.y,
+            1,
+            layout.list.height,
+        ),
+        widgets::ScrollbarState::new(layout.offset, entries.len(), layout.list.height as usize),
+        theme,
+    );
 }
 
 fn render_row(
@@ -229,8 +220,8 @@ fn render_row(
 
     let current = entry.current;
 
-    // 右侧留一列给 ↑/↓ 滚动指示，避免压住进度百分比。
-    let inner_width = rect.width.saturating_sub(4) as usize;
+    // 行矩形已扣掉最右一列滚动条，这里再留 3 列空白，避免压住进度百分比。
+    let inner_width = rect.width.saturating_sub(3) as usize;
     let marker = if current {
         "●"
     } else if selected {

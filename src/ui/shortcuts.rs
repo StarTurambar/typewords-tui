@@ -34,10 +34,10 @@ pub fn layout(app: &App, content: Rect) -> ShortcutsLayout {
     );
     let visible = list_area.height as usize;
     let total = ShortcutAction::ALL.len();
-    let offset = app
-        .shortcut_cursor
-        .saturating_sub(visible.saturating_sub(1));
+    let offset = widgets::list_offset(app.shortcut_cursor, total, visible);
 
+    // 行矩形让出最右 1 列：滚动条画在那里，选中高亮与点击都不覆盖它。
+    let row_width = list_area.width.saturating_sub(1);
     let rows = (offset..total.min(offset + visible))
         .map(|index| {
             (
@@ -45,7 +45,7 @@ pub fn layout(app: &App, content: Rect) -> ShortcutsLayout {
                 Rect::new(
                     list_area.x,
                     list_area.y + (index - offset) as u16,
-                    list_area.width,
+                    row_width,
                     1,
                 ),
             )
@@ -81,6 +81,21 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             };
             render_row(app, frame, *rect, action, theme);
         }
+        widgets::scrollbar(
+            frame,
+            Rect::new(
+                content.right().saturating_sub(1),
+                content.y.saturating_add(1),
+                1,
+                content.height.saturating_sub(1),
+            ),
+            widgets::ScrollbarState::new(
+                layout.offset,
+                ShortcutAction::ALL.len(),
+                content.height.saturating_sub(1) as usize,
+            ),
+            theme,
+        );
     });
 }
 
@@ -120,7 +135,8 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, action: ShortcutAction, 
     }
 
     let inner_x = rect.x.saturating_add(2);
-    let inner_width = rect.width.saturating_sub(4) as usize;
+    // 行矩形已扣掉最右一列滚动条，再留 3 列空白。
+    let inner_width = rect.width.saturating_sub(3) as usize;
     if inner_width == 0 {
         return;
     }

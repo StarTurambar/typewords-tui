@@ -97,7 +97,13 @@ pub fn layout(app: &App, content: Rect) -> AdvFsrsLayout {
             };
             (
                 item,
-                Rect::new(list.x, list.y + position as u16, list.width, 1),
+                Rect::new(
+                    list.x,
+                    list.y + position as u16,
+                    // 最右 1 列留给滚动条。
+                    list.width.saturating_sub(1),
+                    1,
+                ),
             )
         })
         .collect();
@@ -117,13 +123,8 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
             } else {
                 Action::AdvFsrsSelect(index)
             };
-            // 行矩形要避开最右一列——那里画着滚动指示器 `↑` / `↓`，
-            // 铺满整行会让点指示器变成选中别的行。
-            let width = rect.width.saturating_sub(1);
-            Some(Target::new(
-                Rect::new(rect.x, rect.y, width, rect.height),
-                action,
-            ))
+            // 行矩形已在布局里让出最右一列（滚动条）。
+            Some(Target::new(*rect, action))
         })
         .collect()
 }
@@ -145,26 +146,15 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             }
         }
 
-        let total = entries.len();
-        // 滚动指示器画在列表区（标题行下方），不能占标题行。
+        // 滚动条画在列表区（标题行下方），不能占标题行。
         let list_top = content.y.saturating_add(1);
-        if layout.offset > 0 && content.width > 0 {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
-                Rect::new(content.right().saturating_sub(1), list_top, 1, 1),
-            );
-        }
-        if layout.offset + layout.rows.len() < total && content.width > 0 {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
-                Rect::new(
-                    content.right().saturating_sub(1),
-                    content.bottom().saturating_sub(1),
-                    1,
-                    1,
-                ),
-            );
-        }
+        let list_height = content.height.saturating_sub(1);
+        widgets::scrollbar(
+            frame,
+            Rect::new(content.right().saturating_sub(1), list_top, 1, list_height),
+            widgets::ScrollbarState::new(layout.offset, entries.len(), list_height as usize),
+            theme,
+        );
     });
 }
 
@@ -224,8 +214,8 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, index: usize, theme: &Th
     }
 
     let inner_x = rect.x.saturating_add(2);
-    // 右侧留出滚动指示列，避免指示符号被读成数值的一部分。
-    let inner_width = rect.width.saturating_sub(5) as usize;
+    // 行矩形已扣掉最右一列滚动条，再留 4 列空白，避免数值贴着滚动条。
+    let inner_width = rect.width.saturating_sub(4) as usize;
     if inner_width == 0 {
         return;
     }

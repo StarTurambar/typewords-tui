@@ -924,10 +924,14 @@ fn stats_arrows_scroll_and_pick_dates() {
         theme.accent,
         "日历选中日应整块 accent 高亮"
     );
-    let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;
-    assert!(max_scroll >= 1);
+    // 120×40 下正文一屏放得下：没有溢出就不该能滚。
+    assert_eq!(
+        typewords_tui::ui::stats::max_scroll(&app),
+        0,
+        "内容未溢出时滚动上限应为 0"
+    );
     press(&mut app, KeyCode::Down);
-    assert_eq!(app.stats_scroll, 1.min(max_scroll));
+    assert_eq!(app.stats_scroll, 0, "没有溢出时 ↓ 不该滚动正文");
 
     let (year, month) = app.stats_month;
     let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).expect("month start");
@@ -939,6 +943,16 @@ fn stats_arrows_scroll_and_pick_dates() {
     press(&mut app, KeyCode::Left);
     assert_eq!(focus::pane(&app), Some(Pane::Nav), "月初再 ← 应进侧栏");
     assert_eq!(label(&app).as_deref(), Some("统计"));
+
+    // 最小终端下正文放不下：↓ 才滚动，且上限按视口现算。
+    let (_fixture, mut app) = test_app(MINIMUM);
+    press(&mut app, KeyCode::Char('4'));
+    assert!(
+        typewords_tui::ui::stats::max_scroll(&app) > 0,
+        "最小终端下统计正文应能滚动"
+    );
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.stats_scroll, 1, "有溢出时 ↓ 应滚动一行");
 
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('4'));

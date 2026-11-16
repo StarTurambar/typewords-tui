@@ -226,7 +226,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(index, _)| *index == app.dict_cursor)?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Settings => {
             let layout = crate::ui::settings::layout(app, content);
@@ -234,7 +234,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(entry, _)| *entry == Some(app.settings_cursor))?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Shortcuts => {
             let layout = crate::ui::shortcuts::layout(app, content);
@@ -250,7 +250,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
                 .rows
                 .iter()
                 .find(|(entry, _)| *entry == Some(app.adv_fsrs_cursor))?;
-            Some(row_rect(*rect, 1))
+            Some(*rect)
         }
         Screen::Words => {
             let layout = crate::ui::words::layout(app, content);
@@ -260,41 +260,41 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
             }
             let row = app.words_cursor.saturating_sub(layout.offset) as u16;
             let y = layout.list.y.saturating_add(row);
-            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+            // 最右 1 列是滚动条，选中高亮不覆盖它。
+            (y < layout.list.bottom())
+                .then(|| Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1))
         }
         Screen::Flows => {
             let layout = crate::ui::flows::layout(app, content);
             if app.flow_cursor >= app.flow_entries().len() || layout.list.height == 0 {
                 return None;
             }
-            let y = layout.list.y.saturating_add(app.flow_cursor as u16);
-            (y < layout.list.bottom()).then(|| Rect::new(layout.list.x, y, layout.list.width, 1))
+            let row = app.flow_cursor.saturating_sub(layout.offset) as u16;
+            let y = layout.list.y.saturating_add(row);
+            (y < layout.list.bottom())
+                .then(|| Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1))
         }
         Screen::Articles => {
-            let layout = crate::ui::articles::layout(content);
+            let layout = crate::ui::articles::layout(app, content);
             let (pane, cursor, count) = if app.article_pane_left {
                 (
-                    layout.books,
+                    &layout.books_list,
                     app.article_book_cursor,
                     app.article_books.len(),
                 )
             } else {
-                (layout.articles, app.article_cursor, app.article_list.len())
+                (
+                    &layout.articles_list,
+                    app.article_cursor,
+                    app.article_list.len(),
+                )
             };
-            if count == 0 || cursor >= count || pane.width < 2 || pane.height < 3 {
+            if count == 0 || cursor >= count || pane.list.width == 0 || pane.list.height == 0 {
                 return None;
             }
-            // 列表有边框：行从边框内侧开始，最后一行同样让出下边框。
-            let y = pane.y.saturating_add(1).saturating_add(cursor as u16);
-            if y >= pane.bottom().saturating_sub(1) {
-                return None;
-            }
-            Some(Rect::new(
-                pane.x.saturating_add(1),
-                y,
-                pane.width.saturating_sub(2),
-                1,
-            ))
+            // 行从边框内侧开始，滚动后跟着偏移走；最右一列是滚动条。
+            let y = pane.list.y.saturating_add((cursor - pane.offset) as u16);
+            (y < pane.list.bottom()).then(|| Rect::new(pane.list.x, y, pane.list.width, 1))
         }
         Screen::Stats => {
             // 按词典视图没有日历选中项；日历视图高亮选中那一天（含记录点）。
@@ -311,11 +311,6 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
         }
         _ => None,
     }
-}
-
-/// 缩到行内、并让出右侧的滚动指示列（词库页 / 设置页用）。
-fn row_rect(rect: Rect, reserved_right: u16) -> Rect {
-    Rect::new(rect.x, rect.y, rect.width.saturating_sub(reserved_right), 1)
 }
 
 /// 当前焦点的提示文案（底栏「选中 X」）。

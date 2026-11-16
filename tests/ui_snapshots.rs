@@ -449,7 +449,10 @@ fn help_scrolls_at_min_size() {
     let scrolled = render_text(&app, 80, 24);
     assert!(scrolled.contains("Shift+拖拽") || scrolled.contains("Shift"));
     assert!(scrolled.contains("导航/查看"));
-    assert!(scrolled.contains("↓") || scrolled.contains("↑"));
+    assert!(
+        scrolled.contains('█'),
+        "滚动后正文右侧应出现滚动条的滑块: {scrolled}"
+    );
 }
 
 /// 帮助页覆盖上游的 FAQ / 关于 / 反馈三个页面。

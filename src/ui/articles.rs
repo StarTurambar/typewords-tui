@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
 use crate::app::buttons::ARTICLE_BUTTONS;
@@ -18,48 +18,106 @@ use crate::ui::widgets;
 
 /// 书本 / 文章列表页的布局。
 pub struct ArticlesLayout {
-    /// 左：书本列表
+    /// 左：书本列表（带边框的整块面板）
     pub books: Rect,
-    /// 右：文章列表
+    /// 右：文章列表（带边框的整块面板）
     pub articles: Rect,
+    /// 左：书本列表的滚动信息
+    pub books_list: ListPane,
+    /// 右：文章列表的滚动信息
+    pub articles_list: ListPane,
 }
 
-pub fn layout(content: Rect) -> ArticlesLayout {
+/// 一栏带边框列表的几何：面板、行内容区、滚动条列与滚动偏移。
+///
+/// 行内容区与滚动条都让开边框；绘制、命中与焦点高亮都读这一份几何，
+/// 行不会钻到滚动条下面，也不会和边框重叠。
+pub struct ListPane {
+    /// 带边框的整块面板
+    pub rect: Rect,
+    /// 行内容区（边框内侧、再让出最右 1 列滚动条）
+    pub list: Rect,
+    /// 滚动条所在的 1 列（边框内侧最右一列）
+    pub scrollbar: Rect,
+    /// 滚动偏移（行）
+    pub offset: usize,
+    /// 内容总行数
+    pub total: usize,
+    /// 可见行数
+    pub visible: usize,
+}
+
+/// 左右两栏的矩形（只看终端尺寸，不看 App）。
+fn columns(content: Rect) -> (Rect, Rect) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(38), Constraint::Min(20)])
         .split(content);
+    (columns[0], columns[1])
+}
+
+fn list_pane(rect: Rect, total: usize, cursor: usize) -> ListPane {
+    let inner = Rect::new(
+        rect.x.saturating_add(1),
+        rect.y.saturating_add(1),
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(2),
+    );
+    let list = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width.saturating_sub(1),
+        inner.height,
+    );
+    let scrollbar = Rect::new(inner.right().saturating_sub(1), inner.y, 1, inner.height);
+    let visible = list.height as usize;
+    ListPane {
+        rect,
+        list,
+        scrollbar,
+        offset: widgets::list_offset(cursor, total, visible),
+        total,
+        visible,
+    }
+}
+
+pub fn layout(app: &App, content: Rect) -> ArticlesLayout {
+    let (books, articles) = columns(content);
     ArticlesLayout {
-        books: columns[0],
-        articles: columns[1],
+        books,
+        articles,
+        books_list: list_pane(books, app.article_books.len(), app.article_book_cursor),
+        articles_list: list_pane(articles, app.article_list.len(), app.article_cursor),
     }
 }
 
 /// 书本 / 文章列表页的鼠标目标。
 ///
-/// 书本列表每行一个目标（选书本），文章列表每行一个目标（选文章）。
+/// 每行一个目标（左栏选书本、右栏选文章）；行矩形来自 `ListPane::list`，
+/// 与滚动偏移、滚动条同源，滚动后仍然画在哪就能点在哪。
 pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     use crate::ui::target::Target;
-    let layout = layout(content);
+    let layout = layout(app, content);
     let mut result = Vec::new();
-    // List 组件的内容从边框内侧开始，每行一个条目。
-    for (index, _) in app.article_books.iter().enumerate() {
-        let y = layout.books.y + 1 + index as u16;
-        if y >= layout.books.bottom().saturating_sub(1) {
+    let books = &layout.books_list;
+    for (index, _) in app.article_books.iter().enumerate().skip(books.offset) {
+        let y = books.list.y + (index - books.offset) as u16;
+        if y >= books.list.bottom() {
             break;
         }
         result.push(Target::new(
-            Rect::new(layout.books.x, y, layout.books.width, 1),
+            Rect::new(books.list.x, y, books.list.width, 1),
             crate::app::Action::ArticleBookMove(index as i32 - app.article_book_cursor as i32),
         ));
     }
-    for (index, _) in app.article_list.iter().enumerate() {
-        let y = layout.articles.y + 1 + index as u16;
-        if y >= layout.articles.bottom().saturating_sub(1) {
+    let articles = &layout.articles_list;
+    for (index, _) in app.article_list.iter().enumerate().skip(articles.offset) {
+        let y = articles.list.y + (index - articles.offset) as u16;
+        if y >= articles.list.bottom() {
             break;
         }
         result.push(Target::new(
-            Rect::new(layout.articles.x, y, layout.articles.width, 1),
+            Rect::new(articles.list.x, y, articles.list.width, 1),
             crate::app::Action::ArticleMove(index as i32 - app.article_cursor as i32),
         ));
     }
@@ -78,10 +136,10 @@ pub fn wheel_action(
     row: u16,
     delta: i32,
 ) -> Option<crate::app::Action> {
-    let layout = layout(content);
-    if inside(layout.books, column, row) {
+    let (books, articles) = columns(content);
+    if inside(books, column, row) {
         Some(crate::app::Action::ArticleBookMove(delta))
-    } else if inside(layout.articles, column, row) {
+    } else if inside(articles, column, row) {
         Some(crate::app::Action::ArticleMove(delta))
     } else {
         None
@@ -99,11 +157,10 @@ fn inside(rect: Rect, column: u16, row: u16) -> bool {
 /// 书本 / 文章列表页。
 pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     shell::render(app, frame, area, theme, Nav::Articles, |frame, content| {
-        let layout = layout(content);
-        let columns = [layout.books, layout.articles];
+        let layout = layout(app, content);
 
         // 左：书本列表
-        let books: Vec<ListItem> = app
+        let books: Vec<Line<'static>> = app
             .article_books
             .iter()
             .map(|book| {
@@ -113,7 +170,7 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                         .iter()
                         .position(|item| item.en_name == book.en_name)
                         .unwrap_or(usize::MAX);
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         if selected { "▶ " } else { "  " },
                         Style::default().fg(if selected { theme.accent } else { theme.dim }),
@@ -138,23 +195,20 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                         }
                         None => Span::styled("  篇数未知", Style::default().fg(theme.dim)),
                     },
-                ]))
+                ])
             })
             .collect();
-        frame.render_widget(
-            List::new(books).block(practice_block(" 书本 ", theme)),
-            columns[0],
-        );
+        render_pane(frame, &layout.books_list, " 书本 ", &books, theme);
 
         // 右：文章列表
-        let articles: Vec<ListItem> = app
+        let articles: Vec<Line<'static>> = app
             .article_list
             .iter()
             .enumerate()
             .map(|(index, article)| {
                 let selected = index == app.article_cursor;
                 let sentences: usize = article.sections.iter().map(|section| section.len()).sum();
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         if selected { "▶ " } else { "  " },
                         Style::default().fg(if selected { theme.accent } else { theme.dim }),
@@ -171,14 +225,43 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                     ),
                     Span::styled(format!("  {sentences} 句"), Style::default().fg(theme.dim)),
                     saved_line(app, article.id, sentences, theme),
-                ]))
+                ])
             })
             .collect();
-        frame.render_widget(
-            List::new(articles).block(practice_block(" 文章 ", theme)),
-            columns[1],
-        );
+        render_pane(frame, &layout.articles_list, " 文章 ", &articles, theme);
     });
+}
+
+/// 画一栏带边框列表：边框 + 从滚动偏移开始的可见行 + 右侧滚动条。
+fn render_pane(
+    frame: &mut Frame,
+    pane: &ListPane,
+    title: &str,
+    lines: &[Line<'static>],
+    theme: &Theme,
+) {
+    if pane.rect.width == 0 || pane.rect.height == 0 {
+        return;
+    }
+    frame.render_widget(practice_block(title, theme), pane.rect);
+    if pane.list.width > 0 && pane.list.height > 0 {
+        for (row, line) in lines.iter().enumerate().skip(pane.offset) {
+            let y = pane.list.y + (row - pane.offset) as u16;
+            if y >= pane.list.bottom() {
+                break;
+            }
+            frame.render_widget(
+                Paragraph::new(line.clone()),
+                Rect::new(pane.list.x, y, pane.list.width, 1),
+            );
+        }
+    }
+    widgets::scrollbar(
+        frame,
+        pane.scrollbar,
+        widgets::ScrollbarState::new(pane.offset, pane.total, pane.visible),
+        theme,
+    );
 }
 
 /// 列表行里「上次跟到这里」的标记：只有当前断点正好属于这一篇文章时才显示。

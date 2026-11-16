@@ -40,7 +40,7 @@ pub fn layout(app: &App, content: Rect) -> WordsLayout {
         content.width,
         content.height.saturating_sub(2),
     );
-    let offset = scroll_offset(
+    let offset = widgets::list_offset(
         app.words_cursor,
         app.filtered_word_indices().len(),
         list.height as usize,
@@ -51,14 +51,6 @@ pub fn layout(app: &App, content: Rect) -> WordsLayout {
         footer,
         offset,
     }
-}
-
-/// 让光标始终落在可视区域内的滚动偏移。
-fn scroll_offset(cursor: usize, total: usize, visible: usize) -> usize {
-    if total == 0 || visible == 0 {
-        return 0;
-    }
-    cursor.min(total - 1).saturating_sub(visible - 1)
 }
 
 pub fn targets(app: &App, content: Rect) -> Vec<Target> {
@@ -80,8 +72,9 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
             // 光标在**过滤后**的位置，位移也要按过滤后的行号算。
             crate::app::Action::WordsMove(row as i32 - app.words_cursor as i32)
         };
+        // 让出最右一列：滚动条画在那里，点它不该选中某一行。
         result.push(Target::new(
-            Rect::new(layout.list.x, y, layout.list.width, 1),
+            Rect::new(layout.list.x, y, layout.list.width.saturating_sub(1), 1),
             action,
         ));
     }
@@ -164,7 +157,9 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, offset: usize, theme: &
         );
         return;
     }
-    let width = rect.width as usize;
+    // 最右一列留给滚动条：行背景与文字都不覆盖它。
+    let row_width = rect.width.saturating_sub(1);
+    let width = row_width as usize;
     for (row, index) in indices.iter().enumerate().skip(offset) {
         let y = rect.y + (row - offset) as u16;
         if y >= rect.bottom() {
@@ -175,14 +170,10 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, offset: usize, theme: &
         };
         let selected = *index == indices.get(app.words_cursor).copied().unwrap_or(usize::MAX);
         let marked = app.words_marked.contains(index);
-        let row_rect = Rect::new(rect.x, y, rect.width, 1);
+        let row_rect = Rect::new(rect.x, y, row_width, 1);
         if selected {
             widgets::paint_rect(frame, row_rect, theme.selection);
-            widgets::paint_rect(
-                frame,
-                Rect::new(rect.x, rect.y + y - rect.y, 1, 1),
-                theme.accent,
-            );
+            widgets::paint_rect(frame, Rect::new(rect.x, y, 1, 1), theme.accent);
         }
         let marker = if marked { "◉" } else { " " };
         let translation = word
@@ -215,6 +206,12 @@ fn render_list(app: &App, frame: &mut Frame, rect: Rect, offset: usize, theme: &
             row_rect,
         );
     }
+    widgets::scrollbar(
+        frame,
+        Rect::new(rect.right().saturating_sub(1), rect.y, 1, rect.height),
+        widgets::ScrollbarState::new(offset, indices.len(), rect.height as usize),
+        theme,
+    );
     let _ = display_width("");
 }
 

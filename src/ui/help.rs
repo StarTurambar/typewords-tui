@@ -3,7 +3,8 @@
 //! 分页条固定在内容区顶部：内容区焦点下 `←` / `→`（`h` / `l` 别名）切换，
 //! 焦点在导航栏时方向键仍归焦点模型，鼠标点标签也可；
 //! 「快捷键」宽屏分两栏（练习 / 导航），其余分页单栏，`↑` / `↓`、PgUp / PgDn
-//! 与滚轮滚动。高度不足时优先显示前面的内容，右侧给出 `↑` / `↓` 指示器。
+//! 与滚轮滚动。高度不足时优先显示前面的内容，正文右侧画滚动条（点滑块
+//! 上下的轨道可上下滚动）。
 //!
 //! 正文是成段的说明文字，逻辑条目与屏幕行数不是一一对应：滚动按**屏幕行**
 //! 计算（`build_rows` 先把条目按当前宽度折成行），否则段落比视口长时滚不到底。
@@ -318,39 +319,40 @@ fn render_body(app: &App, frame: &mut Frame, content: Rect, theme: &Theme) {
     if body.height == 0 {
         return;
     }
-    let visible = body.height as usize;
-    let (offset, max_offset) = match two_column_rows(app, body) {
-        Some((left, right)) => {
-            let left_max = left.len().saturating_sub(visible);
-            let right_max = right.len().saturating_sub(visible);
-            let max_offset = left_max.max(right_max);
-            let offset = (app.help_scroll as usize).min(max_offset);
+    let rows = body_rows(app, body);
+    let state =
+        widgets::ScrollbarState::new(app.help_scroll as usize, rows.total(), body.height as usize);
+    let offset = state.offset;
+    match &rows {
+        Rows::Two(left, right) => {
+            let left_max = left.len().saturating_sub(state.visible);
+            let right_max = right.len().saturating_sub(state.visible);
             render_columns(
                 frame,
                 body,
-                &left,
-                &right,
+                left,
+                right,
                 theme,
                 offset.min(left_max),
                 offset.min(right_max),
             );
-            (offset, max_offset)
         }
-        None => {
-            let rows = single_rows(app, body);
-            let max_offset = rows.len().saturating_sub(visible);
-            let offset = (app.help_scroll as usize).min(max_offset);
+        Rows::Single(rows) => {
             let list = Rect::new(
                 body.x,
                 body.y,
                 body.width.saturating_sub(1).max(1),
                 body.height,
             );
-            render_rows(frame, list, &rows, theme, offset);
-            (offset, max_offset)
+            render_rows(frame, list, rows, theme, offset);
         }
-    };
-    render_scroll_indicators(frame, body, theme, offset > 0, offset < max_offset);
+    }
+    widgets::scrollbar(frame, scrollbar_rect(body), state, theme);
+}
+
+/// 滚动条所占的列：正文最右侧 1 列。
+fn scrollbar_rect(body: Rect) -> Rect {
+    Rect::new(body.right().saturating_sub(1), body.y, 1, body.height)
 }
 
 /// 分页条：当前分页高亮（selection 底色）；整屏帮助时右侧给出按键提示。
@@ -418,7 +420,7 @@ fn two_columns(tab: HelpTab, body: Rect) -> bool {
 }
 
 /// 两栏的列宽（左栏 / 右栏）：中间 1 列分隔线 + 1 列留白，最右 1 列留给
-/// 滚动指示器。折行与绘制必须用同一组宽度。
+/// 滚动条。折行与绘制必须用同一组宽度。
 fn column_widths(body: Rect) -> (u16, u16) {
     let left = body.width.saturating_sub(3) / 2;
     (left, body.width.saturating_sub(left + 3))
@@ -450,7 +452,7 @@ fn data_dir_line(app: &App) -> Option<String> {
     })
 }
 
-/// 单栏分页的行（正文右侧留 1 列给滚动指示器）。
+/// 单栏分页的行（正文右侧留 1 列给滚动条）。
 fn single_rows(app: &App, body: Rect) -> Vec<Row> {
     let width = body.width.saturating_sub(1).max(1) as usize;
     build_rows(
@@ -460,20 +462,42 @@ fn single_rows(app: &App, body: Rect) -> Vec<Row> {
     )
 }
 
-/// 当前分页的滚动状态：实际生效的偏移量与最大偏移量。
+/// 当前分页的滚动状态：实际生效的偏移量、内容总行数与视口行数。
 ///
 /// 偏移量以**屏幕行**为单位；两栏时以更长的一栏为准，否则右栏最后几行
 /// 永远滚不出来。
-fn scroll_limits(app: &App, body: Rect) -> (usize, usize) {
+fn scroll_state(app: &App, body: Rect) -> widgets::ScrollbarState {
     if body.height == 0 {
-        return (0, 0);
+        return widgets::ScrollbarState::new(0, 0, 0);
     }
-    let visible = body.height as usize;
-    let max_offset = match two_column_rows(app, body) {
-        Some((left, right)) => left.len().max(right.len()).saturating_sub(visible),
-        None => single_rows(app, body).len().saturating_sub(visible),
-    };
-    ((app.help_scroll as usize).min(max_offset), max_offset)
+    let total = body_rows(app, body).total();
+    widgets::ScrollbarState::new(app.help_scroll as usize, total, body.height as usize)
+}
+
+/// 当前分页的屏幕行：两栏时左 / 右各一份，否则单栏一份。
+///
+/// 绘制、滚动上限与点击轨道都要用同一份折行结果；分开算一次会多画一遍折行，
+/// 也容易出现「上限按这一份算、绘制按那一份算」的漂移。
+enum Rows {
+    Two(Vec<Row>, Vec<Row>),
+    Single(Vec<Row>),
+}
+
+impl Rows {
+    /// 内容总行数：两栏取更长的一栏。
+    fn total(&self) -> usize {
+        match self {
+            Rows::Two(left, right) => left.len().max(right.len()),
+            Rows::Single(rows) => rows.len(),
+        }
+    }
+}
+
+fn body_rows(app: &App, body: Rect) -> Rows {
+    match two_column_rows(app, body) {
+        Some((left, right)) => Rows::Two(left, right),
+        None => Rows::Single(single_rows(app, body)),
+    }
 }
 
 fn render_columns(
@@ -504,37 +528,7 @@ fn render_columns(
     }
 }
 
-/// 右侧的 `↑` / `↓` 滚动指示器。
-fn render_scroll_indicators(
-    frame: &mut Frame,
-    body: Rect,
-    theme: &Theme,
-    can_scroll_up: bool,
-    can_scroll_down: bool,
-) {
-    if body.width == 0 || body.height == 0 {
-        return;
-    }
-    if can_scroll_up {
-        frame.render_widget(
-            Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
-            Rect::new(body.right().saturating_sub(1), body.y, 1, 1),
-        );
-    }
-    if can_scroll_down {
-        frame.render_widget(
-            Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
-            Rect::new(
-                body.right().saturating_sub(1),
-                body.bottom().saturating_sub(1),
-                1,
-                1,
-            ),
-        );
-    }
-}
-
-/// 帮助页的鼠标目标：分页标签 + 正文右侧的滚动指示器。
+/// 帮助页的鼠标目标：分页标签 + 正文右侧滚动条的可点轨道。
 ///
 /// 正文是只读文本，点哪里都不产生动作——早期实现把整块内容区映射成
 /// `HelpBack`，任何一次点击（聚焦窗口、点空白、选文字）都会退出帮助页。
@@ -558,23 +552,10 @@ pub fn targets(app: &App, content: Rect) -> Vec<crate::ui::target::Target> {
     if layout.body.width == 0 || layout.body.height == 0 {
         return result;
     }
-    let (offset, max_offset) = scroll_limits(app, layout.body);
-    if offset > 0 {
-        result.push(Target::new(
-            Rect::new(layout.body.right().saturating_sub(1), layout.body.y, 1, 1),
-            crate::app::Action::HelpScroll(-1),
-        ));
-    }
-    if offset < max_offset {
-        result.push(Target::new(
-            Rect::new(
-                layout.body.right().saturating_sub(1),
-                layout.body.bottom().saturating_sub(1),
-                1,
-                1,
-            ),
-            crate::app::Action::HelpScroll(1),
-        ));
+    // 滚动条上滑块上下各有一段轨道：点一次滚一行。滑块本身不产生动作。
+    let state = scroll_state(app, layout.body);
+    for (rect, delta) in widgets::scrollbar_click_rows(state, scrollbar_rect(layout.body)) {
+        result.push(Target::new(rect, crate::app::Action::HelpScroll(delta)));
     }
     result
 }
@@ -589,7 +570,7 @@ pub fn max_scroll(app: &App) -> u16 {
         return 0;
     }
     let layout = layout(content);
-    scroll_limits(app, layout.body).1 as u16
+    scroll_state(app, layout.body).max_offset() as u16
 }
 
 /// 两个练习页的键位分区（练习 + 文章跟打），快捷键分页的左栏。
