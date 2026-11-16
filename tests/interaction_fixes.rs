@@ -436,11 +436,11 @@ fn calendar_day_rects_cover_the_rendered_day_numbers() {
     }
 }
 
-// ── 滚动指示器不能被行 target 抢走 ──────────────────────────────────────
+// ── 滚动条不能被行 target 抢走 ─────────────────────────────────────────
 
-/// 设置页点右下角的 `↓` 不会跳到别的设置项。
+/// 设置页的滚动条不会被行 target 覆盖：点滚动条不会跳到别的设置项。
 #[test]
-fn the_settings_scroll_indicator_is_not_a_row_target() {
+fn the_settings_scrollbar_is_not_a_row_target() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     app.screen = Screen::Settings;
@@ -448,23 +448,17 @@ fn the_settings_scroll_indicator_is_not_a_row_target() {
     let rows = logical_rows(&app, 120, 40);
     let targets = typewords_tui::ui::hit::targets(&app, area);
 
-    // 找到右下角的 ↓
-    let indicator = rows
-        .iter()
-        .enumerate()
-        .filter_map(|(y, row)| {
-            row.iter()
-                .position(|(c, _)| *c == '↓')
-                .map(|index| (row[index].1, y as u16))
-        })
-        .next_back();
-    let Some((column, row)) = indicator else {
-        return; // 没有更多内容时没有指示器
-    };
+    // 内容区（侧栏右侧）里的滚动条滑块是实心块，正文里不会出现这个字符。
+    let thumb = rows.iter().enumerate().find_map(|(y, row)| {
+        row.iter()
+            .find(|(c, column)| *c == '█' && *column >= 28)
+            .map(|(_, column)| (*column, y as u16))
+    });
+    let (column, row) = thumb.expect("设置项在 40 行终端里一屏放不下，应出现滚动条");
     let owner = targets.iter().find(|t| t.contains(column, row));
     assert!(
         owner.is_none(),
-        "↓ 指示器不应被行 target 覆盖，实际被 {:?} 覆盖",
+        "滚动条不应被行 target 覆盖，实际被 {:?} 覆盖",
         owner.map(|t| &t.action)
     );
 }
@@ -525,27 +519,27 @@ fn clicking_the_help_body_does_not_leave_the_page() {
     assert_eq!(app.help_scroll, 0, "点击正文不应改变滚动位置");
 }
 
-/// 帮助页点滚动指示器是滚动，不是退出。
+/// 帮助页点滚动条的轨道是滚动，不是退出。
 #[test]
-fn clicking_the_help_scroll_indicator_scrolls_instead_of_exiting() {
+fn clicking_the_help_scrollbar_scrolls_instead_of_exiting() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
     press(&mut app, KeyCode::Char('?'));
     let area = Rect::new(0, 0, 80, 24);
 
-    // 从命中目标取 ↓ 指示器，而不是在整屏里找最后一个 '↓'：底栏提示
-    // 「↑↓ 滚动」里也有一个 ↓，按文字搜索会点到页脚（那里没有目标）。
+    // 从命中目标取「向下滚」那一段轨道，而不是在整屏里找字符：底栏提示
+    // 「↑↓ 滚动」里也有箭头，按文字搜索会点到页脚（那里没有目标）。
     let target = typewords_tui::ui::hit::targets(&app, area)
         .into_iter()
         .find(|target| target.action == Action::HelpScroll(1))
-        .expect("帮助页应有 ↓ 滚动命中区");
+        .expect("帮助页应有向下滚动命中区");
     let rows = logical_rows(&app, 80, 24);
     let symbol = rows[target.rect.y as usize]
         .iter()
         .find(|(_, x)| *x == target.rect.x)
         .map(|(c, _)| *c)
-        .expect("滚动指示器所在列应存在");
-    assert_eq!(symbol, '↓', "↓ 命中区应画在正文的滚动指示器上");
+        .expect("滚动条所在列应存在");
+    assert_eq!(symbol, '│', "命中区应落在滚动条滑块下方的轨道上");
 
     app.on_mouse(
         MouseEvent {
@@ -556,8 +550,8 @@ fn clicking_the_help_scroll_indicator_scrolls_instead_of_exiting() {
         },
         area,
     );
-    assert_eq!(app.screen, Screen::Help, "点滚动指示器不该退出帮助页");
-    assert_eq!(app.help_scroll, 1, "点 ↓ 应向下滚动一行");
+    assert_eq!(app.screen, Screen::Help, "点滚动条不该退出帮助页");
+    assert_eq!(app.help_scroll, 1, "点轨道应向下滚动一行");
 }
 
 /// 帮助页三个分页：`←` / `→`（`h` / `l` 别名）切换，到边停住，换页回到顶部。

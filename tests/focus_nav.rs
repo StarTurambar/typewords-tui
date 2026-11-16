@@ -926,6 +926,14 @@ fn stats_arrows_pick_dates_by_calendar_cells() {
         theme.accent,
         "日历选中日应整块 accent 高亮"
     );
+    // 120×40 下正文一屏放得下：没有溢出就不该能滚。
+    assert_eq!(
+        typewords_tui::ui::stats::max_scroll(&app),
+        0,
+        "内容未溢出时滚动上限应为 0"
+    );
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.stats_scroll, 0, "没有溢出时 ↓ 不该滚动正文");
 
     let (year, month) = app.stats_month;
     // 8~14 号覆盖一整周：其中一定有周一到周六之间的日子，左右都有日历格子。
@@ -1007,11 +1015,39 @@ fn stats_arrows_pick_dates_by_calendar_cells() {
     assert_eq!(label(&app).as_deref(), Some("统计"));
     assert_eq!(app.stats_day, monday, "← 不该退到上一周的周日");
 
-    // 滚轮 / PgDn 仍负责滚动正文（宽屏从侧栏 → 内容区，按 → 回来）。
+    // 宽屏 120×40 正文一屏放得下：没有溢出，PgDn 也滚不动。
     press(&mut app, KeyCode::Right);
     assert_eq!(focus::pane(&app), Some(Pane::Content));
     press(&mut app, KeyCode::PageDown);
-    assert!(app.stats_scroll > 0, "PgDn 仍应滚动正文");
+    assert_eq!(app.stats_scroll, 0, "没有溢出时 PgDn 不该滚动正文");
+
+    // 最小终端下正文放不下：方向键仍只选日期（滚动交给 PgDn / 滚轮），
+    // 滚动上限按当前视口现算。
+    let (_fixture, mut app) = test_app(MINIMUM);
+    press(&mut app, KeyCode::Char('4'));
+    assert!(
+        typewords_tui::ui::stats::max_scroll(&app) > 0,
+        "最小终端下统计正文应能滚动"
+    );
+    let today = app.stats_day;
+    let month_last = (1..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), day))
+        .next_back()
+        .map_or(0, |date| date.day());
+    let expected = if today.day() + 7 <= month_last {
+        today + chrono::Duration::days(7)
+    } else {
+        today
+    };
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.stats_day, expected,
+        "有溢出时 ↓ 仍是选下一周的同一天，不是滚动正文"
+    );
+    app.apply_action(app::Action::StatsScroll(-1000));
+    assert_eq!(app.stats_scroll, 0, "滚轮可以滚回顶部");
+    press(&mut app, KeyCode::PageDown);
+    assert!(app.stats_scroll > 0, "PgDn 才滚动正文");
 
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('4'));
@@ -1024,7 +1060,8 @@ fn stats_arrows_pick_dates_by_calendar_cells() {
 /// 选中了却看不见，等于键盘操作没有反馈。
 #[test]
 fn stats_arrows_reveal_the_selected_day_after_scrolling() {
-    let (_fixture, mut app) = test_app(WIDE);
+    // 只有正文真的溢出（最小终端）才谈得上「把日历滚出视野」。
+    let (_fixture, mut app) = test_app(MINIMUM);
     press(&mut app, KeyCode::Char('4'));
     let (year, month) = app.stats_month;
     let date = (8..=14)
@@ -1032,8 +1069,10 @@ fn stats_arrows_reveal_the_selected_day_after_scrolling() {
         .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
         .expect("本月第二周应有左右都有日期的日子");
     app.select_stats_day(date);
+    let max = typewords_tui::ui::stats::max_scroll(&app);
+    assert!(max > 0, "最小终端下统计正文应能滚动");
     app.apply_action(app::Action::StatsScroll(10));
-    assert_eq!(app.stats_scroll, 10, "滚轮 / PgDn 应把正文滚下去");
+    assert_eq!(app.stats_scroll, max, "滚轮 / PgDn 应把正文滚到底");
     assert!(
         focus::focused_rect(&app, app.viewport).is_none(),
         "日历滚出视野后选中日没有高亮矩形"
@@ -1041,7 +1080,7 @@ fn stats_arrows_reveal_the_selected_day_after_scrolling() {
 
     press(&mut app, KeyCode::Down);
     assert_eq!(app.stats_day, date + chrono::Duration::days(7));
-    assert!(app.stats_scroll < 10, "选中的日期应被滚回视野");
+    assert!(app.stats_scroll < max, "选中的日期应被滚回视野");
     assert!(
         focus::focused_rect(&app, app.viewport).is_some(),
         "选中的日期应重新可见"
@@ -1100,10 +1139,13 @@ fn narrow_stats_dict_view_left_stays_in_content() {
     assert_eq!(focus::pane(&app), Some(Pane::Content));
 }
 
-/// 60×20 的短终端上，选中日期滚到最后一个可见行时不能被「↓ 还有 N 行」
-/// 盖掉：滚动提示必须画在正文预留的独立行，而不是正文最后一行。
+/// 60×20 的短终端上，选中月末那天后正文要滚到含它的那一段：选中日的
+/// 高亮与数字都画得出来，正文最后一列让给滚动条。
+///
+/// 旧实现用底部一行写「↓ 还有 N 行」，恰好会盖掉正文最后一行；统一成
+/// 滚动条后正文占满分区，滚动提示不再占用任何正文行。
 #[test]
-fn stats_selected_day_is_not_covered_by_the_scroll_hint() {
+fn stats_selected_day_stays_visible_next_to_the_scrollbar() {
     let (_fixture, mut app) = test_app(MINIMUM);
     press(&mut app, KeyCode::Char('4'));
     let (year, month) = app.stats_month;
@@ -1114,14 +1156,13 @@ fn stats_selected_day_is_not_covered_by_the_scroll_hint() {
     app.select_stats_day(last);
     assert!(app.stats_scroll > 0, "月末应把正文滚到包含选中日的那一段");
 
-    // 选中日被滚到可见区的最后一行。
     let rect = focus::focused_rect(&app, app.viewport).expect("选中日应有高亮矩形");
     let theme = app.theme();
     let buffer = buffer_of(&app, MINIMUM);
     assert_eq!(
         buffer.cell((rect.x, rect.y)).expect("cell").bg,
         theme.accent,
-        "选中日的高亮不能被滚动提示覆盖"
+        "选中日的选中高亮不能被其它行内容覆盖"
     );
 
     let rendered = render_text(&app, MINIMUM);
@@ -1131,13 +1172,14 @@ fn stats_selected_day_is_not_covered_by_the_scroll_hint() {
         "选中日的数字应画出来：{}",
         rows[rect.y as usize]
     );
-    let stats_shell = shell::layout(app.viewport, Nav::Stats);
-    let hint_y = stats_shell.content.bottom() as usize - 1;
-    assert_ne!(hint_y, rect.y as usize, "提示不应占用正文最后一行");
+
+    // 正文最右一列是滚动条（轨道 │ / 滑块 █），不是正文文字。
+    let content = shell::layout(app.viewport, Nav::Stats).content;
+    let column = content.x + content.width - 1;
+    let symbol = buffer.cell((column, rect.y)).expect("cell").symbol();
     assert!(
-        rows[hint_y].contains("↓ 还有"),
-        "滚动提示应在正文下方的预留行：{}",
-        rows[hint_y]
+        matches!(symbol, "█" | "│"),
+        "正文最右一列应是滚动条，实际是 {symbol:?}"
     );
 }
 

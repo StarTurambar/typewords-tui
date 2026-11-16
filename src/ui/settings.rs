@@ -97,7 +97,13 @@ pub fn layout(app: &App, content: Rect) -> SettingsLayout {
             };
             (
                 item,
-                Rect::new(content.x, content.y + position as u16, content.width, 1),
+                Rect::new(
+                    content.x,
+                    content.y + position as u16,
+                    // 最右 1 列留给滚动条：选中高亮与点击都不覆盖它。
+                    content.width.saturating_sub(1),
+                    1,
+                ),
             )
         })
         .collect();
@@ -117,14 +123,8 @@ pub fn targets(app: &App, content: Rect) -> Vec<Target> {
             } else {
                 Action::SelectSetting(index)
             };
-            // 行矩形要避开最右一列——那里画着滚动指示器 `↑` / `↓`。
-            // 早期实现铺满整行，命中测试用 `find` 取第一个，于是点 `↓`
-            // 反而把光标跳到了别的设置项。
-            let width = rect.width.saturating_sub(1);
-            Some(Target::new(
-                Rect::new(rect.x, rect.y, width, rect.height),
-                action,
-            ))
+            // 行矩形已在布局里让出最右一列（滚动条）。
+            Some(Target::new(*rect, action))
         })
         .collect()
 }
@@ -145,24 +145,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             }
         }
 
-        let total = entries.len();
-        if layout.offset > 0 && content.width > 0 {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↑", Style::default().fg(theme.accent_alt))),
-                Rect::new(content.right().saturating_sub(1), content.y, 1, 1),
-            );
-        }
-        if layout.offset + layout.rows.len() < total && content.width > 0 {
-            frame.render_widget(
-                Paragraph::new(Span::styled("↓", Style::default().fg(theme.accent_alt))),
-                Rect::new(
-                    content.right().saturating_sub(1),
-                    content.bottom().saturating_sub(1),
-                    1,
-                    1,
-                ),
-            );
-        }
+        widgets::scrollbar(
+            frame,
+            Rect::new(
+                content.right().saturating_sub(1),
+                content.y,
+                1,
+                content.height,
+            ),
+            widgets::ScrollbarState::new(layout.offset, entries.len(), content.height as usize),
+            theme,
+        );
     });
 }
 
@@ -205,8 +198,8 @@ fn render_row(app: &App, frame: &mut Frame, rect: Rect, index: usize, theme: &Th
     }
 
     let inner_x = rect.x.saturating_add(2);
-    // 右侧留出空白与 ↑/↓ 指示列，避免指示符号被读成数值的一部分。
-    let inner_width = rect.width.saturating_sub(5) as usize;
+    // 行矩形已扣掉最右一列滚动条，再留 4 列空白，避免数值贴着滚动条。
+    let inner_width = rect.width.saturating_sub(4) as usize;
     if inner_width == 0 {
         return;
     }

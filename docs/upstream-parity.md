@@ -11,7 +11,7 @@
 | 技术栈与规模 | Nuxt 4.2 + Vue 3.5 + Pinia + UnoCSS + vue-i18n + ts-fsrs（`package.json` 声明 `^5.2.3`；TUI 移植按 5.4.1）+ idb-keyval；Tauri v2 壳；`app/` 下 15 个页面、约 210 个文件、约 3 万行 | Rust 2024（`rust-version` 1.90）+ ratatui 0.30 + crossterm + serde / chrono / clap，FSRS-6 自实现；`src/` 下 67 个 Rust 文件、约 2.9 万行，13 个屏幕 + 7 类弹层 |
 | 产物与环境 | `nuxt generate` 静态站；桌面端是 Tauri 安装包（WebView2 载入同一份前端），运行在浏览器或桌面窗口 | 单个 `tw` 二进制 + 只读 `assets/`，运行在终端（最小 60 × 20），无 WebView、无 Node 运行时 |
 | 数据与网络 | IndexedDB 4 个 key：`typing-word-dict`(4)、`typing-word-setting`(23)、`PracticeSaveWord`(2)、`PracticeSaveArticle`(1)；在线查词、百度翻译、有道发音、Supabase 同步、umami 埋点 | 数据目录 5 份 JSON：`dict.json`(4)、`setting.json`(23)、`practice-word.json`(2)、`practice-article.json`(1)、`flows.json`（无版本）；默认离线，唯一联网能力是可选的有道发音（系统 `curl` 下载 mp3，外部播放器播放） |
-| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 30 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
+| 测试与分发 | `package.json` 的 `test` 为空，快照内没有测试目录；静态站 + Tauri 安装包 | 31 个集成测试文件 + 模块内单测，CI 跑 fmt / clippy / Ubuntu + Windows；GitHub Release 按五平台矩阵产出 tar.gz（可执行文件 + assets + docs + LICENSE + 同名 `.sha256` 与聚合 `SHA256SUMS`） |
 
 ### 1.2 对照基线
 

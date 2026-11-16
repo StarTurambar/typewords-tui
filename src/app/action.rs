@@ -857,10 +857,14 @@ impl App {
     }
 
     fn scroll_stats(&mut self, delta: i32) {
-        let count = crate::ui::stats::body_line_count(self);
-        let max = count.saturating_sub(1) as i32;
-        let next = (self.stats_scroll as i32 + delta).clamp(0, max.max(0));
-        self.stats_scroll = next as u16;
+        // 上限 = 总行数 - 视口行数：内容不足一屏时是 0，按不出任何滚动。
+        // 旧实现用「总行数 - 1」，没有溢出也能一直按 ↓ 把正文滚成只剩最后
+        // 一行；而且行数按写死的 80 列算，窗口一变上限就错。
+        let max = crate::ui::stats::max_scroll(self) as i32;
+        // 从实际生效的偏移开始加减：窗口变高后 max 会变小，旧偏移可能已经
+        // 越界，直接从旧值加会先被 clamp 吃掉一次按键。
+        let current = (self.stats_scroll as i32).min(max);
+        self.stats_scroll = (current + delta).clamp(0, max.max(0)) as u16;
     }
 
     /// 切换统计页的视图：日历 / 按词典。
