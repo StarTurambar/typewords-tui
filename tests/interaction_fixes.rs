@@ -14,6 +14,7 @@ use ratatui::layout::Rect;
 use typewords_tui::app::{self, Action, HelpTab, Screen};
 use typewords_tui::domain::shortcut::{BaseKey, ShortcutAction, ShortcutKey};
 use typewords_tui::domain::types::WordPracticeMode;
+use typewords_tui::ui::focus::{self, FocusId, NavId, Pane};
 use unicode_width::UnicodeWidthStr;
 
 fn press(app: &mut app::App, code: KeyCode) {
@@ -670,6 +671,202 @@ fn reopening_help_starts_on_the_shortcuts_tab() {
         app.help_tab,
         HelpTab::Shortcuts,
         "再次打开帮助应回到第一个分页"
+    );
+}
+
+// ── 帮助页：分页条高亮与到边方向键 ────────────────────────────────────
+
+/// 分页条那一行每列的底色（帮助页三分页都画在同一行）。
+///
+/// 高亮是「整块」的：底色铺满分页标签矩形（含左右各一格留白），
+/// 所以按颜色找块面就够了，不必逐字判断。
+fn tab_row_backgrounds(app: &app::App, width: u16, height: u16) -> Vec<ratatui::style::Color> {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for y in 0..height {
+        // 宽字符（CJK）占两列：后一格是占位而不是同一行文字，拼文本时要跳过，
+        // 否则拿到的是「快 捷 键」。
+        let mut text = String::new();
+        let mut x = 0u16;
+        while x < width {
+            let symbol = buffer
+                .cell((x, y))
+                .map(|cell| cell.symbol().to_string())
+                .unwrap_or_default();
+            let cell_width = UnicodeWidthStr::width(symbol.as_str()).max(1) as u16;
+            text.push_str(&symbol);
+            x += cell_width;
+        }
+        if text.contains("快捷键") && text.contains("常见问题") {
+            return (0..width)
+                .map(|x| buffer.cell((x, y)).map(|cell| cell.bg).unwrap_or_default())
+                .collect();
+        }
+    }
+    panic!("帮助页分页条没有渲染出来");
+}
+
+/// 当前分页用全站统一的强调色整块高亮，而不是几乎看不见的 selection 底色。
+///
+/// 早期分页条只铺 `theme.selection`：深色主题下它与背景几乎同色、高对比主题下
+/// 干脆同色，看不出当前停在哪一页。现在与设置页当前行 / 侧栏当前项同一套：
+/// 键盘在本页时强调色底 + 反色文字；焦点进导航栏后让位回 selection 底色。
+#[test]
+fn help_active_tab_uses_the_accent_selection_language() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('?'));
+    let theme = app.theme();
+
+    let backgrounds = tab_row_backgrounds(&app, 120, 40);
+    assert!(
+        backgrounds.contains(&theme.accent),
+        "内容区焦点下当前分页应整块强调色高亮"
+    );
+    assert!(
+        !backgrounds.contains(&theme.selection),
+        "强调色高亮不应再混用 selection 底色"
+    );
+
+    // 切到「常见问题」，强调色块跟着走。
+    press(&mut app, KeyCode::Right);
+    let backgrounds = tab_row_backgrounds(&app, 120, 40);
+    assert!(
+        backgrounds.contains(&theme.accent),
+        "换分页后新分页应有强调色高亮"
+    );
+
+    // Tab 进导航栏：键盘不在本页，页面高亮让位成 selection 底色。
+    press(&mut app, KeyCode::Tab);
+    let backgrounds = tab_row_backgrounds(&app, 120, 40);
+    assert!(
+        !backgrounds.contains(&theme.accent),
+        "焦点进导航栏后分页条不再用强调色"
+    );
+    assert!(
+        backgrounds.contains(&theme.selection),
+        "焦点进导航栏后当前分页退回 selection 底色"
+    );
+}
+
+/// 练习中打开的整屏帮助没有焦点模型，当前分页仍是强调色高亮。
+#[test]
+fn practice_help_active_tab_is_highlighted_with_accent() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    app.start_practice();
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.screen, Screen::Help);
+    let theme = app.theme();
+
+    let backgrounds = tab_row_backgrounds(&app, 120, 40);
+    assert!(
+        backgrounds.contains(&theme.accent),
+        "整屏帮助的当前分页应强调色高亮"
+    );
+    press(&mut app, KeyCode::Right);
+    let backgrounds = tab_row_backgrounds(&app, 120, 40);
+    assert!(
+        backgrounds.contains(&theme.accent),
+        "整屏帮助切分页后新分页仍有强调色高亮"
+    );
+}
+
+/// 第一个分页再按 `←` 要像其它页面一样回到侧栏，而不是被分页条吞掉。
+///
+/// 分页条早期无条件拦截 `←` / `→`：帮助页里 `←` 永远回不到侧栏，只能
+/// 发现 `Tab` 能换栏。到边的那一下现在放行给焦点模型（宽屏内容区左边缘
+/// `←` 进侧栏），分页之间照旧切换。
+#[test]
+fn help_left_at_the_first_tab_enters_the_sidebar() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.help_tab, HelpTab::Shortcuts);
+
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.screen, Screen::Help, "到边的 ← 不该离开帮助页");
+    assert_eq!(
+        app.help_tab,
+        HelpTab::Shortcuts,
+        "第一个分页再按 ← 仍是第一个分页"
+    );
+    assert_eq!(
+        app.focus,
+        Some(FocusId::Nav(NavId::Help)),
+        "到边的 ← 应回到侧栏的「帮助」项"
+    );
+
+    // 回内容区后分页键照旧：→ 回到内容区，再 → 切到第二个分页。
+    press(&mut app, KeyCode::Right);
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "侧栏焦点下 → 回到内容区"
+    );
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::Faq);
+    assert_eq!(app.screen, Screen::Help);
+}
+
+/// 最后一个分页再按 `→` 只吞键：不离开帮助页，也不会去别的地方。
+#[test]
+fn help_right_at_the_last_tab_stays_on_the_page() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::About);
+
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.help_tab, HelpTab::About, "最后一页再按 → 应停住");
+    assert_eq!(app.screen, Screen::Help, "到边的 → 不该离开帮助页");
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "帮助页右侧没有可跨的栏，焦点留在内容区"
+    );
+}
+
+/// `h` / `l` 不是焦点键：到边时仍被分页条吞掉，不能落进「任意键返回」。
+#[test]
+fn help_h_at_the_first_tab_does_not_leave_the_page() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Char('h'));
+    assert_eq!(app.screen, Screen::Help, "h 到边应被分页条吞掉");
+    assert_eq!(app.help_tab, HelpTab::Shortcuts);
+
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.screen, Screen::Help, "l 到边应被分页条吞掉");
+    assert_eq!(app.help_tab, HelpTab::About);
+}
+
+/// 窄屏没有侧栏：到边的 `←` 仍是分页条的事，跨栏键是 `↑`。
+#[test]
+fn help_left_at_the_first_tab_does_nothing_on_narrow_screens() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 80, 24));
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.screen, Screen::Help);
+    assert_eq!(app.help_tab, HelpTab::Shortcuts);
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "窄屏内容区跨栏键是 ↑，← 到边不动"
     );
 }
 

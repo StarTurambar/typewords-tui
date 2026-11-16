@@ -268,6 +268,9 @@ fn focus_action(app: &App, key: KeyEvent) -> Option<Action> {
 /// 焦点在导航栏时例外：窄屏顶栏靠 `←` / `→` 换页签，宽屏 `→` 用于回到
 /// 内容区；若这里继续拦截，帮助页里一旦 Tab 进导航栏就无法再移动选中。
 /// 此时只保留 `h` / `l` 别名切分页。
+///
+/// 分页到边的那一下不归本函数：`screen_action` 先用 `help_tab_at_edge` 判断，
+/// 放行给焦点模型，`←` 才能像其它页面一样从内容区最左回到侧栏。
 fn help_tab_action(app: &App, key: KeyEvent) -> Option<Action> {
     // 带 Ctrl / Alt 的箭头 / h / l 不当作分页：练习中打开的整屏帮助里
     // 「任意键返回」应继续生效（Alt+←/→ 是练习页的上下组键）。
@@ -288,6 +291,20 @@ fn help_tab_action(app: &App, key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// 分页是否已经到边（第一页再 `←`、最后一页再 `→`）。
+///
+/// 到边时这两下方向键不属于分页条：要留给焦点模型做「内容区 ↔ 导航栏」的
+/// 跨界，否则帮助页的 `←` 永远回不到侧栏——其它页面在内容区最左按 `←`
+/// 就进侧栏，帮助页却像被卡住。只认裸箭头：`h` / `l` 不是焦点键，到边
+/// 仍要吞掉，不能落到「任意键返回」。
+fn help_tab_at_edge(app: &App, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Left => app.help_tab.prev() == app.help_tab,
+        KeyCode::Right => app.help_tab.next() == app.help_tab,
+        _ => false,
+    }
+}
+
 pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
     // 练习 / 跟打中打开的帮助页是整屏只读页：分页与滚动之外任意键返回。
     if app.screen == Screen::Help && app.in_typing_session() {
@@ -305,7 +322,12 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
     // 菜单帮助页不在练习中：`←` / `→` 切分页，方向键 / Tab / Enter 走统一的
     // 焦点语义，其余按键保持「任意键返回」（数字键也返回，不切页）。
     if app.screen == Screen::Help {
-        if let Some(action) = help_tab_action(app, key) {
+        // 分页已经到边时这一下 `←` / `→` 不再属于分页条：交给下面的焦点模型，
+        // 宽屏内容区最左再按 `←` 就能回侧栏（与其它页面「到左边缘 `←` 进侧栏」
+        // 同一套语义）。整屏帮助没有侧栏，到边仍由 `help_tab_action` 吞掉。
+        if !help_tab_at_edge(app, key)
+            && let Some(action) = help_tab_action(app, key)
+        {
             return Some(action);
         }
         return match key.code {
