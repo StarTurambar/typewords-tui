@@ -73,7 +73,7 @@ pub fn layout(app: &App, content: Rect) -> SettingsLayout {
         .position(|entry| matches!(entry, Entry::Item(index) if *index == app.settings_cursor))
         .unwrap_or(0);
 
-    let mut offset = cursor_entry.saturating_sub(visible.saturating_sub(1));
+    let mut offset = widgets::list_offset(cursor_entry, entries.len(), visible);
     if offset > 0 {
         // 尽量让分区标题跟着当前条目一起滚入视口。
         let start = entries[..=offset]
