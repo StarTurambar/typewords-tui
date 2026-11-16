@@ -4034,8 +4034,7 @@ impl App {
 
     /// 打开键入练习中的整屏帮助；返回时由 `help_back` 回到对应练习页。
     fn open_typing_help(&mut self) {
-        self.help_tab = HelpTab::Shortcuts;
-        self.help_scroll = 0;
+        self.reset_help_state();
         self.set_screen(Screen::Help);
     }
 

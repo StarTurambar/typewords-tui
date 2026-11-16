@@ -264,7 +264,23 @@ fn focus_action(app: &App, key: KeyEvent) -> Option<Action> {
 ///
 /// 分页是帮助页自己的横向操作，优先于通用焦点导航——否则 `←` / `→` 会被
 /// 焦点模型解释成「移动选中 / 跨栏」，用户看不出帮助页还有另外两页。
+///
+/// 焦点在导航栏时例外：窄屏顶栏靠 `←` / `→` 换页签，宽屏 `→` 用于回到
+/// 内容区；若这里继续拦截，帮助页里一旦 Tab 进导航栏就无法再移动选中。
+/// 此时只保留 `h` / `l` 别名切分页。
 fn help_tab_action(app: &App, key: KeyEvent) -> Option<Action> {
+    // 带 Ctrl / Alt 的箭头 / h / l 不当作分页：练习中打开的整屏帮助里
+    // 「任意键返回」应继续生效（Alt+←/→ 是练习页的上下组键）。
+    if has_command_modifier(key) {
+        return None;
+    }
+    if crate::ui::focus::pane(app) == Some(crate::ui::focus::Pane::Nav) {
+        return match key.code {
+            KeyCode::Char('h') => Some(Action::HelpSelectTab(app.help_tab.prev())),
+            KeyCode::Char('l') => Some(Action::HelpSelectTab(app.help_tab.next())),
+            _ => None,
+        };
+    }
     match key.code {
         KeyCode::Left | KeyCode::Char('h') => Some(Action::HelpSelectTab(app.help_tab.prev())),
         KeyCode::Right | KeyCode::Char('l') => Some(Action::HelpSelectTab(app.help_tab.next())),

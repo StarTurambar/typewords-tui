@@ -1,6 +1,7 @@
 //! 帮助页：快捷键 / 常见问题 / 关于与反馈三个分页。
 //!
-//! 分页条固定在内容区顶部：`←` / `→`（`h` / `l` 别名）切换，鼠标点标签也可；
+//! 分页条固定在内容区顶部：内容区焦点下 `←` / `→`（`h` / `l` 别名）切换，
+//! 焦点在导航栏时方向键仍归焦点模型，鼠标点标签也可；
 //! 「快捷键」宽屏分两栏（练习 / 导航），其余分页单栏，`↑` / `↓`、PgUp / PgDn
 //! 与滚轮滚动。高度不足时优先显示前面的内容，右侧给出 `↑` / `↓` 指示器。
 //!
@@ -18,7 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthChar;
 
-use crate::app::{App, HelpTab};
+use crate::app::{App, HelpTab, Screen};
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
 use crate::ui::widgets::{self, display_width, fit_text};
@@ -105,7 +106,10 @@ const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Key("a", "文章背诵"),
     HelpEntry::Key("Ctrl+F", "练习流程"),
     HelpEntry::Key("m", "切换练习模式"),
-    HelpEntry::Key("↑ ↓ ← →", "所有页面：移动选中 / 到边跨栏（Esc 取消或返回）"),
+    HelpEntry::Key(
+        "↑ ↓ ← →",
+        "页面焦点导航：移动选中 / 到边跨栏（Esc 取消或返回）",
+    ),
     HelpEntry::Key("Tab", "导航栏 ↔ 内容区换栏"),
     HelpEntry::Key("Enter", "触发选中项（主页 = 开始学习）"),
     HelpEntry::Key("f", "自由练习"),
@@ -115,6 +119,7 @@ const NAVIGATION: &[HelpEntry] = &[
     HelpEntry::Key(", / .", "统计页翻月"),
     HelpEntry::Key("↑ / ↓", "列表滚动 / 词库与设置选择"),
     HelpEntry::Key("← / →", "文章页换栏 / 统计页选日期 / 帮助页切分页"),
+    HelpEntry::Key("h / l", "帮助页上一分页 / 下一分页"),
     HelpEntry::Key("鼠标点击", "侧栏 / 按钮 / 列表 / 帮助分页"),
     HelpEntry::Key("滚轮", "滚动列表"),
     HelpEntry::Key("Shift+拖拽", "选择文本"),
@@ -374,8 +379,16 @@ fn render_tabs(
     if !show_hint {
         return;
     }
-    let hint = "←→ 分页 · ↑↓ 滚动 · Esc 返回";
-    let hint_width = display_width(hint) as u16;
+    // 提示与底栏共用同一份键位定义，避免两处文案（包括大小写）漂移。
+    let hint = shell::hints_for(Screen::Help)
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let hint_width = display_width(&hint) as u16;
+    if hint_width == 0 || layout.body.width < hint_width {
+        return;
+    }
     let last_tab_right = layout
         .tabs
         .iter()
@@ -383,12 +396,19 @@ fn render_tabs(
         .max()
         .unwrap_or(0);
     let x = layout.body.right().saturating_sub(hint_width);
-    if hint_width > 0 && x > last_tab_right && layout.body.width > hint_width {
-        frame.render_widget(
-            Paragraph::new(Span::styled(hint, Style::default().fg(theme.dim))),
-            Rect::new(x, layout.tabs[0].y, hint_width, 1),
-        );
-    }
+    // 60~64 列时分页条右侧放不下：落到分页条与正文之间的留白行，保证
+    // 最小支持宽度也有「←→ 分页」提示（整屏帮助没有底栏可退）。
+    let y = if x > last_tab_right {
+        layout.tabs[0].y
+    } else if layout.tabs[0].y.saturating_add(TAB_BAR_GAP) < layout.body.y {
+        layout.tabs[0].y.saturating_add(TAB_BAR_GAP)
+    } else {
+        return;
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(hint, Style::default().fg(theme.dim))),
+        Rect::new(x, y, hint_width, 1),
+    );
 }
 
 fn two_columns(tab: HelpTab, body: Rect) -> bool {
@@ -397,17 +417,22 @@ fn two_columns(tab: HelpTab, body: Rect) -> bool {
         && body.height >= TWO_COLUMN_MIN_HEIGHT
 }
 
+/// 两栏的列宽（左栏 / 右栏）：中间 1 列分隔线 + 1 列留白，最右 1 列留给
+/// 滚动指示器。折行与绘制必须用同一组宽度。
+fn column_widths(body: Rect) -> (u16, u16) {
+    let left = body.width.saturating_sub(3) / 2;
+    (left, body.width.saturating_sub(left + 3))
+}
+
 /// 快捷键分页的两栏行；其它分页或宽度不够时返回 `None`（走单栏）。
 fn two_column_rows(app: &App, body: Rect) -> Option<(Vec<Row>, Vec<Row>)> {
     if !two_columns(app.help_tab, body) {
         return None;
     }
-    // 两栏之间：1 列分隔线 + 1 列留白；最右 1 列留给滚动指示器。
-    let left_width = body.width.saturating_sub(3) / 2;
+    let (left_width, right_width) = column_widths(body);
     if left_width < 26 {
         return None;
     }
-    let right_width = body.width.saturating_sub(left_width + 3);
     let data_dir = data_dir_line(app);
     Some((
         build_rows(&typing_entries(), left_width as usize, data_dir.as_deref()),
@@ -460,14 +485,13 @@ fn render_columns(
     left_offset: usize,
     right_offset: usize,
 ) {
-    // 两栏之间：1 列分隔线 + 1 列留白；最右 1 列留给滚动指示器。
-    let left_width = body.width.saturating_sub(3) / 2;
+    let (left_width, right_width) = column_widths(body);
     let left = Rect::new(body.x, body.y, left_width, body.height);
     let divider_x = body.x + left_width;
     let right = Rect::new(
         divider_x.saturating_add(2),
         body.y,
-        body.width.saturating_sub(left_width + 3),
+        right_width,
         body.height,
     );
     render_rows(frame, left, left_rows, theme, left_offset);
@@ -744,29 +768,14 @@ fn wrap_prose(text: &str, width: usize) -> Vec<String> {
                     line.push(' ');
                     line_width += 1;
                 }
-                ProseUnit::Word(word) => {
-                    let word_width = display_width(&word);
-                    if line_width + word_width > width && !line.is_empty() {
-                        push_line(&mut lines, &mut line);
-                        line_width = 0;
-                    }
-                    if word_width > width {
-                        // 超长单词：逐字符折，保证不会画出界。
-                        for character in word.chars() {
-                            push_char(&mut lines, &mut line, &mut line_width, character, width);
-                        }
-                    } else {
-                        line.push_str(&word);
-                        line_width += word_width;
-                    }
-                }
-                ProseUnit::Char(text) => {
+                ProseUnit::Atom(text) => {
                     let unit_width = display_width(&text);
                     if line_width + unit_width > width && !line.is_empty() {
                         push_line(&mut lines, &mut line);
                         line_width = 0;
                     }
                     if unit_width > width {
+                        // 超长单位（单词 / 字符）：逐字符折，保证不会画出界。
                         for character in text.chars() {
                             push_char(&mut lines, &mut line, &mut line_width, character, width);
                         }
@@ -787,10 +796,9 @@ fn wrap_prose(text: &str, width: usize) -> Vec<String> {
 
 enum ProseUnit {
     Space,
-    /// 连续 ASCII 非空白字符（单词、路径、URL、组合键）。
-    Word(String),
-    /// CJK 字符 / 标点等逐字可折的单位；行尾标点会粘到前一个单位上。
-    Char(String),
+    /// 不可再拆的显示单位：连续 ASCII 非空白字符（单词、路径、URL、组合键），
+    /// 或单个 CJK 字符 / 标点。行尾标点会粘到前一个单位上。
+    Atom(String),
 }
 
 /// 把段落切成「尽量不拆的 ASCII 单词 + 可逐字折的字符」。
@@ -803,31 +811,31 @@ fn prose_units(paragraph: &str) -> Vec<ProseUnit> {
     for character in paragraph.chars() {
         if character == ' ' {
             if !word.is_empty() {
-                units.push(ProseUnit::Word(std::mem::take(&mut word)));
+                units.push(ProseUnit::Atom(std::mem::take(&mut word)));
             }
             units.push(ProseUnit::Space);
         } else if character.is_ascii() {
             word.push(character);
         } else {
             if !word.is_empty() {
-                units.push(ProseUnit::Word(std::mem::take(&mut word)));
+                units.push(ProseUnit::Atom(std::mem::take(&mut word)));
             }
             if is_trailing_punctuation(character)
                 && let Some(last) = units.last_mut()
             {
                 match last {
-                    ProseUnit::Word(text) | ProseUnit::Char(text) => {
+                    ProseUnit::Atom(text) => {
                         text.push(character);
                         continue;
                     }
                     ProseUnit::Space => {}
                 }
             }
-            units.push(ProseUnit::Char(character.to_string()));
+            units.push(ProseUnit::Atom(character.to_string()));
         }
     }
     if !word.is_empty() {
-        units.push(ProseUnit::Word(word));
+        units.push(ProseUnit::Atom(word));
     }
     units
 }
