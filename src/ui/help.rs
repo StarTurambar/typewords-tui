@@ -378,9 +378,9 @@ fn scrollbar_rect(body: Rect) -> Rect {
 ///   高对比主题下更是同色，用户看不出当前停在哪一页。
 /// - 键盘进导航栏后：退回 `selection` 底色，页面自己的高亮让位给导航栏。
 ///
-/// 强调色必须**画在文字之后**：`focus::paint` 用 `Buffer::set_style` 只改样式、
-/// 不动字形，既能反色又不吃掉文字；反过来先铺底色再画字，宽字符后面的续接格
-/// 会被 `set_stringn` 重置成默认色，块面上出现一道道空洞。
+/// 两档底色都必须**画在文字之后**：`focus::paint` / `paint_rect` 用
+/// `Buffer::set_style` 只改样式、不动字形；先铺底色再画字，宽字符后面的
+/// 续接格会被 `set_stringn` 重置成默认色，块面上出现一道道空洞。
 fn render_tabs(
     frame: &mut Frame,
     layout: &HelpLayout,
@@ -394,17 +394,21 @@ fn render_tabs(
             continue;
         }
         let selected = *tab == active;
-        if selected && !focused {
-            widgets::paint_rect(frame, *rect, theme.selection);
-        }
         let text = fit_text(&format!(" {} ", tab.label()), rect.width as usize);
         let mut style = Style::default().fg(if selected { theme.fg } else { theme.muted });
         if selected {
             style = style.add_modifier(Modifier::BOLD);
         }
         frame.render_widget(Paragraph::new(Span::styled(text, style)), *rect);
-        if selected && focused {
-            crate::ui::focus::paint(frame, *rect, theme);
+        // 底色必须**画在文字之后**：先铺底色再画字，宽字符后面的续接格会被
+        // `Buffer::set_stringn` 的 `reset()` 清掉背景，块面上出现一道道空洞。
+        // `paint_rect` / `focus::paint` 都只改样式、不动字形，后画不会吃掉文字。
+        if selected {
+            if focused {
+                crate::ui::focus::paint(frame, *rect, theme);
+            } else {
+                widgets::paint_rect(frame, *rect, theme.selection);
+            }
         }
     }
     if !show_hint {

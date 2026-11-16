@@ -267,7 +267,7 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
         }
         Screen::Flows => {
             let layout = crate::ui::flows::layout(app, content);
-            if app.flow_cursor >= app.flow_entries().len() || layout.list.height == 0 {
+            if app.flow_cursor >= app.flow_entry_count() || layout.list.height == 0 {
                 return None;
             }
             let row = app.flow_cursor.saturating_sub(layout.offset) as u16;
@@ -299,16 +299,8 @@ fn page_selection_rect(app: &App, area: Rect) -> Option<Rect> {
         }
         Screen::Stats => {
             // 按词典视图没有日历选中项；日历视图高亮选中那一天（含记录点）。
-            if app.stats_by_dict {
-                return None;
-            }
-            crate::ui::stats::targets(app, content)
-                .into_iter()
-                .find(|target| match &target.action {
-                    Action::StatsSelectDay(date) => *date == app.stats_day,
-                    _ => false,
-                })
-                .map(|target| target.rect)
+            // 只算日历几何，不走完整 targets——后者要重算整页正文行数。
+            crate::ui::stats::selected_day_rect(app, content)
         }
         _ => None,
     }

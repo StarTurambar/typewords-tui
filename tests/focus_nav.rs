@@ -1064,10 +1064,10 @@ fn stats_arrows_reveal_the_selected_day_after_scrolling() {
     let (_fixture, mut app) = test_app(MINIMUM);
     press(&mut app, KeyCode::Char('4'));
     let (year, month) = app.stats_month;
-    let date = (8..=14)
-        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
-        .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
-        .expect("本月第二周应有左右都有日期的日子");
+    // 选第一周的 1 号：它在正文第 2 行，滚到底后必然不可见；↓ 选到的
+    // 第二周（第 3 行）也一定在滚动上限之前，自动回滚量非零。用「第二周
+    // 的某天」会在只有 4~5 周的月份落到滚到底后的可见尾段，断言随月份失败。
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, 1).expect("本月 1 号");
     app.select_stats_day(date);
     let max = typewords_tui::ui::stats::max_scroll(&app);
     assert!(max > 0, "最小终端下统计正文应能滚动");
@@ -1139,8 +1139,76 @@ fn narrow_stats_dict_view_left_stays_in_content() {
     assert_eq!(focus::pane(&app), Some(Pane::Content));
 }
 
+/// 焦点导航被让位时（词条搜索框仍有焦点），帮助页到边的 `←` 不能落到
+/// 「任意键返回」的兜底上——它应该仍被分页条吞掉，把用户留在帮助页。
+#[test]
+fn help_edge_arrow_stays_on_the_page_when_focus_navigation_is_disabled() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('w'));
+    press(&mut app, KeyCode::Char('/'));
+    assert!(app.words_search_focus, "词条页搜索框应处于输入态");
+    app.apply_action(app::Action::Navigate(Screen::Help));
+    assert_eq!(app.screen, Screen::Help);
+    assert!(!focus::enabled(&app), "搜索框输入态让焦点导航让位");
+
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.screen, Screen::Help, "到边的 ← 不该退出帮助页");
+    assert_eq!(app.help_tab, app::HelpTab::Shortcuts);
+}
+
+/// 统计页切到按词典视图后没有日历：底栏不能继续写「选日期」，
+/// 因为 ↑ / ↓ 实际滚动正文、← / → 没有动作。
+#[test]
+fn stats_dict_view_footer_describes_scrolling_not_date_picking() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Char('4'));
+    app.apply_action(app::Action::StatsToggleView);
+    assert!(app.stats_by_dict);
+    let footer = last_line(&app, NARROW);
+    assert!(
+        !footer.contains("选日期"),
+        "按词典视图没有日期可选：{footer}"
+    );
+    assert!(
+        footer.contains("滚动"),
+        "按词典视图 ↑↓ 应提示滚动：{footer}"
+    );
+}
+
+/// 窗口变大后滚动上限变小：旧偏移要被夹回，绘制、日历命中区与焦点矩形
+/// 继续读同一个生效偏移（否则日历画在顶部、命中区却按旧偏移全部消失）。
+#[test]
+fn growing_the_terminal_clamps_stats_scroll_and_keeps_calendar_clickable() {
+    let (_fixture, mut app) = test_app(MINIMUM);
+    press(&mut app, KeyCode::Char('4'));
+    app.apply_action(app::Action::StatsScroll(1000));
+    assert!(app.stats_scroll > 0, "60×20 下统计正文应能滚动");
+    let (year, month) = app.stats_month;
+
+    app.set_viewport(area_of(WIDE));
+    assert_eq!(app.stats_scroll, 0, "窗口变大后滚动偏移应夹回 0");
+
+    let targets = typewords_tui::ui::hit::targets(&app, area_of(WIDE));
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, 12).expect("本月 12 号");
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.action == app::Action::StatsSelectDay(date)),
+        "日历日期应有命中区"
+    );
+    assert!(
+        focus::focused_rect(&app, area_of(WIDE)).is_some(),
+        "选中的日期应有高亮矩形"
+    );
+}
+
 /// 60×20 的短终端上，选中月末那天后正文要滚到含它的那一段：选中日的
 /// 高亮与数字都画得出来，正文最后一列让给滚动条。
+///
+/// 先把正文滚到底再选日期：月中/月末所在的周在日历里的行随月份变化
+/// （30 天且 1 号靠后的月份，月末行可能本来就在首屏内），不能假设
+/// `stats_scroll` 在选日期前一定是 0。
 ///
 /// 旧实现用底部一行写「↓ 还有 N 行」，恰好会盖掉正文最后一行；统一成
 /// 滚动条后正文占满分区，滚动提示不再占用任何正文行。
@@ -1148,6 +1216,7 @@ fn narrow_stats_dict_view_left_stays_in_content() {
 fn stats_selected_day_stays_visible_next_to_the_scrollbar() {
     let (_fixture, mut app) = test_app(MINIMUM);
     press(&mut app, KeyCode::Char('4'));
+    app.apply_action(app::Action::StatsScroll(1000));
     let (year, month) = app.stats_month;
     let last = (1..=31)
         .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))

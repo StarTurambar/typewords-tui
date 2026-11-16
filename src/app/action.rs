@@ -627,7 +627,6 @@ impl App {
     pub(crate) fn move_selection(&mut self, delta: i32) {
         match self.screen {
             Screen::DictPicker => self.move_dict_cursor(delta),
-            Screen::Stats => self.scroll_stats(delta),
             Screen::Settings => self.move_settings_cursor(delta),
             Screen::AdvFsrs => self.move_adv_fsrs_cursor(delta),
             Screen::Flows => self.move_flow_edit_cursor(delta),
@@ -847,24 +846,17 @@ impl App {
     fn scroll_help(&mut self, delta: i32) {
         // 上限按当前分页、当前终端尺寸下的实际屏幕行数算，而不是写死 80——
         // 写死的值在条目变多时会截断，条目变少时又会滚过头。三个分页长度
-        // 不同、正文还会折行，必须现算。
-        let max = crate::ui::help::max_scroll(self) as i32;
-        // 从「实际生效的偏移」开始加减：窗口变高后 max 会变小，旧偏移可能
-        // 已经越界；若直接从旧值加减，第一次 ↑ 会被 clamp 回原位，看起来像
-        // 按键失灵。
-        let current = (self.help_scroll as i32).min(max);
-        self.help_scroll = (current + delta).clamp(0, max) as u16;
+        // 不同、正文还会按折行，必须现算。
+        let max = crate::ui::help::max_scroll(self);
+        self.help_scroll = scroll_by(self.help_scroll, delta, max);
     }
 
     fn scroll_stats(&mut self, delta: i32) {
         // 上限 = 总行数 - 视口行数：内容不足一屏时是 0，按不出任何滚动。
         // 旧实现用「总行数 - 1」，没有溢出也能一直按 ↓ 把正文滚成只剩最后
         // 一行；而且行数按写死的 80 列算，窗口一变上限就错。
-        let max = crate::ui::stats::max_scroll(self) as i32;
-        // 从实际生效的偏移开始加减：窗口变高后 max 会变小，旧偏移可能已经
-        // 越界，直接从旧值加会先被 clamp 吃掉一次按键。
-        let current = (self.stats_scroll as i32).min(max);
-        self.stats_scroll = (current + delta).clamp(0, max.max(0)) as u16;
+        let max = crate::ui::stats::max_scroll(self);
+        self.stats_scroll = scroll_by(self.stats_scroll, delta, max);
     }
 
     /// 切换统计页的视图：日历 / 按词典。
@@ -992,6 +984,15 @@ impl App {
         let index = ids.iter().position(|id| *id == current).unwrap_or(0);
         self.boot.settings.theme = ids[(index + 1) % ids.len()].clone();
     }
+}
+
+/// 以**实际生效的偏移**为基准做一次滚动：窗口变高后 max 会变小，旧偏移
+/// 可能已经越界；若直接从旧值加减，第一次按键会被 clamp 回原位，看起来
+/// 像按键失灵。帮助页与统计页共用这一条。
+fn scroll_by(current: u16, delta: i32, max: u16) -> u16 {
+    let max = max as i32;
+    let current = (current as i32).min(max);
+    (current + delta).clamp(0, max) as u16
 }
 
 /// 某年某月的最后一天（统计页日历边界用）。

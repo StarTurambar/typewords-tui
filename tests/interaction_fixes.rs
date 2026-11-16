@@ -746,6 +746,63 @@ fn help_active_tab_uses_the_accent_selection_language() {
     );
 }
 
+/// 分页条底色必须覆盖整块，包括宽字符（CJK）后面的续接格。
+///
+/// 先铺底色再画字时，`Buffer::set_stringn` 会把宽字符的续接格 `reset()`，
+/// 块面上留下与文字同宽的竖条空洞；底色只能在文字之后用 `set_style` 补。
+/// `TestBackend` 的 diff 会跳过续接格，所以这里直接检查渲染后的帧缓冲。
+#[test]
+fn help_tab_highlight_covers_wide_char_continuation_cells() {
+    fn tab_row_frame(
+        app: &app::App,
+        width: u16,
+        height: u16,
+    ) -> (Rect, Vec<ratatui::style::Color>) {
+        let mut captured: Option<ratatui::buffer::Buffer> = None;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                app.render(frame);
+                captured = Some(frame.buffer_mut().clone());
+            })
+            .expect("draw");
+        let buffer = captured.expect("frame buffer");
+        let tab = typewords_tui::ui::hit::targets(app, Rect::new(0, 0, width, height))
+            .into_iter()
+            .find(|target| matches!(target.action, Action::HelpSelectTab(_)))
+            .expect("应有分页标签目标");
+        let colors = (tab.rect.x..tab.rect.right())
+            .map(|x| buffer.cell((x, tab.rect.y)).expect("cell").bg)
+            .collect();
+        (tab.rect, colors)
+    }
+
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.set_viewport(Rect::new(0, 0, 120, 40));
+    press(&mut app, KeyCode::Char('?'));
+    let theme = app.theme();
+
+    // 焦点在导航栏：selection 底色也要覆盖续接格。
+    press(&mut app, KeyCode::Tab);
+    let (rect, colors) = tab_row_frame(&app, 120, 40);
+    assert_eq!(colors.len(), rect.width as usize);
+    assert!(
+        colors.iter().all(|bg| *bg == theme.selection),
+        "selection 底色应覆盖整块（含宽字符续接格）：{colors:?}"
+    );
+
+    // 焦点回内容区：强调色底色同样覆盖整块。
+    press(&mut app, KeyCode::Tab);
+    let (rect, colors) = tab_row_frame(&app, 120, 40);
+    assert_eq!(colors.len(), rect.width as usize);
+    assert!(
+        colors.iter().all(|bg| *bg == theme.accent),
+        "强调色底色应覆盖整块（含宽字符续接格）：{colors:?}"
+    );
+}
+
 /// 练习中打开的整屏帮助没有焦点模型，当前分页仍是强调色高亮。
 #[test]
 fn practice_help_active_tab_is_highlighted_with_accent() {

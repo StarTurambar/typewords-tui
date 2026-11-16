@@ -325,9 +325,12 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
         // 分页已经到边时这一下 `←` / `→` 不再属于分页条：交给下面的焦点模型，
         // 宽屏内容区最左再按 `←` 就能回侧栏（与其它页面「到左边缘 `←` 进侧栏」
         // 同一套语义）。整屏帮助没有侧栏，到边仍由 `help_tab_action` 吞掉。
-        if !help_tab_at_edge(app, key)
-            && let Some(action) = help_tab_action(app, key)
-        {
+        //
+        // 焦点导航被暂时让位时（词条搜索框仍有焦点等 `focus::enabled` 为假
+        // 的状态）不能放行：`focus_action` 返回 None，末尾的 `HelpBack` 兜底
+        // 会把边上的 `←` / `→` 变成退出帮助页；此时仍按分页键吞掉。
+        let edge_belongs_to_focus = help_tab_at_edge(app, key) && crate::ui::focus::enabled(app);
+        if !edge_belongs_to_focus && let Some(action) = help_tab_action(app, key) {
             return Some(action);
         }
         return match key.code {
