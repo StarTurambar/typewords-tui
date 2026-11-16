@@ -221,6 +221,27 @@ fn overflowing_help_draws_a_scrollbar_and_stops_at_the_bottom() {
     );
 }
 
+/// 帮助页刚向下滚一行时，滚动条顶部仍要有可点的上滚轨道。
+///
+/// 按比例取整会让前几个偏移的滑块贴顶；旧的 `↑` 指示器在 offset > 0 时
+/// 一直可点，换成滚动条后不能丢掉这条鼠标回滚路径。
+#[test]
+fn help_scrollbar_can_scroll_back_up_right_after_the_first_down() {
+    let size = (80, 24);
+    let area = area_of(size);
+    let (_fixture, mut app) = app_of(size);
+    press(&mut app, KeyCode::Char('?'));
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.help_scroll, 1);
+
+    let up = typewords_tui::ui::hit::targets(&app, area)
+        .into_iter()
+        .find(|target| target.action == Action::HelpScroll(-1))
+        .expect("滚了一行后顶部应有上滚轨道");
+    click(&mut app, area, up.rect);
+    assert_eq!(app.help_scroll, 0, "点上滚轨道应回到顶部");
+}
+
 /// 统计页溢出：点滚动条轨道一次滚一行，滚动上限按视口现算。
 #[test]
 fn overflowing_stats_scrolls_and_its_track_moves_one_row() {
