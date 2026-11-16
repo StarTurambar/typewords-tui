@@ -516,10 +516,18 @@ fn focus_hints(app: &App, area: Rect) -> Option<Vec<(&'static str, String)>> {
         "触发"
     };
     let esc = if home { "取消" } else { "返回" };
+    // 统计页内容区的方向键是在日历里选日期，不是通用的「移动」；提示跟着
+    // 页面语义走，用户才知道上下键换的是哪一天。焦点在导航栏时仍是「移动」。
+    let move_label = if app.screen == Screen::Stats && pane == Some(crate::ui::focus::Pane::Content)
+    {
+        "选日期"
+    } else {
+        "移动"
+    };
     // tab 放在末尾：底栏太窄时从尾部丢弃，先保住「选中 / 移动 / enter / esc」。
     let mut hints = vec![
         ("选中", label),
-        ("↑↓←→", "移动".to_string()),
+        ("↑↓←→", move_label.to_string()),
         ("enter", enter.to_string()),
         ("esc", esc.to_string()),
     ];
@@ -561,7 +569,9 @@ pub fn hints_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("+/-", "每日词数"),
             ("esc", "返回"),
         ],
-        Screen::Stats => &[("↑↓", "滚动"), ("esc", "返回")],
+        // 方向键在日历里选日期，滚动交给滚轮；有焦点时底栏走 focus_hints，
+        // 这一份是「没有选中项」时的回退提示，同样不能写成「↑↓ 滚动」。
+        Screen::Stats => &[("↑↓←→", "选日期"), ("滚轮", "滚动"), ("esc", "返回")],
         Screen::Settings => &[("↑↓", "选择"), ("enter", "修改"), ("esc", "保存返回")],
         Screen::WordTest => &[
             ("1~4", "选择"),

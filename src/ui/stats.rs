@@ -27,6 +27,8 @@ struct StatsLayout {
     tiles: Rect,
     section: Rect,
     list: Rect,
+    /// 滚动提示的独立一行；内容区太矮、没留出这一行时为 None。
+    hint: Option<Rect>,
     tile_columns: usize,
     tile_height: u16,
     visible: usize,
@@ -56,18 +58,30 @@ fn layout(_app: &App, content: Rect) -> StatsLayout {
         1,
     );
 
-    let mut list_height = content.bottom().saturating_sub(section.bottom());
-    // 底部留一行放滚动提示
-    if list_height > 1 {
-        list_height -= 1;
-    }
+    let raw_height = content.bottom().saturating_sub(section.bottom());
+    // 底部留一行放滚动提示：提示必须画在正文之外，否则会盖掉最后一行
+    // （选中日期正好滚到那一行时会被「↓ 还有 N 行」直接冲掉）。
+    let list_height = if raw_height > 1 {
+        raw_height - 1
+    } else {
+        raw_height
+    };
     let list = Rect::new(content.x, section.bottom(), content.width, list_height);
+    let hint = (raw_height > 1 && list_height > 0).then(|| {
+        Rect::new(
+            content.x,
+            content.bottom().saturating_sub(1),
+            content.width,
+            1,
+        )
+    });
 
     StatsLayout {
         header,
         tiles,
         section,
         list,
+        hint,
         tile_columns,
         tile_height,
         visible: list_height as usize,
@@ -77,6 +91,48 @@ fn layout(_app: &App, content: Rect) -> StatsLayout {
 /// 下方内容区的行数（滚动边界用）。
 pub fn body_line_count(app: &App) -> usize {
     body_lines(app, 80, &app.theme()).len()
+}
+
+/// 日历里选中日期在正文中的行号：月份标题与星期表头各占一行，
+/// 之后每一行是一周。
+fn selected_day_row(app: &App) -> Option<usize> {
+    let (year, month) = app.stats_month;
+    let day = app.stats_day;
+    if day.year() != year || day.month() != month {
+        return None;
+    }
+    let grid = calendar_grid(year, month)?;
+    let cell = grid.leading + day.day() as usize - 1;
+    Some(2 + cell / 7)
+}
+
+/// 让日历里选中的那天落在可视范围内时应设的滚动偏移。
+///
+/// 统计页的方向键只移动选中日期、不再滚动正文，但滚轮可能已经把日历滚出
+/// 视野；每次移动或翻月后用它把选中的那一行滚回来，避免「选中了却看不见」。
+/// 按词典视图没有日历，返回当前偏移。
+pub fn scroll_to_selected_day(app: &App) -> u16 {
+    if app.stats_by_dict {
+        return app.stats_scroll;
+    }
+    let shell = shell::layout(app.viewport, Nav::Stats);
+    let layout = layout(app, shell.content);
+    let Some(row) = selected_day_row(app) else {
+        return app.stats_scroll;
+    };
+    if layout.visible == 0 {
+        return app.stats_scroll;
+    }
+    let current = app.stats_scroll as usize;
+    let next = if row < current {
+        row
+    } else if row >= current + layout.visible {
+        row + 1 - layout.visible
+    } else {
+        current
+    };
+    let max = body_line_count(app).saturating_sub(1);
+    next.min(max) as u16
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -159,7 +215,10 @@ fn calendar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("    ", Style::default().fg(theme.dim)),
-        Span::styled("← → 选日期   , . 翻月", Style::default().fg(theme.dim)),
+        Span::styled(
+            "↑↓←→ 选日期   滚轮滚动   , . 翻月",
+            Style::default().fg(theme.dim),
+        ),
     ]));
 
     // 表头与日期列同宽（5 列），按显示宽度右对齐，避免中文表头错位
@@ -533,7 +592,9 @@ fn render_body(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme
             ),
         );
     }
-    if total > layout.visible {
+    if total > layout.visible
+        && let Some(hint) = layout.hint
+    {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 format!(
@@ -542,12 +603,7 @@ fn render_body(app: &App, frame: &mut Frame, layout: &StatsLayout, theme: &Theme
                 ),
                 Style::default().fg(theme.dim),
             )),
-            Rect::new(
-                layout.list.x,
-                layout.list.bottom().saturating_sub(1),
-                layout.list.width,
-                1,
-            ),
+            hint,
         );
     }
 }

@@ -2,6 +2,7 @@
 
 mod common;
 
+use chrono::Datelike;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
 
@@ -1168,15 +1169,36 @@ fn stats_page_switches_views_and_navigates_the_calendar() {
     press(&mut app, KeyCode::Char('t'));
     assert_eq!(app.screen, app::Screen::Stats);
 
-    let day = app.stats_day;
+    // 方向键按日历格子走：先挑本月第二周一个左右都有日期的日子。
+    let (year, month) = app.stats_month;
+    let date = (8..=14)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
+        .expect("本月第二周应有左右都有日期的日子");
+    app.select_stats_day(date);
     press(&mut app, KeyCode::Right);
-    assert_eq!(app.stats_day, day + chrono::Duration::days(1));
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(1),
+        "→ 应选右边一天"
+    );
     press(&mut app, KeyCode::Left);
-    assert_eq!(app.stats_day, day);
+    assert_eq!(app.stats_day, date, "← 应选回左边一天");
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(7),
+        "↓ 应选下面一周的同一天"
+    );
 
     let (year, month) = app.stats_month;
+    let next_month = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
     press(&mut app, KeyCode::Char('.'));
-    assert_eq!(app.stats_month, (year, month + 1), "应翻到下个月");
+    assert_eq!(app.stats_month, next_month, "应翻到下个月");
 
     assert!(!app.stats_by_dict);
     press(&mut app, KeyCode::Char('v'));
