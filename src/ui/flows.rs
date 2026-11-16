@@ -42,7 +42,7 @@ pub fn layout(app: &App, content: Rect) -> FlowsLayout {
     let list = columns[0];
     let offset = widgets::list_offset(
         app.flow_cursor,
-        app.flow_entries().len(),
+        app.flow_entry_count(),
         list.height as usize,
     );
     FlowsLayout {

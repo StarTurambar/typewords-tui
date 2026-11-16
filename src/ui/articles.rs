@@ -18,13 +18,9 @@ use crate::ui::widgets;
 
 /// 书本 / 文章列表页的布局。
 pub struct ArticlesLayout {
-    /// 左：书本列表（带边框的整块面板）
-    pub books: Rect,
-    /// 右：文章列表（带边框的整块面板）
-    pub articles: Rect,
-    /// 左：书本列表的滚动信息
+    /// 左：书本列表（带边框的整块面板 + 滚动信息）
     pub books_list: ListPane,
-    /// 右：文章列表的滚动信息
+    /// 右：文章列表（带边框的整块面板 + 滚动信息）
     pub articles_list: ListPane,
 }
 
@@ -84,8 +80,6 @@ fn list_pane(rect: Rect, total: usize, cursor: usize) -> ListPane {
 pub fn layout(app: &App, content: Rect) -> ArticlesLayout {
     let (books, articles) = columns(content);
     ArticlesLayout {
-        books,
-        articles,
         books_list: list_pane(books, app.article_books.len(), app.article_book_cursor),
         articles_list: list_pane(articles, app.article_list.len(), app.article_cursor),
     }
@@ -198,7 +192,7 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                 ])
             })
             .collect();
-        render_pane(frame, &layout.books_list, " 书本 ", &books, theme);
+        render_pane(frame, &layout.books_list, " 书本 ", books, theme);
 
         // 右：文章列表
         let articles: Vec<Line<'static>> = app
@@ -228,16 +222,19 @@ pub fn render_articles(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
                 ])
             })
             .collect();
-        render_pane(frame, &layout.articles_list, " 文章 ", &articles, theme);
+        render_pane(frame, &layout.articles_list, " 文章 ", articles, theme);
     });
 }
 
 /// 画一栏带边框列表：边框 + 从滚动偏移开始的可见行 + 右侧滚动条。
+///
+/// 行按值传入：只把可见的那一段 move 进一个 `Paragraph`，避免逐行 clone
+/// 已构造好的 `Line`，也避免每行一个 widget。
 fn render_pane(
     frame: &mut Frame,
     pane: &ListPane,
     title: &str,
-    lines: &[Line<'static>],
+    lines: Vec<Line<'static>>,
     theme: &Theme,
 ) {
     if pane.rect.width == 0 || pane.rect.height == 0 {
@@ -245,15 +242,13 @@ fn render_pane(
     }
     frame.render_widget(practice_block(title, theme), pane.rect);
     if pane.list.width > 0 && pane.list.height > 0 {
-        for (row, line) in lines.iter().enumerate().skip(pane.offset) {
-            let y = pane.list.y + (row - pane.offset) as u16;
-            if y >= pane.list.bottom() {
-                break;
-            }
-            frame.render_widget(
-                Paragraph::new(line.clone()),
-                Rect::new(pane.list.x, y, pane.list.width, 1),
-            );
+        let visible: Vec<Line<'static>> = lines
+            .into_iter()
+            .skip(pane.offset)
+            .take(pane.visible)
+            .collect();
+        if !visible.is_empty() {
+            frame.render_widget(Paragraph::new(visible), pane.list);
         }
     }
     widgets::scrollbar(
