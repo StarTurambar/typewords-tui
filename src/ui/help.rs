@@ -1,7 +1,9 @@
 //! 帮助页：快捷键 / 常见问题 / 关于与反馈三个分页。
 //!
 //! 分页条固定在内容区顶部：内容区焦点下 `←` / `→`（`h` / `l` 别名）切换，
-//! 焦点在导航栏时方向键仍归焦点模型，鼠标点标签也可；
+//! 分页到边的那一下放行给焦点模型（宽屏内容区最左再 `←` 回侧栏，与其它
+//! 页面同一套语义），焦点在导航栏时方向键仍归焦点模型，鼠标点标签也可；
+//! 当前分页整块强调色高亮，与全站「当前选中项」同一套语言。
 //! 「快捷键」宽屏分两栏（练习 / 导航），其余分页单栏，`↑` / `↓`、PgUp / PgDn
 //! 与滚轮滚动。高度不足时优先显示前面的内容，右侧给出 `↑` / `↓` 指示器。
 //!
@@ -311,9 +313,20 @@ fn render_body(app: &App, frame: &mut Frame, content: Rect, theme: &Theme) {
         return;
     }
     let layout = layout(content);
+    // 键盘在本页内容区（含练习中打开的整屏帮助，那里没有焦点模型）时，
+    // 当前分页与全站其它页面的「当前选中项」一样整块强调色高亮；焦点进
+    // 导航栏后让位成 selection 底色——和设置页的当前行、侧栏的当前项同一套。
+    let focused = crate::ui::focus::pane(app) != Some(crate::ui::focus::Pane::Nav);
     // 整屏帮助没有底栏，按键提示只能画在分页条右侧；套外壳时底栏已经有一份
     // 同样的提示（`hints_for(Screen::Help)`），不重复占位。
-    render_tabs(frame, &layout, app.help_tab, theme, app.in_typing_session());
+    render_tabs(
+        frame,
+        &layout,
+        app.help_tab,
+        focused,
+        theme,
+        app.in_typing_session(),
+    );
     let body = layout.body;
     if body.height == 0 {
         return;
@@ -353,11 +366,23 @@ fn render_body(app: &App, frame: &mut Frame, content: Rect, theme: &Theme) {
     render_scroll_indicators(frame, body, theme, offset > 0, offset < max_offset);
 }
 
-/// 分页条：当前分页高亮（selection 底色）；整屏帮助时右侧给出按键提示。
+/// 分页条：当前分页高亮；整屏帮助时右侧给出按键提示。
+///
+/// 高亮用全站统一的两档语言（见 `ui::focus`）：
+///
+/// - `focused`（键盘在本页）：强调色整块 + 反色文字，和设置页当前行、侧栏
+///   当前项一模一样。早期这里只铺 `selection` 底色，深色主题下与背景几乎同色、
+///   高对比主题下更是同色，用户看不出当前停在哪一页。
+/// - 键盘进导航栏后：退回 `selection` 底色，页面自己的高亮让位给导航栏。
+///
+/// 强调色必须**画在文字之后**：`focus::paint` 用 `Buffer::set_style` 只改样式、
+/// 不动字形，既能反色又不吃掉文字；反过来先铺底色再画字，宽字符后面的续接格
+/// 会被 `set_stringn` 重置成默认色，块面上出现一道道空洞。
 fn render_tabs(
     frame: &mut Frame,
     layout: &HelpLayout,
     active: HelpTab,
+    focused: bool,
     theme: &Theme,
     show_hint: bool,
 ) {
@@ -366,7 +391,7 @@ fn render_tabs(
             continue;
         }
         let selected = *tab == active;
-        if selected {
+        if selected && !focused {
             widgets::paint_rect(frame, *rect, theme.selection);
         }
         let text = fit_text(&format!(" {} ", tab.label()), rect.width as usize);
@@ -375,6 +400,9 @@ fn render_tabs(
             style = style.add_modifier(Modifier::BOLD);
         }
         frame.render_widget(Paragraph::new(Span::styled(text, style)), *rect);
+        if selected && focused {
+            crate::ui::focus::paint(frame, *rect, theme);
+        }
     }
     if !show_hint {
         return;
