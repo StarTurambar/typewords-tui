@@ -6,7 +6,8 @@
 //!
 //! 所有套外壳的页面共用同一套两栏规则：导航栏 ↔ 内容区；内容区在宽屏左边缘
 //! 按 ← / 窄屏最顶部按 ↑ 跨栏，Tab 随时换栏。非主页的内容区焦点是页面
-//! 自己的光标（FocusId::Page），移动与激活都交给页面自己的逻辑。
+//! 自己的光标（FocusId::Page），移动与激活都交给页面自己的逻辑；统计页的
+//! 光标是日历里选中的那天，四个方向键都按日历格子移动（见 `move_stats_page`）。
 
 use super::{Action, App, Screen};
 use crate::domain::flow::navigator::NoticeLevel;
@@ -126,7 +127,10 @@ impl App {
         }
         let narrow = focus::nav_orientation(area) == NavOrientation::Horizontal;
         let crosses = match direction {
-            FocusDir::Left => !narrow,
+            // 统计页日历的左边缘是硬边界（行首没有日期），窄屏也允许 ← 直接
+            // 回顶栏的「统计」页签——这是用户视觉上「左边就是页面签」的那条路。
+            // 按词典视图没有日历，维持「窄屏 ← 不跨栏」的通用规则。
+            FocusDir::Left => !narrow || (self.screen == Screen::Stats && !self.stats_by_dict),
             FocusDir::Up => narrow,
             _ => false,
         };

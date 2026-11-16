@@ -5,7 +5,8 @@
 //!   页面自己的光标（词库行 / 设置行 / 日历日期 / 滚动位置）就是 Page 的身份。
 //! - 主页内容区按视觉行分带：上下键在带间移动（永不反向），左右键在带内移动。
 //! - 其它页面内容区：上下键移动页面光标，左右键执行页面的横向操作
-//!   （文章页换栏、统计页选日期），动不了时按几何跨栏。
+//!   （文章页换栏）；统计页的四个方向键都按日历格子选日期（↑/↓ 换周、
+//!   ←/→ 换天，日历左边缘再 ← 进导航栏），动不了时按几何跨栏。
 //! - 宽屏：侧栏竖向；窄屏：顶栏横向。宽屏内容区左边缘 ← 进侧栏，
 //!   窄屏内容区最顶部 ↑ 进顶栏；Tab / Shift+Tab 在任何页面都能换栏。
 //! - 进入任何页面默认选中内容区（主页是主按钮），Esc 在主页取消选中、
@@ -909,9 +910,10 @@ fn settings_arrows_move_the_cursor_and_enter_activates() {
     assert!(app.mode_picker.is_some());
 }
 
-/// 统计页：↑/↓ 滚动正文，←/→ 选日期，Enter 切换视图。
+/// 统计页：方向键按日历格子选日期（↑/↓ 换周、←/→ 换天），不再滚动正文；
+/// 日历左边缘再 ← 进导航栏的「统计」页签，滚轮 / PgUp / PgDn 才滚动正文。
 #[test]
-fn stats_arrows_scroll_and_pick_dates() {
+fn stats_arrows_pick_dates_by_calendar_cells() {
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('4'));
     assert_eq!(focus::pane(&app), Some(Pane::Content));
@@ -924,27 +926,219 @@ fn stats_arrows_scroll_and_pick_dates() {
         theme.accent,
         "日历选中日应整块 accent 高亮"
     );
-    let max_scroll = typewords_tui::ui::stats::body_line_count(&app).saturating_sub(1) as u16;
-    assert!(max_scroll >= 1);
-    press(&mut app, KeyCode::Down);
-    assert_eq!(app.stats_scroll, 1.min(max_scroll));
 
     let (year, month) = app.stats_month;
-    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).expect("month start");
-    app.select_stats_day(first);
+    // 8~14 号覆盖一整周：其中一定有周一到周六之间的日子，左右都有日历格子。
+    let date = (8..=14)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
+        .expect("本月第二周应有左右都有日期的日子");
+    app.select_stats_day(date);
+
     press(&mut app, KeyCode::Right);
-    assert_eq!(app.stats_day.day(), 2, "→ 应选下一天");
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(1),
+        "→ 应选右边那一天"
+    );
     press(&mut app, KeyCode::Left);
-    assert_eq!(app.stats_day.day(), 1, "← 应回上一天");
+    assert_eq!(app.stats_day, date, "← 应回到左面那一天");
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.stats_day,
+        date + chrono::Duration::days(7),
+        "↓ 应选下面那一周的同一列"
+    );
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.stats_day, date, "↑ 应回到上面那一周的同一列");
+    assert_eq!(app.stats_scroll, 0, "方向键选日期不该滚动正文");
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    // 第一周上面没有格子：↑ 停住，不跨月、也不跨栏（宽屏 ↑ 不跨栏）。
+    let first_week = chrono::NaiveDate::from_ymd_opt(year, month, 7).expect("本月 7 号");
+    app.select_stats_day(first_week);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.stats_day, first_week, "第一周上面没有日期，应停住");
+    assert_eq!(app.stats_month, (year, month), "↑ 不该擅自翻月");
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    // 最后一周下面没有格子：↓ 停住，不跨月。
+    let last_day = (1..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .next_back()
+        .expect("本月最后一天")
+        .day();
+    let last_week = chrono::NaiveDate::from_ymd_opt(year, month, last_day).expect("本月最后一天");
+    app.select_stats_day(last_week);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.stats_day, last_week, "最后一周下面没有日期，应停住");
+    assert_eq!(app.stats_month, (year, month), "↓ 不该擅自翻月");
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    // 1 号左边是上月留白：同样回到页面签，而不是跨月退到上月最后一天。
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).expect("本月 1 号");
+    app.select_stats_day(first);
     press(&mut app, KeyCode::Left);
-    assert_eq!(focus::pane(&app), Some(Pane::Nav), "月初再 ← 应进侧栏");
+    assert_eq!(focus::pane(&app), Some(Pane::Nav), "1 号再 ← 应进侧栏");
     assert_eq!(label(&app).as_deref(), Some("统计"));
+    assert_eq!(app.stats_day, first, "← 不该跨月退到上月最后一天");
+    press(&mut app, KeyCode::Right);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    // 周日右边没有格子：→ 停住，不回绕到下一周的周一。
+    let sunday = (8..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| date.weekday().num_days_from_monday() == 6 && date.day() < last_day)
+        .expect("本月应有非月末的周日");
+    app.select_stats_day(sunday);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.stats_day, sunday, "周日右边没有日期，应停住");
+    assert_eq!(app.stats_month, (year, month), "→ 不该翻月");
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+
+    // 周一左边没有格子：再 ← 进侧栏的「统计」页签，而不是回上一周。
+    let monday = (1..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| date.weekday().num_days_from_monday() == 0 && date.day() > 1)
+        .expect("本月应有非 1 号的周一");
+    app.select_stats_day(monday);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav), "周一再 ← 应进侧栏");
+    assert_eq!(label(&app).as_deref(), Some("统计"));
+    assert_eq!(app.stats_day, monday, "← 不该退到上一周的周日");
+
+    // 滚轮 / PgDn 仍负责滚动正文（宽屏从侧栏 → 内容区，按 → 回来）。
+    press(&mut app, KeyCode::Right);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    press(&mut app, KeyCode::PageDown);
+    assert!(app.stats_scroll > 0, "PgDn 仍应滚动正文");
 
     let (_fixture, mut app) = test_app(WIDE);
     press(&mut app, KeyCode::Char('4'));
     assert!(!app.stats_by_dict);
     press(&mut app, KeyCode::Enter);
     assert!(app.stats_by_dict, "统计页 Enter 应切换视图");
+}
+
+/// 统计页：滚轮把日历滚出视野后，方向键选中的日期要自动滚回来——
+/// 选中了却看不见，等于键盘操作没有反馈。
+#[test]
+fn stats_arrows_reveal_the_selected_day_after_scrolling() {
+    let (_fixture, mut app) = test_app(WIDE);
+    press(&mut app, KeyCode::Char('4'));
+    let (year, month) = app.stats_month;
+    let date = (8..=14)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| (1..=5).contains(&date.weekday().num_days_from_monday()))
+        .expect("本月第二周应有左右都有日期的日子");
+    app.select_stats_day(date);
+    app.apply_action(app::Action::StatsScroll(10));
+    assert_eq!(app.stats_scroll, 10, "滚轮 / PgDn 应把正文滚下去");
+    assert!(
+        focus::focused_rect(&app, app.viewport).is_none(),
+        "日历滚出视野后选中日没有高亮矩形"
+    );
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.stats_day, date + chrono::Duration::days(7));
+    assert!(app.stats_scroll < 10, "选中的日期应被滚回视野");
+    assert!(
+        focus::focused_rect(&app, app.viewport).is_some(),
+        "选中的日期应重新可见"
+    );
+}
+
+/// 窄屏统计页：日历左边缘再按 ← 同样回到顶栏的「统计」页签。
+///
+/// 窄屏的导航栏在顶部，常规跨栏用 ↑；但日历的左边缘在视觉上就是「左边
+/// 没有东西」，用户期望它通向页面签，而不是毫无反应。
+#[test]
+fn narrow_stats_left_edge_returns_to_the_topbar() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    let (year, month) = app.stats_month;
+    let monday = (1..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .find(|date| date.weekday().num_days_from_monday() == 0 && date.day() > 1)
+        .expect("本月应有非 1 号的周一");
+    app.select_stats_day(monday);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(focus::pane(&app), Some(Pane::Nav));
+    assert_eq!(label(&app).as_deref(), Some("统计"));
+
+    // 窄屏第一周上面没有日期：↑ 走通用规则回顶栏，也不跨月。
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+    let first_week = chrono::NaiveDate::from_ymd_opt(year, month, 7).expect("本月 7 号");
+    app.select_stats_day(first_week);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Nav),
+        "窄屏第一周再 ↑ 应回顶栏"
+    );
+    assert_eq!(label(&app).as_deref(), Some("统计"));
+    assert_eq!(app.stats_month, (year, month), "↑ 不该擅自翻月");
+}
+
+/// 窄屏按词典视图没有日历：← 不跨栏（维持「窄屏内容区 ← 不跨栏」的通用
+/// 规则），↑ / ↓ 到底时也不会把焦点抢走。
+#[test]
+fn narrow_stats_dict_view_left_stays_in_content() {
+    let (_fixture, mut app) = test_app(NARROW);
+    press(&mut app, KeyCode::Char('4'));
+    app.apply_action(app::Action::StatsToggleView);
+    assert!(app.stats_by_dict);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(
+        focus::pane(&app),
+        Some(Pane::Content),
+        "按词典视图没有日历左边缘，← 不该跨栏"
+    );
+    press(&mut app, KeyCode::Down);
+    assert_eq!(focus::pane(&app), Some(Pane::Content));
+}
+
+/// 60×20 的短终端上，选中日期滚到最后一个可见行时不能被「↓ 还有 N 行」
+/// 盖掉：滚动提示必须画在正文预留的独立行，而不是正文最后一行。
+#[test]
+fn stats_selected_day_is_not_covered_by_the_scroll_hint() {
+    let (_fixture, mut app) = test_app(MINIMUM);
+    press(&mut app, KeyCode::Char('4'));
+    let (year, month) = app.stats_month;
+    let last = (1..=31)
+        .filter_map(|day| chrono::NaiveDate::from_ymd_opt(year, month, day))
+        .next_back()
+        .expect("本月最后一天");
+    app.select_stats_day(last);
+    assert!(app.stats_scroll > 0, "月末应把正文滚到包含选中日的那一段");
+
+    // 选中日被滚到可见区的最后一行。
+    let rect = focus::focused_rect(&app, app.viewport).expect("选中日应有高亮矩形");
+    let theme = app.theme();
+    let buffer = buffer_of(&app, MINIMUM);
+    assert_eq!(
+        buffer.cell((rect.x, rect.y)).expect("cell").bg,
+        theme.accent,
+        "选中日的高亮不能被滚动提示覆盖"
+    );
+
+    let rendered = render_text(&app, MINIMUM);
+    let rows: Vec<&str> = rendered.lines().collect();
+    assert!(
+        rows[rect.y as usize].contains(&format!("{:>3}", last.day())),
+        "选中日的数字应画出来：{}",
+        rows[rect.y as usize]
+    );
+    let stats_shell = shell::layout(app.viewport, Nav::Stats);
+    let hint_y = stats_shell.content.bottom() as usize - 1;
+    assert_ne!(hint_y, rect.y as usize, "提示不应占用正文最后一行");
+    assert!(
+        rows[hint_y].contains("↓ 还有"),
+        "滚动提示应在正文下方的预留行：{}",
+        rows[hint_y]
+    );
 }
 
 /// 帮助页：内容区方向键滚动，Tab 进导航栏；Enter 返回上一层。
