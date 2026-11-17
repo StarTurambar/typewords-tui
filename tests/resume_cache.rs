@@ -152,6 +152,75 @@ fn resuming_practice_restores_the_stat_snapshot() {
     assert_eq!(app.stat.spend, spend_before, "恢复后应保留断点里的用时");
 }
 
+/// 旧版（v1）单词缓存：启动要说明「版本不受支持」，文件原样保留，主页也
+/// 不能一直挂着「上次任务」——否则按 Enter 静默新建，用户无从得知原因。
+#[test]
+fn an_unsupported_practice_cache_explains_itself_instead_of_silently_starting_fresh() {
+    use typewords_tui::domain::flow::navigator::NoticeLevel;
+
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let cache = paths.home.join("practice-word.json");
+    let original = r#"{"version":1,"val":null}"#;
+    std::fs::write(&cache, original).unwrap();
+
+    let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+    assert!(
+        app.toasts
+            .iter()
+            .any(|toast| toast.level == NoticeLevel::Warning && toast.message.contains("不受支持")),
+        "启动时应说明缓存被忽略: {:?}",
+        app.toasts
+            .iter()
+            .map(|toast| &toast.message)
+            .collect::<Vec<_>>()
+    );
+    assert!(cache.is_file(), "不受支持的缓存不应被移动或删除");
+    assert_eq!(
+        std::fs::read_to_string(&cache).unwrap(),
+        original,
+        "不受支持的缓存应原样保留"
+    );
+
+    let text = render_text(&app, 120, 40);
+    assert!(
+        !text.contains("上次任务"),
+        "不可恢复的缓存不该显示「上次任务」: {text}"
+    );
+    assert!(text.contains("今日任务"), "应显示「今日任务」: {text}");
+
+    // 按 Enter 开新任务，而不是停在「看得见断点、续不上」的状态。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice, "应正常开始新任务");
+    assert!(app.session.is_some(), "应建立练习会话");
+}
+
+/// 可反序列化但没有可恢复内容的 v2 缓存（`val:{}`）也不能冒充「上次任务」。
+///
+/// `PracticeCacheCompact` 整体带 `serde(default)`，空对象会得到
+/// `Some(默认值)`；`tw import-web` 也会把这种信封原样写进来。只看
+/// `Option::is_some()` 会重现「主页挂着上次任务、按 Enter 却静默新建」。
+#[test]
+fn a_structurally_empty_practice_cache_is_not_advertised_as_resumable() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let cache = paths.home.join("practice-word.json");
+    let original = r#"{"version":2,"val":{}}"#;
+    std::fs::write(&cache, original).unwrap();
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    let text = render_text(&app, 120, 40);
+    assert!(
+        !text.contains("上次任务"),
+        "没有任务词 / 快照的空壳缓存不该显示「上次任务」: {text}"
+    );
+    assert!(text.contains("今日任务"), "应显示「今日任务」: {text}");
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice, "应正常开始新任务");
+    assert!(app.session.is_some(), "应建立练习会话");
+}
+
 /// 文章跟打：Esc 退出后重启，启动停在主页；进文章页并选中同一篇才续打。
 #[test]
 fn article_practice_progress_persists_and_resumes() {

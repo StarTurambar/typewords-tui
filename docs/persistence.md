@@ -80,17 +80,19 @@
 | `practice-article.json` | 1 | `PRACTICE_ARTICLE_CACHE_VERSION` | `PracticeSaveArticle` |
 | `flows.json` | 无 | — | `localStorage['PracticeFlowV2']` |
 
-除 `flows.json` 是裸结构外，其余 4 份都套信封。写入用 `serde_json::to_string` 的紧凑单行格式（`flows.json` 例外，用 `to_string_pretty`）；手写或格式化编辑不影响读取。读取时机：`dict.json` / `setting.json` / `flows.json` 在启动装载时各读一次；两份断点缓存按需读（首页 `Enter` 尝试恢复、进文章页刷新标记）。
+除 `flows.json` 是裸结构外，其余 4 份都套信封。写入用 `serde_json::to_string` 的紧凑单行格式（`flows.json` 例外，用 `to_string_pretty`）；手写或格式化编辑不影响读取。读取时机：`dict.json` / `setting.json` / `flows.json` 在启动装载时各读一次；两份断点缓存在启动时也各读一次（`refresh_practice_resume` / `refresh_article_resume`，用于提示读不出来的缓存、决定主页是否显示「上次任务」与文章列表是否标「上次第 N 句」），之后按需再读（首页 `Enter` 尝试恢复、进文章页刷新标记）。
 
 ### 2.2 原子写
 
 `src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
 
+`write_atomic_bytes` 是同一路径的字节版本，`copy_atomic` 在它之上做「整份读出 + 原子写入」，供备份与回滚这类「要么完整旧内容、要么原样不动」的场景使用（`std::fs::copy` 会先截断目标，中断就留半截文件）。
+
 因此进程中途被杀不会留下半截 JSON：正式文件要么旧内容、要么新内容。残留的 `.tmp` 不属于任何后续写入，不会被复用或删除，可直接清理；临时名唯一化后，同进程内并发写（存档与词库目录同时落盘）也不会互相截断。原子性只覆盖**单份文件**：`tw doctor` / `tw export-dict` / `tw export-web` 不取锁，读到的每份文件各自完整，但多份文件可能来自不同时刻，需要一致快照就先退出所有实例。
 
 ### 2.3 读取状态 `LoadStatus`
 
-`FileStore::read_envelope` 的约定：文件不存在或只有空白 → 视为缺失（`Ok(None)`，不隔离、不报错）；读取或解析失败 → 隔离；成功返回 `(val, version, updated_at)`。`load_typed` 把结果归类为：
+`FileStore::read_raw` 先只解析信封的版本头（`version` / `updated_at`），版本判定通过后 `decode_val` 才反序列化 `val`。约定：文件不存在或只有空白 → 视为缺失（`Ok(None)`，不隔离、不报错）；读取或版本头解析失败 → 隔离；版本过高 / 缓存版本不符 → 直接归类，不解析 `val`、不移动文件。`load_typed` / `load_cache` 把结果归类为：
 
 | 状态 | 触发条件 | 内存值 | 提示（`Loaded::notice`） |
 | --- | --- | --- | --- |
@@ -99,7 +101,7 @@
 | `VersionTooNew{found,expected}` | `version >` 期望值 | 默认值，原文件保留 | `存档版本过高（…），本次不会覆盖，请升级后使用` |
 | `UnsupportedVersion{found,expected}` | 缓存版本不符（单词缓存 `!= 2`、文章缓存 `!= 1`） | `None`，原文件保留 | `存档版本不受支持（…），已忽略；下次保存会覆盖` |
 
-`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；单词缓存的提示在恢复流程里弹（`restore_practice_from_cache`），文章缓存的在 `refresh_article_resume`（启动与进文章页各一次）；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
+`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
@@ -108,6 +110,8 @@
 ### 2.5 版本策略
 
 没有迁移框架：**低于等于**期望版本直接按当前类型反序列化，缺失字段由各结构体的 `#[serde(default)]` 补默认值；**高于**期望版本才算 `VersionTooNew`。`flows.json` 没有版本概念，解析成功即接受。
+
+版本判定**先于**载荷反序列化：只解析版本头，`version` 过高就直接返回 `VersionTooNew`，不会去解析 `val`。因此高版本存档即使字段结构已被新版本改掉（当前程序读不懂），也仍然原文件保留 + 只读，而不会被误判成「损坏」隔离、再被默认值覆盖。断点缓存同理：版本不符时忽略且不移动文件。
 
 | 文件 | 期望 | `version <` 期望 | `==` | `>` 期望 |
 | --- | --- | --- | --- | --- |
@@ -205,13 +209,15 @@
 
 **写入与删除时机**（`App::save_practice_now` → `store.save_practice`）：开一轮练习立即保存；单词推进、键入错误、自测操作等进度变化排 500 ms 防抖保存；本次 tick 确实累计时长且跨过 30 秒整数倍时再排一次（`should_schedule_periodic_save`）；`Ctrl+C` 与退出程序立即保存；结算 `finish_session` 删除文件。写入失败弹 `保存练习进度失败: …`，不中断练习。
 
-**恢复条件**（`App::try_resume_saved_practice` → `restore_practice_from_cache`，首页 `Enter` 触发，启动时不自动恢复）。任一步不满足就静默放弃、**不删文件**：
+**恢复条件**（`App::try_resume_saved_practice` → `restore_practice_from_cache`，首页 `Enter` 触发；启动时只读一次状态、不自动恢复）。任一步不满足就静默放弃、**不删文件**：
 
 1. 读到 `version == 2` 的缓存（否则走 2.3 的提示与忽略），且当前学习词典存在、已有词表；
 2. `cache_from_compact` 能按当前词典的 `words` 用单词字符串精确匹配还原任务词表（匹配不到的词被丢弃，任务词表全空则放弃），且 `practiceData`、`statStoreData`、`sessionSnapshot` 三者齐备；
 3. 流程游标合法（`Navigator::restore_snapshot`），且断点里的 flow 模式与本次要跑的模式一致。
 
 恢复成功后进入练习页并 Toast「已继续上次练习」。因此换过词库后旧缓存通常无法恢复；版本不符的缓存不被移动，下次保存时被覆盖。
+
+版本不符的缓存不被移动、也不会被删除；损坏的缓存按既有规则隔离为 `*.corrupt-<时间戳>.json`（内容保留，但不在原路径）。两种情况启动时都弹一次 Warning，且主页**不**显示「上次任务」：`App::has_saved_practice` 的判据是「版本可读且含可恢复内容」，不是文件是否存在。否则主页会一直挂着「上次任务」、按 `Enter` 却静默新建，用户无从得知原因。
 
 ## 6. `practice-article.json`（`ArticleCacheEnvelope`，版本 1）
 
@@ -303,7 +309,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 - 顶层 `version > 5` 整体拒绝；缺 `version` / 缺 `val` 对象报错退出。
 - `dict` / `setting`：信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`PracticeSaveWord` 必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。
 - 校验策略是「校验即将落盘的原文」（`validate_envelope`），通过后**原样写入**（`FileStore::write_envelope_raw`），因此未建模字段不会丢，也不会出现「导入成功、下次启动被判损坏」。
-- 覆盖前先把旧文件复制成 `<文件名>.bak-<时间戳>.json`（同一秒重名加 `-2`、`-3`）；多个文件写入途中失败时按备份回滚，错误信息给出备份路径。`.bak` 不自动清理。
+- 覆盖前先把旧文件复制成 `<文件名>.bak-<时间戳>.json`（同一秒重名加 `-2`、`-3`；备份也走原子写，不会留下半截 `.bak`）。多个文件写入途中失败时按备份逆序回滚，恢复同样是原子写。错误信息按实际情况给：一份都没写成就报「没有存档被改动」，写过则分别列出「已回滚: …」与「未能回滚: …」，每一项都带对应的 `.bak`（导入前不存在的存档回滚时删除，没有 `.bak`）——回滚全部失败时磁盘上已是导入后的内容，不会谎称没改动。`.bak` 不自动清理。
 - 文章断点按来源分流：带 `tuiPracticeData` 扩展（TUI 导出）或本身就是 TUI 原生 `practiceData` 的，规范化写入 `practice-article.json`；空占位（`{}` / `null`）不动本地；网页版自身的三级游标没有文章 id，无法映射，报「已丢弃」。
 
 **`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，缺失或不可解析的用空信封 `{"val": {}, "version": N}` 占位，拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。

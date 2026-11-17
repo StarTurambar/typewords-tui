@@ -28,19 +28,19 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "DIR")]
     pub home: Option<PathBuf>,
     /// 直接进入指定词库（id 或 enName；内置词典可用 wordCollect / wordWrong / wordKnown）
-    #[arg(long, value_name = "DICT_ID")]
+    #[arg(long, global = true, value_name = "DICT_ID")]
     pub dict: Option<String>,
     /// 启动时覆盖练习模式（system/free/review/shuffle/identify/dictation/listen）
-    #[arg(long, value_name = "MODE")]
+    #[arg(long, global = true, value_name = "MODE")]
     pub mode: Option<String>,
     /// 启动时覆盖主题（内置 dark/light/high-contrast/midnight/paper/ikb 或 <home>/themes 下的文件名）
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, global = true, value_name = "NAME")]
     pub theme: Option<String>,
     /// 随机种子（复现问题用）
-    #[arg(long, value_name = "N")]
+    #[arg(long, global = true, value_name = "N")]
     pub seed: Option<u64>,
     /// 清空当前练习缓存
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub reset_practice: bool,
     /// 运行日志文件（缺省 <home>/logs/tw-<日期>.log）
     #[arg(long, global = true, value_name = "FILE", conflicts_with = "no_log")]
@@ -443,5 +443,56 @@ mod tests {
             "词数应取有效词数：{dict_line}"
         );
         assert_eq!(progress_line, "学习进度: 6/12 (50%)");
+    }
+
+    /// 全局参数放在子命令前后都要能解析。
+    ///
+    /// 文档示例是 `tw task --seed 42`：`seed` / `dict` / `mode` / `theme` /
+    /// `reset-practice` 早期没有 `global = true`，clap 只认
+    /// `tw --seed 42 task`，用户照抄文档会得到
+    /// `error: unexpected argument '--seed' found`（退出码 2）。
+    #[test]
+    fn global_options_parse_before_and_after_the_subcommand() {
+        for args in [
+            vec!["tw", "task", "--seed", "42"],
+            vec!["tw", "--seed", "42", "task"],
+        ] {
+            let cli = Cli::try_parse_from(&args)
+                .unwrap_or_else(|err| panic!("{args:?} 应能解析，实际报错: {err}"));
+            assert_eq!(cli.seed, Some(42), "{args:?}");
+            assert!(matches!(cli.command, Some(Command::Task)), "{args:?}");
+        }
+
+        let cli = Cli::try_parse_from([
+            "tw",
+            "task",
+            "--dict",
+            "cet4",
+            "--mode",
+            "review",
+            "--theme",
+            "dark",
+            "--seed",
+            "7",
+            "--reset-practice",
+            "--home",
+            "H",
+        ])
+        .expect("子命令之后的全局参数都应被接受");
+        assert_eq!(cli.dict.as_deref(), Some("cet4"));
+        assert_eq!(cli.mode.as_deref(), Some("review"));
+        assert_eq!(cli.theme.as_deref(), Some("dark"));
+        assert_eq!(cli.seed, Some(7));
+        assert!(cli.reset_practice);
+        assert_eq!(cli.home.as_deref(), Some(Path::new("H")));
+
+        // `export-dict` 缺省用全局 `--dict`：写在子命令之后同样要落到 cli.dict。
+        let cli = Cli::try_parse_from(["tw", "export-dict", "--dict", "cet4"])
+            .expect("export-dict 之后也应接受 --dict");
+        assert_eq!(cli.dict.as_deref(), Some("cet4"));
+        assert!(matches!(
+            cli.command,
+            Some(Command::ExportDict { id: None, .. })
+        ));
     }
 }

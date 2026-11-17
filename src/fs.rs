@@ -38,19 +38,41 @@ pub const LOCK_FILE_NAME: &str = ".tw.lock";
 /// 写同一份存档时会互相截断：先写完的那个 `rename` 可能把对方的半截内容
 /// 换到正式文件上，或因临时文件被对方删除而失败（表现为「保存词典失败」）。
 pub fn write_atomic(path: &Path, text: &str) -> Result<()> {
-    write_atomic_with(path, text, |_| {})
+    write_atomic_bytes(path, text.as_bytes())
+}
+
+/// 原子写字节内容：与 `write_atomic` 走同一条路径，供不经过文本的调用方使用。
+pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_atomic_with(path, bytes, |_| {})
+}
+
+/// 原子复制：读出 `from` 的全部字节，再用 `write_atomic_bytes` 写到 `to`。
+///
+/// `fs::copy` 是「打开目标 → 截断 → 逐块写」，中途失败会留下半截目标文件；
+/// 把备份还原成存档时正好相反——需要的是「要么是完整旧内容，要么原样不动」。
+/// 存档都是几百 KB 到几 MB 的 JSON，整份读进内存的代价可以忽略。
+///
+/// 权限位按源文件复制（`fs::copy` 也这样做）：用户手工收紧过 0600 的存档，
+/// 备份与回滚不应把它放宽成 umask 默认值。复制权限失败不影响已写好的内容。
+pub fn copy_atomic(from: &Path, to: &Path) -> Result<()> {
+    let bytes = fs::read(from).with_context(|| format!("读取文件失败: {}", from.display()))?;
+    write_atomic_bytes(to, &bytes)?;
+    if let Ok(metadata) = fs::metadata(from) {
+        let _ = fs::set_permissions(to, metadata.permissions());
+    }
+    Ok(())
 }
 
 /// `write_atomic` 的实现；`before_rename` 只给单测注入「临时文件被外部删除」
 /// 这类故障用，生产路径传空闭包。
-fn write_atomic_with(path: &Path, text: &str, before_rename: impl FnOnce(&Path)) -> Result<()> {
+fn write_atomic_with(path: &Path, bytes: &[u8], before_rename: impl FnOnce(&Path)) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("创建目录失败: {}", parent.display()))?;
     }
     let (tmp, mut file) = create_temp(path)?;
     let written = file
-        .write_all(text.as_bytes())
+        .write_all(bytes)
         .with_context(|| format!("写入临时文件失败: {}", tmp.display()));
     // fsync 失败只说明「不保证已落盘」，本次进度仍然该保存，因此不阻断。
     let _ = file.sync_all();
@@ -227,7 +249,7 @@ mod tests {
         // 上放了一份半截内容。旧实现（固定名 .practice-word.json.tmp）会把这半截
         // 内容 rename 成正式存档；新实现只认自己独占的名字，rename 失败并保留原文。
         let legacy = dir.path().join(".practice-word.json.tmp");
-        let err = write_atomic_with(&target, "new", |tmp| {
+        let err = write_atomic_with(&target, b"new", |tmp| {
             fs::remove_file(tmp).expect("模拟外部删除本次的临时文件");
             fs::write(&legacy, "{ 半截外来内容 }").expect("模拟外部占用旧固定名");
         })
@@ -249,6 +271,42 @@ mod tests {
             "{ 半截外来内容 }",
             "外来文件不能被消费或删除"
         );
+    }
+
+    #[test]
+    fn copy_atomic_restores_the_source_bytes_without_leaving_a_temp_file() {
+        // 回滚走的就是这条路径：目标先被改坏，再从备份整份还原。
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("dict.json.bak-20260101-120000.json");
+        let target = dir.path().join("dict.json");
+        fs::write(&backup, "{\"val\":{},\"version\":4}").unwrap();
+        fs::write(&target, "{ 导入后的内容 }").unwrap();
+
+        copy_atomic(&backup, &target).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "{\"val\":{},\"version\":4}"
+        );
+        assert!(temp_files(dir.path()).is_empty(), "回滚不应留下临时文件");
+    }
+
+    /// `fs::copy` 会保留源文件权限；原子复制也必须如此。
+    #[cfg(unix)]
+    #[test]
+    fn copy_atomic_preserves_source_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("dict.json");
+        let to = dir.path().join("dict.json.bak-20260101-120000.json");
+        fs::write(&from, "{\"val\":{},\"version\":4}").unwrap();
+        fs::set_permissions(&from, fs::Permissions::from_mode(0o600)).unwrap();
+
+        copy_atomic(&from, &to).unwrap();
+
+        let mode = fs::metadata(&to).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "备份/回滚不应放宽源存档的权限");
     }
 
     #[test]

@@ -24,8 +24,8 @@ use crate::domain::statistics::DayTotals;
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
-    BaseState, Dict, PracticeState, SettingState, Statistics, TaskWords, Word, WordPracticeMode,
-    WordPracticeType,
+    BaseState, Dict, PracticeCacheCompact, PracticeState, SettingState, Statistics, TaskWords,
+    Word, WordPracticeMode, WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
 use crate::logging;
@@ -758,6 +758,13 @@ pub struct App {
     pub fatal: Option<String>,
     pub last_activity: i64,
     last_timer_tick: i64,
+    /// 单词断点缓存当前是否可恢复（版本可读且内容非空）。
+    ///
+    /// 主页每次重绘都要问「有没有上次任务」，所以在启动与恢复流程里读一次
+    /// 缓存、把结论存在这里；渲染路径上不碰磁盘。文件存在但版本不受支持或
+    /// 已损坏时为 `false`——否则主页会一直挂着「上次任务」，按 Enter 却
+    /// 静默新建。
+    saved_practice_resumable: bool,
     pending_practice_save: Option<i64>,
     /// 文章跟打进度的延迟保存截止时间。
     pending_article_save: Option<i64>,
@@ -940,6 +947,7 @@ impl App {
             fatal: None,
             last_activity: now,
             last_timer_tick: now,
+            saved_practice_resumable: false,
             pending_practice_save: None,
             pending_article_save: None,
         };
@@ -968,8 +976,7 @@ impl App {
 
         if cli.reset_practice {
             // 两个练习的断点都清：启动参数的用途是「复现问题时清干净」。
-            let _ = app.store.remove_practice();
-            let _ = app.store.remove_practice_article();
+            app.clear_practice_cache();
             app.toast(NoticeLevel::Success, "已清空练习进度");
         } else {
             // 启动固定在主页：断点缓存只作为「继续」入口的数据源，
@@ -980,6 +987,9 @@ impl App {
             // 占位框），两份缓存同时存在时还会叠成「单词会话 + 文章练习」
             // 的非法状态，按 Esc 后没有任何页面能画出来。
             app.refresh_article_resume();
+            // 单词缓存同样先读一次：损坏 / 版本不符的提示要弹出来，主页的
+            // 「上次任务」也不能只看文件在不在。
+            app.refresh_practice_resume();
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -996,22 +1006,45 @@ impl App {
         Ok(app)
     }
 
-    /// 从断点缓存恢复练习会话。
+    /// 读单词断点缓存：顺带弹出读不出来的提示，并刷新
+    /// [`App::has_saved_practice`] 的结论。
     ///
-    /// 返回是否恢复成功——主页按 Enter（启动后第一次，或在同一次运行内）
-    /// 用它决定是接着练还是重新生成任务。
-    fn restore_practice_from_cache(&mut self) -> bool {
+    /// 读缓存只有这一处：启动刷新（`refresh_practice_resume`）与恢复流程
+    /// 共用。提示因此在启动时弹一次；恢复流程里再读时若仍读不出来，也会
+    /// 补一次（文件在同一次运行内被外部改坏的边角情况）。
+    fn load_practice_cache(&mut self) -> Option<PracticeCacheCompact> {
         let loaded = self.store.load_practice();
         if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
-        let Some(compact) = loaded.value else {
-            return false;
-        };
+        // 能反序列化不等于能恢复：`{"val":{}}` 会得到 Some(默认值)，但
+        // `cache_from_compact` 必然拒绝它。主页据此显示「上次任务」，按
+        // Enter 却静默新建，正是本次修复要消掉的幽灵断点。
+        self.saved_practice_resumable = loaded
+            .value
+            .as_ref()
+            .is_some_and(PracticeCacheCompact::has_restorable_content);
+        loaded.value
+    }
+
+    /// 读一次单词断点缓存，刷新 [`App::has_saved_practice`] 的结论。
+    ///
+    /// 启动时调用一次；运行期切换词库也可能经
+    /// `Bootstrapped::normalize_study_progress` 删掉 `practice-word.json`，
+    /// 切换成功后再调一次，主页才不会挂着已经不存在的「上次任务」。
+    fn refresh_practice_resume(&mut self) {
+        let _ = self.load_practice_cache();
+    }
+
+    /// 用已读出的断点缓存恢复练习会话。
+    ///
+    /// 返回是否恢复成功——主页按 Enter（启动后第一次，或在同一次运行内）
+    /// 用它决定是接着练还是重新生成任务。
+    fn restore_practice_from_cache(&mut self, compact: &PracticeCacheCompact) -> bool {
         let Some(dict) = self.boot.base.study_dict() else {
             return false;
         };
-        let Some(cache) = cache_from_compact(&compact, &dict.words) else {
+        let Some(cache) = cache_from_compact(compact, &dict.words) else {
             return false;
         };
         let flow = match self.flow_store.flows.get(&cache.session_snapshot.flow_id) {
@@ -1045,8 +1078,7 @@ impl App {
             return false;
         }
         // 先看一眼断点里的模式，对不上就别费劲恢复。
-        let loaded = self.store.load_practice();
-        let Some(compact) = loaded.value else {
+        let Some(compact) = self.load_practice_cache() else {
             return false;
         };
         let Some(dict) = self.boot.base.study_dict() else {
@@ -1062,7 +1094,7 @@ impl App {
         if flow.mode != mode {
             return false;
         }
-        if !self.restore_practice_from_cache() {
+        if !self.restore_practice_from_cache(&compact) {
             return false;
         }
         self.toast(NoticeLevel::Info, "已继续上次练习");
@@ -1095,8 +1127,9 @@ impl App {
         let mut cache = session.build_cache();
         cache.stat_store_data = self.stat.clone();
         let compact = cache_to_compact(&cache);
-        if let Err(err) = self.store.save_practice(Some(&compact)) {
-            self.toast(NoticeLevel::Error, format!("保存练习进度失败: {err}"));
+        match self.store.save_practice(Some(&compact)) {
+            Ok(()) => self.saved_practice_resumable = true,
+            Err(err) => self.toast(NoticeLevel::Error, format!("保存练习进度失败: {err}")),
         }
         self.pending_practice_save = None;
     }
@@ -1106,8 +1139,15 @@ impl App {
     /// 「清空当前练习进度」与 `--reset-practice` 共用此函数——两者的用途
     /// 都是「从干净状态开始」，留着半个文章的跟打进度没意义。
     pub fn clear_practice_cache(&mut self) {
-        let _ = self.store.remove_practice();
-        let _ = self.store.remove_practice_article();
+        match self.store.remove_practice() {
+            Ok(()) => self.saved_practice_resumable = false,
+            // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
+            // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
+            Err(err) => logging::error(format!("清空单词练习缓存失败: {err}")),
+        }
+        if let Err(err) = self.store.remove_practice_article() {
+            logging::error(format!("清空文章练习缓存失败: {err}"));
+        }
         self.pending_practice_save = None;
         self.pending_article_save = None;
         self.article_resume = None;
@@ -1170,13 +1210,14 @@ impl App {
 
     // ── 统计 / 任务预览 ──────────────────────────────────────────────────
 
-    /// 是否有未完成的单词练习进度（断点缓存存在）。
+    /// 是否有**可恢复**的单词练习进度（断点缓存版本可读且内容非空）。
     ///
     /// 主页据此把「今日任务」改成「上次任务」——对齐上游 `words.vue` 的
-    /// `isSaveData`。只查文件在不在，不解析内容：主页每次重绘都问一次，
-    /// 解析整个缓存太贵。
+    /// `isSaveData`。只看文件在不在会把版本不受支持 / 已损坏的缓存也算成
+    /// 断点：主页一直显示「上次任务」，按 Enter 却静默新建。结论由
+    /// `load_practice_cache` 在启动与恢复流程里更新，渲染路径上不碰磁盘。
     pub fn has_saved_practice(&self) -> bool {
-        self.store.practice_exists()
+        self.saved_practice_resumable
     }
 
     /// 是否有未完成的文章跟打进度。
@@ -1484,7 +1525,12 @@ impl App {
         // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
         // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
         self.pending_practice_save = None;
-        let _ = self.store.remove_practice();
+        match self.store.remove_practice() {
+            Ok(()) => self.saved_practice_resumable = false,
+            // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
+            // 而不是谎称「没有上次任务」。
+            Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),
+        }
         self.refresh_stats();
         self.refresh_task_preview();
     }
@@ -2321,6 +2367,13 @@ impl App {
     /// 内置流程就是它对应的练习模式：启用它必须把模式写回设置并落盘，
     /// 否则界面说「已切回内置流程」、实际练习仍按旧模式跑。
     fn activate_flow(&mut self) {
+        // 编辑态下 `Enter` 是误按：`focus_action` 把它统一翻成 `ActivateFocus`，
+        // 先于页面键位生效，而编辑键位里根本没有它。放过去就会静默换掉
+        // 「启用中的流程」并写 `flows.json`，用户其实只是在改结构。
+        if self.flow_editing {
+            self.toast(NoticeLevel::Warning, "编辑中，按 Esc 退出编辑后再启用");
+            return;
+        }
         let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
             return;
         };
@@ -3031,6 +3084,8 @@ impl App {
                     return;
                 }
                 self.save_dict_now();
+                // select_dict 可能校正进度并删掉练习断点。
+                self.refresh_practice_resume();
             }
         }
         self.open_words();
@@ -3463,6 +3518,8 @@ impl App {
                     return;
                 }
                 self.save_dict_now();
+                // select_dict 可能校正进度并删掉练习断点。
+                self.refresh_practice_resume();
                 self.refresh_task_preview();
                 self.toast(NoticeLevel::Success, format!("已新建「{name}」"));
             }

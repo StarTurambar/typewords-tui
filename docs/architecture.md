@@ -70,11 +70,11 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 | --- | --- | --- | --- |
 | domain | src/domain/ | 与终端无关的类型、词库、今日任务、FSRS、流程、键入、会话、文章、统计 | 不依赖 app / ui / store / theme，也不引入终端相关 crate；tests/layering.rs 守护 |
 | store | src/store/ | 5 份 JSON 存档的读写、版本校验、损坏隔离 | 依赖 domain 与 fs |
-| theme | src/theme/ | 主题模型、6 套内置主题、用户主题加载与校验 | 不依赖 ratatui，也不依赖 ui |
+| theme | src/theme/ | 主题模型、6 套内置主题、用户主题加载与校验 | 不依赖 app / ui，也不引入终端相关 crate；tests/layering.rs 守护 |
 | fs | src/fs.rs | 原子写（唯一临时名 + fsync + rename）与数据目录锁 | 只依赖 std；domain 与 store 共用，避免两层成环 |
 | app | src/app/ | App 状态机、Action、键鼠映射、焦点、事件循环、保存时机 | 依赖 domain / store / bootstrap / cli / paths；渲染入口调用 ui |
 | ui | src/ui/ | ratatui 布局与绘制、token → Color、鼠标命中 | 只读 App 与 domain 数据，不修改状态 |
-| audio | src/audio/ | 终端响铃、系统 TTS、有道下载与外部播放器 | 只依赖 domain 的设置；子进程不阻塞事件循环 |
+| audio | src/audio/ | 终端响铃、系统 TTS、有道下载与外部播放器 | 只依赖 domain 的设置与 logging；子进程不阻塞事件循环 |
 | logging / crash | src/logging.rs、src/crash.rs | 运行日志（追加写、按启动日期分文件、保留清理）、panic 崩溃报告与 Windows 早退保护 | 只依赖 std + chrono + anyhow；不做业务判断，写日志失败不影响启动 |
 | 入口/装配 | src/main.rs、lib.rs、cli.rs、paths.rs、bootstrap.rs、backup.rs | 解析参数与路径、装载初始状态、分派子命令、网页版备份适配 | 最外层，可依赖所有层 |
 
@@ -290,6 +290,7 @@ App 是唯一的状态持有者。输入分两条路径：
 
 - 从 last_learn_index 向后扫描，跳过忽略集合（已掌握 + 可选的 SIMPLE_WORDS），取 per_day 个新词。
 - 学完判定只看词表本身（effective_length），不看目录登记 length；最后一个词也必须能学到，学完后 complete 置位。
+- 忽略集合只有一份口径：`BaseState::ignore_words_set(ignore_simple_word)`（全小写）。任务生成与结算推进（session.rs 的 advance_dict_progress）都用它并按 `Word::lower` 比较；两边不一致时，词库尾部只剩首字母大写的忽略词（如 CET-4 的 Christ）会让 complete 永不置位。
 - 到期复习按 Local 自然日判断（due <= 今天），按 due 升序取 per_day * ratio 个再洗牌；ratio 为 0 时，学完 / 到末尾仍按至少 1 处理。
 - 无到期且开启随机填充时，从已学范围排除忽略词、本轮新词与已抽中的词，随机补足。
 - create_shuffle_task 用于随机复习：range 上界在尚未学时取整本词表，否则取 last_learn_index。
@@ -393,6 +394,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 ### 7.6 audio / backup / bootstrap / cli
 
 - audio：键音与对错提示音走终端 BEL；单词 / 文章朗读走系统 TTS（Windows 常驻 PowerShell + System.Speech；macOS say；Linux espeak-ng / spd-say）；可选有道发音用系统 curl 下载 mp3 后交外部播放器。被安全软件拦截时本轮静默放弃，不重试。
+- 有道发音的下载 / 播放脚本从环境变量取路径与 URL（`TYPEWORDS_AUDIO_PATH` / `TYPEWORDS_AUDIO_URL`），**不追加在 `-Command` 之后**：Windows PowerShell 会把那里的参数拼进命令文本再解析一次（`$args` 恒为空，URL 里的 `&` 直接 ParserError），`tts` 的音色参数踩过同一个坑。启动前先查解释器、curl 与播放器是否在 PATH 里，缺任何一个或进程起不来都降级回系统 TTS，并写一行运行日志说明缺的是什么。
 - backup：import-web 解析 BackupData v5，按版本与结构逐项校验；覆盖前复制 .bak，多文件写入失败时回滚；export-web 生成网页版可导入的 JSON。文章断点按来源分流：TUI 导出的带 tuiPracticeData 可往返，网页版自己的三级游标因缺文章 id 而丢弃。
 - bootstrap：FileStore + Catalog + ThemeRegistry 装配；readonly 标记；notices；ensure_study_dict；normalize_study_progress。
 - cli：参数与 6 个子命令的入口；parse_mode 接受英文模式名与中文别名；doctor_to / export_dict_to 便于测试断言输出；export-dict 的导出目标解析（内置词典走存档、普通词库走词条文件）也在这里，因为 domain 不能依赖 store。

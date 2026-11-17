@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use typewords_tui::app;
-use typewords_tui::domain::types::{WordPracticeMode, WordPracticeType};
+use typewords_tui::domain::types::{Word, WordPracticeMode, WordPracticeType};
 
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
@@ -77,6 +77,24 @@ fn stale_metadata_fixture() -> common::Fixture {
         serde_json::to_string(&catalog).unwrap(),
     )
     .unwrap();
+    fixture
+}
+
+/// 与 `common::Fixture` 相同，只把词表最后一个词改成首字母大写
+/// （`Word11`），模拟内置 CET-4 里 Christ / Christian / Candy 这类词。
+fn fixture_with_capitalized_tail() -> common::Fixture {
+    let fixture = common::Fixture::new();
+    let path = fixture
+        .assets()
+        .join("dicts")
+        .join("en")
+        .join("word")
+        .join("toy.json");
+    let text = std::fs::read_to_string(&path).expect("读取测试词库");
+    let mut words: Vec<serde_json::Value> = serde_json::from_str(&text).expect("解析测试词库");
+    let last = words.last_mut().expect("测试词库非空");
+    last["word"] = serde_json::json!("Word11");
+    std::fs::write(&path, serde_json::to_string(&words).unwrap()).expect("写入测试词库");
     fixture
 }
 
@@ -199,6 +217,82 @@ fn settling_the_last_group_completes_the_dictionary() {
     assert_eq!(dict.last_learn_index, dict.effective_length());
     assert_eq!(summary.length, 12, "结算的分母应是有效词数");
     assert_eq!(summary.last_learn_index, 12, "结算的分子应夹在有效词数内");
+}
+
+/// 词库尾部只剩「已掌握但首字母大写」的词时也要能学完。
+///
+/// 任务生成用全小写的忽略集合判断「后面没有可学的新词」，结算推进却拿
+/// 原大小写的词去比：`Christ` 这类词一边被跳过、一边数不进忽略项，
+/// `last_learn_index + ignore_count` 永远够不到词数，`complete` 永不置位
+/// ——主页永远停在「差几个词学完」，结算页也永不给「已完成」。
+#[test]
+fn a_tail_of_capitalized_known_words_still_completes_the_dictionary() {
+    let fixture = fixture_with_capitalized_tail();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot
+        .base
+        .known_mut()
+        .expect("应存在「已掌握」词典")
+        .words
+        .push(Word::new("Word11"));
+    app.boot.settings.word_practice_mode = WordPracticeMode::System;
+    app.start_practice();
+    let new_words: Vec<&str> = app
+        .session
+        .as_ref()
+        .expect("应开始练习")
+        .task_words
+        .new
+        .iter()
+        .map(|word| word.word.as_str())
+        .collect();
+    assert_eq!(new_words.len(), 11, "尾部大写词已掌握，只剩 11 个新词");
+    assert!(
+        !new_words.contains(&"Word11"),
+        "已掌握的大写词不该再出现在新词里"
+    );
+    assert!(
+        drive_to_settlement(&mut app, 5000),
+        "11 个新词的会话应在 5000 步内结束"
+    );
+    let dict = app.boot.study_dict().expect("应选中测试词库");
+    assert!(
+        dict.complete,
+        "尾部只剩已掌握的大写词，也应标记「已学完」而不是卡在 11/12"
+    );
+    assert_eq!(dict.last_learn_index, dict.effective_length());
+}
+
+/// 开启「忽略简单词」时同理：尾部只剩首字母大写的简单词也要能学完，
+/// 忽略集合必须与任务生成同源（受 `ignore_simple_word` 影响）。
+#[test]
+fn a_tail_of_capitalized_simple_words_still_completes_the_dictionary() {
+    let fixture = fixture_with_capitalized_tail();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot.base.simple_words.push("Word11".to_string());
+    app.boot.settings.ignore_simple_word = true;
+    app.boot.settings.word_practice_mode = WordPracticeMode::System;
+    app.start_practice();
+    let new_words: Vec<&str> = app
+        .session
+        .as_ref()
+        .expect("应开始练习")
+        .task_words
+        .new
+        .iter()
+        .map(|word| word.word.as_str())
+        .collect();
+    assert_eq!(new_words.len(), 11, "尾部大写简单词被忽略，只剩 11 个新词");
+    assert!(
+        drive_to_settlement(&mut app, 5000),
+        "11 个新词的会话应在 5000 步内结束"
+    );
+    let dict = app.boot.study_dict().expect("应选中测试词库");
+    assert!(
+        dict.complete,
+        "忽略简单词后尾部无可学新词，也应标记「已学完」"
+    );
+    assert_eq!(dict.last_learn_index, dict.effective_length());
 }
 
 /// 「继续」不能让进度跳两格：结算已经推进过一次，第二次推进会把中间整组词

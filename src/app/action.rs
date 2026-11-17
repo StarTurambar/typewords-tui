@@ -910,6 +910,11 @@ impl App {
             Ok(()) => {
                 self.dict_cursor = position;
                 self.save_dict_now();
+                // 切换资源词库会经 `normalize_study_progress` 校正进度，
+                // 必要时删掉练习断点；不让「上次任务」的缓存结论过期。
+                if entry.kind == crate::app::DictEntryKind::Resource {
+                    self.refresh_practice_resume();
+                }
                 self.refresh_task_preview();
                 self.set_screen(Screen::Home);
                 let message = match entry.kind {

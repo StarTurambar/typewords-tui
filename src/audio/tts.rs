@@ -135,15 +135,11 @@ pub fn is_supported() -> bool {
 #[cfg(windows)]
 mod session {
     use std::io::{self, Write};
-    use std::os::windows::process::CommandExt;
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
     use super::{SCRIPT, protocol_line};
-
-    /// `CreateProcess` 的「无窗口」标志：子进程不创建可见的控制台窗口。
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     pub(super) struct Session {
         pub(super) child: Child,
@@ -249,8 +245,8 @@ mod session {
             command.env("TYPEWORDS_TTS_VOICE", voice);
         }
         // 不要用 `-WindowStyle Hidden`：那正是安全软件「隐藏执行 PowerShell」
-        // 规则最典型的匹配特征。CREATE_NO_WINDOW 同样不出窗口。
-        command.creation_flags(CREATE_NO_WINDOW);
+        // 规则最典型的匹配特征。CREATE_NO_WINDOW 同样不出窗口（与有道播放共用）。
+        crate::audio::no_console_window(&mut command);
         command
     }
 }

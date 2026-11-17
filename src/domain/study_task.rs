@@ -49,13 +49,15 @@ pub fn add_random_review_when_no_due(
     }
 
     let mut excluded: HashSet<String> = options.ignore_set.clone();
-    excluded.extend(task_words.new.iter().map(|word| word.word.clone()));
-    excluded.extend(task_words.review.iter().map(|word| word.word.clone()));
+    excluded.extend(task_words.new.iter().map(Word::lower));
+    excluded.extend(task_words.review.iter().map(Word::lower));
 
     let learned_end = options.last_learn_index.min(options.words.len());
     let mut candidates: Vec<Word> = options.words[..learned_end]
         .iter()
-        .filter(|word| !excluded.contains(&word.word))
+        // 忽略集合里全是小写键（`ignore_words_set`），这里也必须按小写比较：
+        // `Christ` 这类首字母大写的已掌握 / 简单词不能重新抽进随机复习。
+        .filter(|word| !excluded.contains(&word.lower()))
         .cloned()
         .collect();
     shuffle(rng, &mut candidates);
@@ -317,6 +319,32 @@ mod tests {
         let mut rng = seeded(7);
         let task = create_study_task(&base, &settings, &mut rng).task_words;
         assert_eq!(task.new.len(), 4, "应按实际词表继续取新词");
+    }
+
+    /// 随机复习填充同样按小写比较忽略集合：`Christ` 这类大写已掌握词不能被抽中。
+    #[test]
+    fn random_review_skips_capitalized_ignored_words() {
+        let mut base = base_with_words(4, 4, 20);
+        base.study_dict_mut().expect("当前词典").words[1] = Word::new("Christ");
+        base.known_mut()
+            .expect("已掌握词典")
+            .words
+            .push(Word::new("Christ"));
+        let settings = SettingState {
+            auto_add_random_review_when_no_due: true,
+            word_review_ratio: 1,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert!(
+            !task.review.iter().any(|word| word.word == "Christ"),
+            "已掌握的大写词不应进入随机复习: {:?}",
+            task.review
+                .iter()
+                .map(|word| word.word.clone())
+                .collect::<Vec<_>>()
+        );
     }
 
     fn base_with_words(count: usize, last_learn_index: usize, per_day: usize) -> BaseState {

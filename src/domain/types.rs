@@ -1071,6 +1071,20 @@ pub struct PracticeCacheCompact {
     pub session_snapshot: Option<PracticeSessionSnapshot>,
 }
 
+impl PracticeCacheCompact {
+    /// 结构上是否具备可恢复的内容（不检查当前词典能否匹配到这些词）。
+    ///
+    /// `PracticeCacheCompact` 整体带 `#[serde(default)]`，因此 `{"val":{}}`
+    /// 也能反序列化成 `Some(默认值)`；只看 `Option::is_some()` 会把这种
+    /// 空壳当成「上次任务」，主页显示断点、按 Enter 却静默新建。
+    pub fn has_restorable_content(&self) -> bool {
+        (!self.task_words_str.new.is_empty() || !self.task_words_str.review.is_empty())
+            && self.practice_data.is_some()
+            && self.stat_store_data.is_some()
+            && self.session_snapshot.is_some()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

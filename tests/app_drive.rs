@@ -580,6 +580,47 @@ fn newer_setting_version_is_not_overwritten() {
     assert_eq!(after, raw, "版本过高的 setting.json 不应被覆盖");
 }
 
+/// 高版本存档的 `val` 与当前程序不兼容时也必须只读：版本判定先于载荷
+/// 解析，否则会被当成损坏隔离，退出时再用默认值覆盖同名存档。
+#[test]
+fn a_newer_archive_with_an_incompatible_payload_is_readonly_and_kept() {
+    let fixture = common::Fixture::new();
+    let raw = r#"{"version":99,"val":{"word":"not-an-object"}}"#;
+    let path = fixture.home().join("dict.json");
+    std::fs::write(&path, raw).unwrap();
+
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    assert!(app.boot.readonly_dict, "版本过高必须进入只读模式");
+    assert!(
+        app.toasts
+            .iter()
+            .any(|toast| toast.message.contains("版本过高")),
+        "应提示版本过高，而不是「已损坏」，实际提示: {:?}",
+        app.toasts
+            .iter()
+            .map(|toast| &toast.message)
+            .collect::<Vec<_>>()
+    );
+
+    // 改内存状态并走正常退出流程：只读守卫应拦住落盘。
+    app.boot.base.word.study_index = 0;
+    app.save_dict_now();
+    press(&mut app, KeyCode::Char('q'));
+    press(&mut app, KeyCode::Char('y'));
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        raw,
+        "版本过高时退出不应覆盖原文件"
+    );
+    let quarantined: Vec<_> = std::fs::read_dir(fixture.home())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
+        .collect();
+    assert!(quarantined.is_empty(), "版本过高不应触发隔离");
+}
+
 #[test]
 fn repeat_custom_count_can_be_edited_and_persists() {
     let fixture = common::Fixture::new();

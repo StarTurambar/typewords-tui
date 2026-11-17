@@ -32,7 +32,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 硬约束（完整目录地图见 [architecture.md · 代码地图](architecture.md#4-代码地图)）：
 
-- `src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，也不引入终端相关 crate；`tests/layering.rs` 守着这条。
+- `src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，也不引入终端相关 crate；`src/theme/` 不依赖 `app` / `ui` 与终端 crate；`tests/layering.rs` 守着这两条。
 - 状态只在 app 层改：非练习键位与鼠标经 `Action` → `App::apply_action`，练习页键盘走 `App::on_practice_key`，启动与 `App::on_tick` 也直接改状态；`ui/` 只读 `App`。
 - 每个页面的 `layout()` 同时服务 `render()` 与命中检测 `targets()`；新增可点击区域必须注册进 `targets()`，`tests/ui_snapshots.rs` 校验两者不漂移。
 - 颜色只来自主题的 13 个 token；存档结构体普遍 `#[serde(default, rename_all = "camelCase")]`（`Card` 保持 ts-fsrs 的 snake_case），新增字段必须带 `default`。
@@ -104,7 +104,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
 | `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录；日志是进程级全局状态，用例串行 |
 | `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
-| `tests/layering.rs` | `src/domain/` 不依赖 `app` / `ui` / `store` / `theme` |
+| `tests/layering.rs` | 分层守卫：`src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，`src/theme/` 不依赖 `app` / `ui`；用 `syn` 解析源码，并自测守卫能识别禁止的 `use`、生命周期 / 字符字面量之后的代码、分组导入与宏体 |
 | `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
 | `tests/typing_keys.rs` | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
 | `tests/fsrs_parity.rs` | 与上游 ts-fsrs 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |

@@ -77,6 +77,69 @@ fn newer_dict_version_is_not_overwritten() {
     assert!(raw.contains("99"));
 }
 
+/// 高版本存档的 `val` 结构可能已经变了。版本判定必须先于载荷解析：
+/// 否则这里会走「损坏」分支隔离原文件，退出时再用默认值覆盖活跃路径。
+#[test]
+fn newer_dict_version_with_incompatible_payload_is_not_quarantined() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    let raw = r#"{"version":99,"val":{"word":"not-an-object"}}"#;
+    std::fs::write(store.file_path("dict.json"), raw).unwrap();
+
+    let loaded = store.load_dict();
+    assert!(matches!(
+        loaded.status,
+        LoadStatus::VersionTooNew {
+            found: 99,
+            expected: 4
+        }
+    ));
+    assert_eq!(
+        std::fs::read_to_string(store.file_path("dict.json")).unwrap(),
+        raw,
+        "版本过高时原文件必须原地保留"
+    );
+    let quarantined: Vec<_> = std::fs::read_dir(fixture.home())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
+        .collect();
+    assert!(quarantined.is_empty(), "版本过高不应触发隔离");
+}
+
+/// `updated_at` 也是会演进的头字段：类型变了不能把高版本存档判成损坏。
+#[test]
+fn newer_dict_version_with_numeric_timestamp_is_not_quarantined() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    let raw = r#"{"version":99,"updated_at":1760000000000,"val":{"word":"not-an-object"}}"#;
+    std::fs::write(store.file_path("dict.json"), raw).unwrap();
+
+    let loaded = store.load_dict();
+    assert!(
+        matches!(
+            loaded.status,
+            LoadStatus::VersionTooNew {
+                found: 99,
+                expected: 4
+            }
+        ),
+        "数字 updated_at 不应影响版本判定，实际: {:?}",
+        loaded.status
+    );
+    assert_eq!(
+        std::fs::read_to_string(store.file_path("dict.json")).unwrap(),
+        raw,
+        "版本过高时原文件必须原地保留"
+    );
+    let quarantined: Vec<_> = std::fs::read_dir(fixture.home())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
+        .collect();
+    assert!(quarantined.is_empty(), "版本过高不应触发隔离");
+}
+
 #[test]
 fn settings_default_when_missing() {
     let fixture = common::Fixture::new();

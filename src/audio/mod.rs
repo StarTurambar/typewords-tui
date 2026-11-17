@@ -100,19 +100,24 @@ pub fn play_wrong(settings: &SettingState) {
 ///
 /// `speed` 是 0.5~3 的倍速，映射到各平台的语速参数。
 pub fn speak(settings: &SettingState, text: &str, speed: f64) {
+    speak_with(settings, text, speed, player::play_remote_pronunciation);
+}
+
+/// 朗读实现；`remote` 可注入，测试用它模拟「有道链路起不来」。
+///
+/// 有道只提供单词发音，且这条链路依赖外部程序与网络：任何一步走不通都必须
+/// **回退到系统 TTS**，否则用户切到有道后得到的是彻底的静默。
+fn speak_with<F>(settings: &SettingState, text: &str, speed: f64, remote: F)
+where
+    F: FnOnce(&str, &str) -> bool,
+{
     if text.trim().is_empty() {
         return;
     }
-    match settings.tts_source.as_str() {
-        "youdao" => {
-            // 有道只提供单词发音；不是单词或下载失败时回退到系统 TTS
-            if player::play_remote_pronunciation(text, settings.sound_type.as_str()) {
-                return;
-            }
-            deliver(text, settings.tts_voice(&settings.sound_type), speed);
-        }
-        _ => deliver(text, settings.tts_voice(&settings.sound_type), speed),
+    if settings.tts_source == "youdao" && remote(text, settings.sound_type.as_str()) {
+        return;
     }
+    deliver(text, settings.tts_voice(&settings.sound_type), speed);
 }
 
 /// 朗读单词发音（手动触发：练习页 `Ctrl+P`、单词测试页 `Ctrl+P`）。
@@ -136,4 +141,80 @@ pub fn speak_sentence(settings: &SettingState, sentence: &str) {
         settings.tts_voice(&settings.sound_type),
         settings.article_sound_speed,
     );
+}
+
+/// Windows 子进程不创建可见的控制台窗口。
+///
+/// 不用 `-WindowStyle Hidden`：那正是安全软件「隐藏执行 PowerShell」规则最
+/// 典型的匹配特征。系统 TTS 与有道播放共用这一处平台粘合，避免两份常量与
+/// 调用各改各的。
+#[cfg(windows)]
+pub(crate) fn no_console_window(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x0800_0000);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn youdao_settings() -> SettingState {
+        SettingState {
+            tts_source: "youdao".to_string(),
+            ..SettingState::default()
+        }
+    }
+
+    /// 开始记录本线程的朗读文本，并清掉可能残留的记录。
+    fn start_recording() {
+        // 单元测试跑在 lib 测试二进制里，没人调用 `App::build_for_test`；
+        // 不静音的话 `deliver` 会真的启动系统 TTS 念出 hello。
+        mute_speech();
+        let _ = take_recorded_speech();
+        record_speech();
+    }
+
+    #[test]
+    fn a_broken_download_pipeline_falls_back_to_system_tts() {
+        start_recording();
+        let seen = std::cell::RefCell::new(None);
+        // 有道链路起不来（缺 curl / 缺播放器 / 解释器起不来）时必须回退，
+        // 否则用户切到有道后只会得到彻底的静默。
+        speak_with(&youdao_settings(), "hello", 1.0, |word, sound_type| {
+            *seen.borrow_mut() = Some((word.to_string(), sound_type.to_string()));
+            false
+        });
+        assert_eq!(
+            seen.borrow().as_ref(),
+            Some(&("hello".to_string(), "us".to_string())),
+            "有道链路应拿到单词与美式 / 英式音标类型"
+        );
+        assert_eq!(
+            take_recorded_speech(),
+            vec!["hello".to_string()],
+            "下载链路失败必须降级回系统 TTS"
+        );
+    }
+
+    #[test]
+    fn a_working_download_pipeline_does_not_double_speak() {
+        start_recording();
+        speak_with(&youdao_settings(), "hello", 1.0, |_, _| true);
+        assert!(
+            take_recorded_speech().is_empty(),
+            "有道链路已经接管时不能再叠一层系统 TTS"
+        );
+    }
+
+    #[test]
+    fn the_remote_pipeline_is_not_touched_with_the_system_source() {
+        start_recording();
+        let called = std::cell::Cell::new(false);
+        speak_with(&SettingState::default(), "hello", 1.0, |_, _| {
+            called.set(true);
+            true
+        });
+        assert!(!called.get(), "系统 TTS 下不该碰有道链路");
+        assert_eq!(take_recorded_speech(), vec!["hello".to_string()]);
+    }
 }
