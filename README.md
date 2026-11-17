@@ -101,7 +101,7 @@ Windows 推荐 **Windows Terminal**，macOS / Linux 用任意支持真彩色的�
 | `tw --seed N` | 固定随机种子（复现问题用） |
 | `tw --reset-practice` | 启动前清空单词 / 文章断点缓存 |
 
-完整参数、目录查找顺序与示例见 [使用手册 · 命令行参考](docs/usage.md#命令行参考)。
+以上参数都是全局参数，放在子命令前后均可（`tw task --seed 42` 与 `tw --seed 42 task` 等价）。完整参数、目录查找顺序与示例见 [使用手册 · 命令行参考](docs/usage.md#命令行参考)。
 
 ## 界面与操作速查
 
