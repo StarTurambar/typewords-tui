@@ -288,11 +288,14 @@ pub fn render_group_picker(
 pub struct CollectPickerLayout {
     pub rect: Rect,
     pub inner: Rect,
-    /// 每个词典一行，与 `dicts` 的顺序一致。
-    pub rows: Vec<Rect>,
+    /// 可见的 (词典下标, 矩形)，只包含真正画出来的行。
+    ///
+    /// 早期实现为全部词典生成矩形，绘制却在提示行前 `break`；于是提示行
+    /// 和弹层下方的空白也被登记成命中区，点它们会改变选中项。
+    pub rows: Vec<(usize, Rect)>,
 }
 
-pub fn collect_picker_layout(dicts_len: usize, area: Rect) -> CollectPickerLayout {
+pub fn collect_picker_layout(dicts_len: usize, cursor: usize, area: Rect) -> CollectPickerLayout {
     let rect = widgets::centered_rect(44, 12, area);
     let inner = Rect::new(
         rect.x + 2,
@@ -307,8 +310,17 @@ pub fn collect_picker_layout(dicts_len: usize, area: Rect) -> CollectPickerLayou
         inner.width,
         inner.height.saturating_sub(2),
     );
-    let rows = (0..dicts_len)
-        .map(|index| Rect::new(list.x, list.y + index as u16, list.width, 1))
+    // 与跳组弹层一样按可视高度截断并跟随光标滚动：
+    // 绘制与命中都只看到这一份「真正画出来的行」。
+    let visible = list.height as usize;
+    let offset = cursor.saturating_sub(visible.saturating_sub(1));
+    let rows = (offset..dicts_len.min(offset + visible))
+        .map(|index| {
+            (
+                index,
+                Rect::new(list.x, list.y + (index - offset) as u16, list.width, 1),
+            )
+        })
         .collect();
     CollectPickerLayout { rect, inner, rows }
 }
@@ -320,7 +332,7 @@ pub fn render_collect_picker(
     dicts: &[(usize, String)],
     cursor: usize,
 ) {
-    let layout = collect_picker_layout(dicts.len(), area);
+    let layout = collect_picker_layout(dicts.len(), cursor, area);
     let rect = layout.rect;
     let inner = layout.inner;
     clear_modal_backdrop(frame, area, rect, theme);
@@ -336,14 +348,13 @@ pub fn render_collect_picker(
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
 
-    for (offset, (_, name)) in dicts.iter().enumerate() {
-        let Some(row) = layout.rows.get(offset).copied() else {
-            break;
+    // 布局已经按可视高度截断，这里直接画它给出的行，不再自己 break——
+    // 否则命中区与画面又会各算一套。
+    for (index, row) in &layout.rows {
+        let Some((_, name)) = dicts.get(*index) else {
+            continue;
         };
-        if row.y >= inner.bottom().saturating_sub(1) {
-            break;
-        }
-        let selected = offset == cursor;
+        let selected = *index == cursor;
         let style = if selected {
             Style::default()
                 .fg(theme.accent)
@@ -354,7 +365,7 @@ pub fn render_collect_picker(
         let marker = if selected { "▶ " } else { "  " };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(format!("{marker}{name}"), style))),
-            row,
+            *row,
         );
     }
 
@@ -801,16 +812,13 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
     }
     if app.collect_picker.is_some() {
         let dicts = app.collectible_dicts();
-        let layout = collect_picker_layout(dicts.len(), area);
+        let cursor = picker_cursor(app);
+        let layout = collect_picker_layout(dicts.len(), cursor, area);
         return layout
             .rows
             .iter()
-            .enumerate()
             .map(|(index, rect)| {
-                Target::new(
-                    *rect,
-                    Action::CollectMove(index as i32 - picker_cursor(app)),
-                )
+                Target::new(*rect, Action::CollectMove(*index as i32 - cursor as i32))
             })
             .collect();
     }
@@ -832,11 +840,8 @@ pub fn targets(app: &crate::app::App, area: Rect) -> Vec<crate::ui::target::Targ
 }
 
 /// 收藏弹层的当前光标。
-fn picker_cursor(app: &crate::app::App) -> i32 {
-    app.collect_picker
-        .as_ref()
-        .map(|p| p.cursor as i32)
-        .unwrap_or(0)
+fn picker_cursor(app: &crate::app::App) -> usize {
+    app.collect_picker.as_ref().map(|p| p.cursor).unwrap_or(0)
 }
 
 /// 命中检测：先在 `targets` 里找，再处理「点击弹层外」的语义。

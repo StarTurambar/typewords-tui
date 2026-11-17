@@ -117,6 +117,115 @@ fn clicking_a_dict_in_the_collect_picker_selects_it() {
     );
 }
 
+/// 打开收藏弹层，并准备 `custom` 个自建词典（连同系统「收藏」）。
+fn app_with_many_collectible_dicts(custom: usize) -> (common::Fixture, app::App) {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    for index in 0..custom {
+        app.boot
+            .base
+            .word
+            .book_list
+            .push(typewords_tui::domain::types::Dict {
+                id: format!("custom-{index}"),
+                name: format!("自建词典{index}"),
+                custom: true,
+                ..Default::default()
+            });
+    }
+    app.start_practice();
+    press_with(&mut app, KeyCode::Enter, KeyModifiers::SHIFT);
+    assert!(app.collect_picker.is_some(), "收藏弹层应已打开");
+    (fixture, app)
+}
+
+/// 收藏弹层只登记真正画出来的行。
+///
+/// 早期 `collect_picker_layout` 给全部词典生成矩形，绘制却在提示行前
+/// `break`：第 9 个词典的矩形正好落在提示行上，点提示行或弹层下方空白
+/// 都会改变选中项。
+#[test]
+fn the_collect_picker_never_targets_rows_it_does_not_draw() {
+    // 系统「收藏」+ 11 个自建词典 = 12 个可收藏目标，超过 8 行可视区。
+    let (_fixture, app) = app_with_many_collectible_dicts(11);
+
+    let area = Rect::new(0, 0, 120, 40);
+    let dicts_len = app.collectible_dicts().len();
+    assert!(
+        dicts_len >= 12,
+        "应有至少 12 个可收藏词典，实际 {dicts_len}"
+    );
+    let layout = typewords_tui::ui::overlays::collect_picker_layout(dicts_len, 0, area);
+    let hint_y = layout.inner.bottom().saturating_sub(1);
+    assert!(
+        layout.rows.len() < dicts_len,
+        "12 个词典不应全部画进 8 行列表，实际 {} 行",
+        layout.rows.len()
+    );
+
+    let targets = typewords_tui::ui::hit::targets(&app, area);
+    let collect: Vec<_> = targets
+        .iter()
+        .filter(|target| matches!(target.action, Action::CollectMove(_)))
+        .collect();
+    assert_eq!(
+        collect.len(),
+        layout.rows.len(),
+        "命中区数量应与实际画出的行一致"
+    );
+    for target in &collect {
+        assert!(
+            target.rect.y < hint_y,
+            "命中区越过了提示行: rect={:?}, hint_y={hint_y}",
+            target.rect
+        );
+    }
+
+    // 提示行上点击不能产生 CollectMove。
+    let action = typewords_tui::ui::hit::action_at(&app, area, layout.inner.x, hint_y);
+    assert!(
+        !matches!(action, Some(Action::CollectMove(_))),
+        "点提示行不应改变收藏选中项，实际 {action:?}"
+    );
+}
+
+/// 收藏弹层跟随光标滚动：选中项滚出可视区后列表要跟过去，
+/// 否则键盘选中的行既看不见也点不到。
+#[test]
+fn the_collect_picker_scrolls_to_keep_the_cursor_visible() {
+    let (_fixture, mut app) = app_with_many_collectible_dicts(11);
+
+    let area = Rect::new(0, 0, 120, 40);
+    let total = app.collectible_dicts().len();
+    app.apply_action(Action::CollectMove(total as i32));
+    let cursor = app.collect_picker.as_ref().expect("弹层").cursor;
+    assert_eq!(cursor, total - 1, "光标应停在最后一个词典");
+
+    let layout = typewords_tui::ui::overlays::collect_picker_layout(total, cursor, area);
+    let hint_y = layout.inner.bottom().saturating_sub(1);
+    assert!(
+        layout.rows.iter().any(|(index, _)| *index == cursor),
+        "选中行应留在可见列表里: rows={:?}, cursor={cursor}",
+        layout.rows
+    );
+    for (index, rect) in &layout.rows {
+        assert!(*index < total);
+        assert!(rect.y < hint_y, "行 {index} 越过了提示行: rect={rect:?}");
+    }
+
+    // 点最后一行（当前选中项）应产生 CollectMove(0)。
+    let (_, last) = layout
+        .rows
+        .iter()
+        .find(|(index, _)| *index == cursor)
+        .expect("最后一行");
+    let action = typewords_tui::ui::hit::action_at(&app, area, last.x + 2, last.y);
+    assert!(
+        matches!(action, Some(Action::CollectMove(0))),
+        "点选中行应产生 CollectMove(0)，实际 {action:?}"
+    );
+}
+
 /// 词条编辑弹层：点字段行应该切换到该字段。
 #[test]
 fn clicking_a_field_in_the_word_edit_overlay_switches_field() {
