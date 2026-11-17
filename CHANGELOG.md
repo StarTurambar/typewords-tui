@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
+终端里「出问题能自己查」的一版：新增运行日志与崩溃报告（启动与运行期错误都落盘，panic 不需要 `RUST_BACKTRACE` 也能拿到完整回溯）、`tw export-dict`（`import-dict` 的逆操作），帮助页补齐「常见问题 / 关于与反馈」两个分页，设置页多了高级 FSRS 子屏；交互上把滚动条与统计页方向键统一收敛，并修掉 12 处会丢数据或静默失效的缺陷（其中有道发音在 Windows 上其实从未真正播放）。存档格式不变（`dict.json` v4、`setting.json` v23、`practice-word.json` v2、`practice-article.json` v1），与 0.3.3 互通。
+
 ### 新增
 
 - **`tw export-dict`**：`tw import-dict` 的逆操作，把词库导出成可再导入的词条数组 JSON。`DICT_ID` 取 id 或 enName，缺省用 `--dict`、再缺省用当前学习词库；收藏 / 错词 / 已掌握的词条只在存档里，也能直接导出。`--out` 缺省写到标准输出（只有 JSON，可重定向），写文件走原子写；与 `tw export-web` 一样只读、不取数据目录锁，TUI 运行时也能用。空词库直接报错，不产出 `import-dict` 会拒收的 `[]`。
@@ -179,7 +183,8 @@
 - **断点续练**：练习游标写入 `practice-word.json`，重启后恢复到同一词、同一阶段。
 - **命令行**：`tw doctor` / `tw task` / `tw import-dict`，以及 `--assets` / `--home` / `--dict` / `--mode` / `--theme` / `--seed` / `--reset-practice`。
 
-[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.0...v0.3.1
