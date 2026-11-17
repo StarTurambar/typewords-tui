@@ -537,10 +537,51 @@ fn import_rolls_back_when_a_later_save_cannot_be_written() {
         "错误应指出失败的文件: {detail}"
     );
     assert!(detail.contains("已回滚"), "错误应说明回滚结果: {detail}");
+    let backup_name = std::fs::read_dir(fixture.home())
+        .expect("读目录")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .find(|name| name.starts_with("dict.json.bak-"))
+        .unwrap_or_else(|| panic!("覆盖前应留下 dict 备份"));
+    assert!(
+        detail.contains(&backup_name),
+        "错误信息应给出备份路径 {backup_name}: {detail}"
+    );
     assert_eq!(
         std::fs::read(fixture.home().join("dict.json")).expect("读 dict"),
         before,
         "失败后 dict.json 应回滚到导入前"
+    );
+}
+
+/// 一份都没写成时才可以说「没有存档被改动」；写过了就必须交代回滚结果。
+#[test]
+fn import_that_fails_before_any_write_says_nothing_was_changed() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    // dict.json 是目录：第一份存档在写入前就被拒绝，一份都没改动。
+    std::fs::create_dir(fixture.home().join("dict.json")).expect("建目录");
+
+    let path = fixture.home().join("no-write.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"dict":{"version":4,"val":{}}}}"#,
+    )
+    .expect("写备份");
+
+    let error = backup::import_web(&store, &path).expect_err("写入失败应中止导入");
+    let detail = format!("{error:#}");
+    assert!(
+        detail.contains("没有存档被改动"),
+        "一份都没写时才能这么说: {detail}"
+    );
+    assert!(!detail.contains("已回滚"), "没有写入就无从回滚: {detail}");
+    assert!(
+        !std::fs::read_dir(fixture.home())
+            .expect("读目录")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().contains(".bak-")),
+        "没有写入就不该产生备份"
     );
 }
 

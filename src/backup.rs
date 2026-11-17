@@ -18,7 +18,7 @@
 //! 补默认值、未知字段忽略），校验通过后原样落盘（不经过反序列化再序列化），
 //! 因此上游存档里本程序没有建模的字段也不会丢。校验失败或版本不受支持的
 //! 条目不会写入；覆盖已有文件前先备份为 `<文件名>.bak-<时间戳>.json`，
-//! 多文件写入中途失败时按备份回滚。文章断点需要按来源分流：TUI 自己导出的
+//! 多文件写入中途失败时按备份原子回滚。文章断点需要按来源分流：TUI 自己导出的
 //! 备份带 `tuiPracticeData` 扩展，能还原成 `practice-article.json`；网页版
 //! 自己产生的缓存只有「段落 / 句 / 词」三级游标、没有文章 id，无法对应到
 //! TUI 的文章，仍按「丢弃」报告。
@@ -42,6 +42,7 @@ use crate::domain::constants::{
     DICT_STATE_VERSION, PRACTICE_ARTICLE_CACHE_VERSION, PRACTICE_CACHE_VERSION, SETTING_VERSION,
 };
 use crate::domain::types::{BaseState, PracticeCacheCompact, PracticeState, SettingState};
+use crate::fs::copy_atomic;
 use crate::store::{FileStore, SaveEnvelope};
 
 /// 上游备份格式的版本号。
@@ -195,6 +196,45 @@ struct Restore {
     backup: Option<PathBuf>,
 }
 
+impl Restore {
+    /// 备份文件名（相对数据目录）；导入前不存在的存档没有备份。
+    fn backup_name(&self) -> Option<String> {
+        self.backup
+            .as_ref()
+            .and_then(|backup| backup.file_name())
+            .map(|name| name.to_string_lossy().to_string())
+    }
+}
+
+/// 一次回滚的结果。
+///
+/// 分成两份是因为「改过没有」与「回滚成没成」是两件事：`done` 非空就说明
+/// 磁盘上已经是导入后的内容，此时哪怕回滚全部失败也不能说「没有存档被改动」。
+#[derive(Debug, Default)]
+struct RollbackOutcome {
+    /// 已恢复（或删除）的文件，按回滚顺序（逆序）
+    restored: Vec<RestoredSave>,
+    /// 没能恢复的文件，附带失败原因与它的备份
+    failed: Vec<RollbackFailure>,
+}
+
+/// 一份已回滚成功的存档。
+#[derive(Debug)]
+struct RestoredSave {
+    name: String,
+    /// 备份文件名；`None` 表示导入前文件不存在，回滚时已删除。
+    backup: Option<String>,
+}
+
+/// 一份没能回滚的存档。
+#[derive(Debug)]
+struct RollbackFailure {
+    name: String,
+    /// 备份文件名；`None` 表示导入前文件不存在，回滚时本来要删掉它。
+    backup: Option<String>,
+    error: anyhow::Error,
+}
+
 impl<'a> ImportWriter<'a> {
     fn new(store: &'a FileStore) -> Self {
         Self {
@@ -222,8 +262,9 @@ impl<'a> ImportWriter<'a> {
         }
         let backup = if path.is_file() {
             let backup = self.next_backup_path(name);
-            fs::copy(&path, &backup).with_context(|| format!("备份 {} 失败", path.display()))?;
-            sync_file(&backup);
+            // 备份本身也走原子写：`fs::copy` 中途失败会留下半截 `.bak`，
+            // 而这份 `.bak` 正是回滚与手工恢复的唯一依据。
+            copy_atomic(&path, &backup).with_context(|| format!("备份 {} 失败", path.display()))?;
             Some(backup)
         } else {
             None
@@ -239,10 +280,10 @@ impl<'a> ImportWriter<'a> {
             }
             Err(err) => {
                 if let Some(backup) = &backup
-                    && let Err(restore_err) = fs::copy(backup, &path)
+                    && let Err(restore_err) = copy_atomic(backup, &path)
                 {
                     return Err(err.context(format!(
-                        "写入 {name} 失败，且恢复原文件失败（备份在 {}）: {restore_err}",
+                        "写入 {name} 失败，且恢复原文件失败（备份在 {}）: {restore_err:#}",
                         backup.display()
                     )));
                 }
@@ -270,51 +311,84 @@ impl<'a> ImportWriter<'a> {
         }
     }
 
-    /// 回滚本次已写入的文件（逆序，尽力而为），返回成功恢复的文件名。
-    fn rollback(&self) -> Vec<String> {
-        let mut restored = Vec::new();
+    /// 回滚本次已写入的文件（逆序，尽力而为）。
+    ///
+    /// 恢复同样走原子写：中断时要么是完整的旧内容，要么仍是导入后的内容，
+    /// 不会留下半截存档。单个文件失败不影响其余文件继续回滚。
+    fn rollback(&self) -> RollbackOutcome {
+        let mut outcome = RollbackOutcome::default();
         for item in self.done.iter().rev() {
             let result = match &item.backup {
-                Some(backup) => fs::copy(backup, &item.path).map(|_| ()),
+                Some(backup) => copy_atomic(backup, &item.path),
                 None => match fs::remove_file(&item.path) {
                     Ok(()) => Ok(()),
                     Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    Err(err) => Err(err),
+                    Err(err) => Err(err.into()),
                 },
             };
-            if result.is_ok() {
-                restored.push(item.name.clone());
+            match result {
+                Ok(()) => outcome.restored.push(RestoredSave {
+                    name: item.name.clone(),
+                    backup: item.backup_name(),
+                }),
+                Err(error) => outcome.failed.push(RollbackFailure {
+                    name: item.name.clone(),
+                    backup: item.backup_name(),
+                    error,
+                }),
             }
         }
-        restored
+        outcome
     }
 
     /// 本次导入产生的备份文件名（相对数据目录）。
     fn backup_names(&self) -> Vec<String> {
-        self.done
-            .iter()
-            .filter_map(|item| item.backup.as_ref())
-            .filter_map(|backup| backup.file_name())
-            .map(|name| name.to_string_lossy().to_string())
-            .collect()
-    }
-}
-
-/// 尽力刷盘：备份文件同样希望落到磁盘，失败不影响导入。
-fn sync_file(path: &Path) {
-    if let Ok(file) = fs::OpenOptions::new().write(true).open(path) {
-        let _ = file.sync_all();
+        self.done.iter().filter_map(Restore::backup_name).collect()
     }
 }
 
 /// 回滚已写入的存档，并给原始错误补上下文。
+///
+/// 「有没有改过」只看 `done`，不看回滚成功的数量：全部回滚失败时磁盘上仍是
+/// 导入后的内容，报「没有存档被改动」会把用户引向错误的数据。回滚失败的文件
+/// 逐个点名，并给出对应的 `.bak`，方便手工还原。
 fn abort_with_rollback(writer: &ImportWriter<'_>, err: anyhow::Error) -> anyhow::Error {
-    let restored = writer.rollback();
-    if restored.is_empty() {
-        err.context("导入中止；没有存档被改动")
-    } else {
-        err.context(format!("导入中止，已回滚: {}", restored.join("、")))
+    if writer.done.is_empty() {
+        return err.context("导入中止；没有存档被改动");
     }
+    let outcome = writer.rollback();
+    let mut notes = Vec::new();
+    if !outcome.restored.is_empty() {
+        let listed: Vec<String> = outcome
+            .restored
+            .iter()
+            .map(|save| match &save.backup {
+                Some(backup) => format!("{}（备份 {backup}）", save.name),
+                None => format!("{}（导入前不存在，已删除）", save.name),
+            })
+            .collect();
+        notes.push(format!("已回滚: {}", listed.join("、")));
+    }
+    if !outcome.failed.is_empty() {
+        let listed: Vec<String> = outcome
+            .failed
+            .iter()
+            .map(|failure| match &failure.backup {
+                Some(backup) => format!("{}（{:#}；备份 {backup}）", failure.name, failure.error),
+                None => format!(
+                    "{}（{:#}；导入前不存在，可手工删除）",
+                    failure.name, failure.error
+                ),
+            })
+            .collect();
+        notes.push(format!("未能回滚: {}", listed.join("、")));
+    }
+    // 备份名是相对数据目录的，把目录一并带上才找得到文件。
+    err.context(format!(
+        "导入中止（数据目录 {}），{}",
+        writer.store.home().display(),
+        notes.join("；")
+    ))
 }
 
 /// 把当前数据目录导出成网页版能导入的备份 JSON。
@@ -481,4 +555,119 @@ fn read_envelope_raw(store: &FileStore, name: &str) -> Result<Option<Value>> {
 /// 空的存档信封。
 fn empty_envelope(version: u32) -> Value {
     serde_json::json!({ "val": {}, "version": version })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 一份「备份还在、目标位置却已无法还原」的存档。
+    ///
+    /// 目标被目录占住后原子写的 rename 必然失败，模拟权限变化 / 文件被占用
+    /// 这类回滚失败（真实触发要磁盘满、权限或 Windows 文件锁）。
+    fn stuck_save(store: &FileStore, name: &str, stamp: &str) -> Restore {
+        let backup = store.file_path(&format!("{name}.bak-{stamp}.json"));
+        fs::write(&backup, "{\"val\":{},\"version\":4}").expect("写备份");
+        let path = store.file_path(name);
+        fs::create_dir(&path).expect("建目录");
+        Restore {
+            name: name.to_string(),
+            path,
+            backup: Some(backup),
+        }
+    }
+
+    /// 回滚写盘失败时不能宣称「没有存档被改动」，还要点名文件与它的 .bak。
+    #[test]
+    fn a_failed_import_that_cannot_roll_back_points_at_the_backup_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path().to_path_buf()).expect("数据目录");
+        let stamp = "20260101-120000";
+        let writer = ImportWriter {
+            store: &store,
+            stamp: stamp.to_string(),
+            done: vec![stuck_save(&store, "dict.json", stamp)],
+        };
+
+        let err = abort_with_rollback(&writer, anyhow!("写入 setting.json 失败"));
+        let detail = format!("{err:#}");
+
+        assert!(
+            !detail.contains("没有存档被改动"),
+            "回滚失败时磁盘上已是导入后的内容，不能这么说: {detail}"
+        );
+        assert!(
+            detail.contains("未能回滚"),
+            "应单独列出失败的文件: {detail}"
+        );
+        assert!(detail.contains("dict.json"), "应点名失败的文件: {detail}");
+        assert!(
+            detail.contains("dict.json.bak-20260101-120000.json"),
+            "应给出备份路径: {detail}"
+        );
+    }
+
+    /// 部分成功时，既要报告回滚成功的文件，也要点名没回滚的文件。
+    #[test]
+    fn a_partial_rollback_lists_both_the_restored_and_the_stuck_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path().to_path_buf()).expect("数据目录");
+        let stamp = "20260101-120000";
+
+        // dict.json 能正常还原。
+        let dict_path = store.file_path("dict.json");
+        fs::write(&dict_path, "导入后的 dict").expect("写 dict");
+        let dict_backup = store.file_path(&format!("dict.json.bak-{stamp}.json"));
+        fs::write(&dict_backup, "导入前的 dict").expect("写 dict 备份");
+
+        // setting.json 的位置被目录占住，还原必然失败。
+        let setting_save = stuck_save(&store, "setting.json", stamp);
+
+        let writer = ImportWriter {
+            store: &store,
+            stamp: stamp.to_string(),
+            // done 按写入顺序记录，回滚是逆序：先试 setting，再试 dict。
+            done: vec![
+                Restore {
+                    name: "dict.json".to_string(),
+                    path: dict_path.clone(),
+                    backup: Some(dict_backup),
+                },
+                setting_save,
+            ],
+        };
+
+        let err = abort_with_rollback(&writer, anyhow!("写入 practice-word.json 失败"));
+        let detail = format!("{err:#}");
+
+        assert!(detail.contains("已回滚: dict.json"), "{detail}");
+        assert!(detail.contains("未能回滚: setting.json"), "{detail}");
+        assert!(
+            detail.contains("setting.json.bak-20260101-120000.json"),
+            "失败项要给出备份路径: {detail}"
+        );
+        assert_eq!(
+            fs::read_to_string(&dict_path).expect("读 dict"),
+            "导入前的 dict",
+            "能还原的文件要真的还原"
+        );
+    }
+
+    /// 一份都没写成就老老实实说「没有存档被改动」。
+    #[test]
+    fn aborting_before_any_write_reports_that_nothing_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path().to_path_buf()).expect("数据目录");
+        let writer = ImportWriter {
+            store: &store,
+            stamp: "20260101-120000".to_string(),
+            done: Vec::new(),
+        };
+
+        let err = abort_with_rollback(&writer, anyhow!("写入 dict.json 失败"));
+        assert!(
+            format!("{err:#}").contains("没有存档被改动"),
+            "还没写任何文件时这句才成立"
+        );
+    }
 }
