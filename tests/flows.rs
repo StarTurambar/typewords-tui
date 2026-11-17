@@ -171,6 +171,89 @@ fn activating_a_builtin_flow_switches_the_practice_mode() {
     );
 }
 
+/// 编辑流程时按 Enter 不能切换「启用中的流程」。
+///
+/// `Enter` 在 `focus_action` 里是通用的「触发当前焦点」，先于页面键位生效；
+/// `activate_flow` 曾经不看 `flow_editing`，于是在改结构时误按 `Enter` 会静默
+/// 换掉启用项并写 `flows.json`——底栏与文档里都没有这个键。
+#[test]
+fn enter_while_editing_a_flow_does_not_change_the_active_flow() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+
+    // 先建副本（新建即启用），再切回内置「复习」：此时没有启用的自建流程。
+    press(&mut app, KeyCode::Char('n'));
+    let custom_id = app.flow_store.active_id.clone();
+    assert!(!custom_id.is_empty(), "新建副本应启用它");
+    let review = app
+        .flow_entries()
+        .iter()
+        .position(|entry| entry.id == "review")
+        .expect("应有「复习」内置流程");
+    while app.flow_cursor > review {
+        press(&mut app, KeyCode::Up);
+    }
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        app.flow_store.active_id.is_empty(),
+        "启用内置流程应清掉自建流程的启用位"
+    );
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["review".to_string()],
+        "● 应停在「复习」这一行"
+    );
+
+    // 回到自建流程那一行，进入结构编辑。
+    let custom_row = app
+        .flow_entries()
+        .iter()
+        .position(|entry| entry.id == custom_id)
+        .expect("应有自建流程");
+    while app.flow_cursor < custom_row {
+        press(&mut app, KeyCode::Down);
+    }
+    press(&mut app, KeyCode::Char('e'));
+    assert!(app.flow_editing, "自建流程应能进入编辑模式");
+
+    // 编辑态按 Enter：既不启用流程，也不改练习模式，更不落盘。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.flow_store.active_id, "", "编辑中按 Enter 不应启用流程");
+    assert_eq!(
+        app.boot.settings.word_practice_mode,
+        WordPracticeMode::Review,
+        "编辑中按 Enter 不应改练习模式"
+    );
+    assert_eq!(
+        active_flow_ids(&app),
+        vec!["review".to_string()],
+        "● 不该跟着 Enter 移动"
+    );
+    let toast = app
+        .current_toast(typewords_tui::domain::timer::now_ms())
+        .map(|toast| toast.message.clone())
+        .unwrap_or_default();
+    assert!(
+        toast.contains("Esc") && toast.contains("编辑"),
+        "应提示先退出编辑，实际：{toast}"
+    );
+    let store = typewords_tui::store::FileStore::new(fixture.home()).expect("store");
+    assert!(
+        store.load_flows().value.active_id.is_empty(),
+        "flows.json 的 activeId 不应被写入"
+    );
+
+    // 退出编辑后 Enter 恢复原语义：启用自建流程。
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.flow_editing, "Esc 应退出编辑");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.flow_store.active_id, custom_id,
+        "退出编辑后 Enter 应重新启用流程"
+    );
+}
+
 /// 编辑流程时步骤光标要能单独移动，删除的才是选中的那一步。
 ///
 /// 早期实现只有节点光标（↑/↓）能移动，步骤光标写死在 0 号或刚新增的那一步，

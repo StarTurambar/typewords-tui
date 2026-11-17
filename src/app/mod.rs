@@ -2321,6 +2321,13 @@ impl App {
     /// 内置流程就是它对应的练习模式：启用它必须把模式写回设置并落盘，
     /// 否则界面说「已切回内置流程」、实际练习仍按旧模式跑。
     fn activate_flow(&mut self) {
+        // 编辑态下 `Enter` 是误按：`focus_action` 把它统一翻成 `ActivateFocus`，
+        // 先于页面键位生效，而编辑键位里根本没有它。放过去就会静默换掉
+        // 「启用中的流程」并写 `flows.json`，用户其实只是在改结构。
+        if self.flow_editing {
+            self.toast(NoticeLevel::Warning, "编辑中，按 Esc 退出编辑后再启用");
+            return;
+        }
         let Some(entry) = self.flow_entries().get(self.flow_cursor).cloned() else {
             return;
         };
