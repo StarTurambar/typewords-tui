@@ -78,6 +78,24 @@ impl<T> Loaded<T> {
     }
 }
 
+/// 存档信封的版本头：只解析 `version` / `updated_at`，故意不声明 `val`。
+///
+/// serde 默认忽略未知字段，因此高版本存档里结构已经变化的 `val` 不会
+/// 影响这里的解析。
+#[derive(Deserialize)]
+struct EnvelopeHeader {
+    version: u32,
+    #[serde(default)]
+    updated_at: Option<String>,
+}
+
+/// 已读入内存、但只解析了版本头的信封。
+struct RawEnvelope {
+    text: String,
+    version: u32,
+    updated_at: Option<String>,
+}
+
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -115,10 +133,12 @@ impl FileStore {
         Ok(target)
     }
 
-    fn read_envelope<T: DeserializeOwned>(
-        &self,
-        name: &str,
-    ) -> Result<Option<(T, u32, Option<String>)>> {
+    /// 读入存档文件，但**只解析版本头**（`version` / `updated_at`），不碰 `val`。
+    ///
+    /// 版本判定必须先于载荷反序列化：高版本存档的 `val` 结构可能已经变了，
+    /// 先整体反序列化会把「版本过高」误判成「损坏」——隔离原文件后，退出时
+    /// 再用默认值写回同名路径，正好毁掉版本号要保护的新版本数据。
+    fn read_raw(&self, name: &str) -> Result<Option<RawEnvelope>> {
         let path = self.file_path(name);
         if !path.is_file() {
             return Ok(None);
@@ -128,9 +148,37 @@ impl FileStore {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        let envelope: SaveEnvelope<T> = serde_json::from_str(&text)
+        let header: EnvelopeHeader = serde_json::from_str(&text)
             .with_context(|| format!("解析存档失败: {}", path.display()))?;
-        Ok(Some((envelope.val, envelope.version, envelope.updated_at)))
+        Ok(Some(RawEnvelope {
+            text,
+            version: header.version,
+            updated_at: header.updated_at,
+        }))
+    }
+
+    /// 版本合格后才反序列化整份信封，取出 `val`。
+    fn decode_val<T: DeserializeOwned>(&self, name: &str, raw: &RawEnvelope) -> Result<T> {
+        let envelope: SaveEnvelope<T> = serde_json::from_str(&raw.text)
+            .with_context(|| format!("解析存档失败: {}", self.file_path(name).display()))?;
+        Ok(envelope.val)
+    }
+
+    /// 隔离坏档，并生成给用户看的原因（成功时带上隔离后的路径）。
+    fn quarantine_reason(&self, name: &str, err: &anyhow::Error) -> String {
+        let path = self.file_path(name);
+        match self.quarantine(&path) {
+            Ok(target) => format!("{err}（已移动到 {}）", target.display()),
+            Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
+        }
+    }
+
+    fn corrupt<T: Default>(&self, name: &str, err: &anyhow::Error) -> Loaded<T> {
+        Loaded {
+            value: T::default(),
+            status: LoadStatus::Corrupt(self.quarantine_reason(name, err)),
+            updated_at: None,
+        }
     }
 
     fn load_typed<T: DeserializeOwned + Default>(
@@ -138,39 +186,87 @@ impl FileStore {
         name: &str,
         expected_version: u32,
     ) -> Loaded<T> {
-        match self.read_envelope::<T>(name) {
-            Ok(None) => Loaded {
-                value: T::default(),
-                status: LoadStatus::Missing,
-                updated_at: None,
-            },
-            Ok(Some((value, version, updated_at))) => {
-                if version > expected_version {
-                    Loaded {
-                        value: T::default(),
-                        status: LoadStatus::VersionTooNew {
-                            found: version,
-                            expected: expected_version,
-                        },
-                        updated_at,
-                    }
-                } else {
-                    Loaded {
-                        value,
-                        status: LoadStatus::Loaded,
-                        updated_at,
-                    }
-                }
-            }
-            Err(err) => {
-                let path = self.file_path(name);
-                let reason = match self.quarantine(&path) {
-                    Ok(target) => format!("{err}（已移动到 {}）", target.display()),
-                    Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
+        let raw = match self.read_raw(name) {
+            Ok(Some(raw)) => raw,
+            Ok(None) => {
+                return Loaded {
+                    value: T::default(),
+                    status: LoadStatus::Missing,
+                    updated_at: None,
                 };
+            }
+            Err(err) => return self.corrupt(name, &err),
+        };
+        // 版本过高时直接返回，绝不解析 `val`，也不隔离文件。
+        if raw.version > expected_version {
+            return Loaded {
+                value: T::default(),
+                status: LoadStatus::VersionTooNew {
+                    found: raw.version,
+                    expected: expected_version,
+                },
+                updated_at: raw.updated_at.clone(),
+            };
+        }
+        match self.decode_val(name, &raw) {
+            Ok(value) => Loaded {
+                value,
+                status: LoadStatus::Loaded,
+                updated_at: raw.updated_at,
+            },
+            Err(err) => self.corrupt(name, &err),
+        }
+    }
+
+    /// 断点缓存的装载：版本不符时忽略（不解析 `val`、不移动文件），
+    /// 版本相符但解析失败才隔离丢弃。
+    fn load_cache<T: DeserializeOwned + Default>(
+        &self,
+        name: &str,
+        expected_version: u32,
+        corrupt_reason: &str,
+    ) -> Loaded<T> {
+        let raw = match self.read_raw(name) {
+            Ok(Some(raw)) => raw,
+            Ok(None) => {
+                return Loaded {
+                    value: T::default(),
+                    status: LoadStatus::Missing,
+                    updated_at: None,
+                };
+            }
+            Err(_) => {
+                let path = self.file_path(name);
+                let _ = self.quarantine(&path);
+                return Loaded {
+                    value: T::default(),
+                    status: LoadStatus::Corrupt(corrupt_reason.to_string()),
+                    updated_at: None,
+                };
+            }
+        };
+        if raw.version != expected_version {
+            return Loaded {
+                value: T::default(),
+                status: LoadStatus::UnsupportedVersion {
+                    found: raw.version,
+                    expected: expected_version,
+                },
+                updated_at: raw.updated_at.clone(),
+            };
+        }
+        match self.decode_val(name, &raw) {
+            Ok(value) => Loaded {
+                value,
+                status: LoadStatus::Loaded,
+                updated_at: raw.updated_at,
+            },
+            Err(_) => {
+                let path = self.file_path(name);
+                let _ = self.quarantine(&path);
                 Loaded {
                     value: T::default(),
-                    status: LoadStatus::Corrupt(reason),
+                    status: LoadStatus::Corrupt(corrupt_reason.to_string()),
                     updated_at: None,
                 }
             }
@@ -215,41 +311,12 @@ impl FileStore {
     }
 
     pub fn load_practice(&self) -> Loaded<Option<PracticeCacheCompact>> {
-        match self.read_envelope::<Option<PracticeCacheCompact>>("practice-word.json") {
-            Ok(None) => Loaded {
-                value: None,
-                status: LoadStatus::Missing,
-                updated_at: None,
-            },
-            Ok(Some((value, version, updated_at))) => {
-                if version != PRACTICE_CACHE_VERSION {
-                    Loaded {
-                        value: None,
-                        status: LoadStatus::UnsupportedVersion {
-                            found: version,
-                            expected: PRACTICE_CACHE_VERSION,
-                        },
-                        updated_at,
-                    }
-                } else {
-                    Loaded {
-                        value,
-                        status: LoadStatus::Loaded,
-                        updated_at,
-                    }
-                }
-            }
-            Err(_) => {
-                // 练习缓存损坏时直接丢弃，不阻断启动。
-                let path = self.file_path("practice-word.json");
-                let _ = self.quarantine(&path);
-                Loaded {
-                    value: None,
-                    status: LoadStatus::Corrupt("练习缓存损坏，已丢弃".to_string()),
-                    updated_at: None,
-                }
-            }
-        }
+        // 练习缓存损坏时直接丢弃，不阻断启动。
+        self.load_cache(
+            "practice-word.json",
+            PRACTICE_CACHE_VERSION,
+            "练习缓存损坏，已丢弃",
+        )
     }
 
     pub fn save_practice(&self, cache: Option<&PracticeCacheCompact>) -> Result<()> {
@@ -279,41 +346,12 @@ impl FileStore {
     /// 与单词练习缓存分开存：两者的进度互不相干，混在一个文件里会让
     /// 「清空单词练习进度」误删文章的跟打进度。
     pub fn load_practice_article(&self) -> Loaded<Option<ArticleCacheEnvelope>> {
-        match self.read_envelope::<Option<ArticleCacheEnvelope>>("practice-article.json") {
-            Ok(None) => Loaded {
-                value: None,
-                status: LoadStatus::Missing,
-                updated_at: None,
-            },
-            Ok(Some((value, version, updated_at))) => {
-                if version != PRACTICE_ARTICLE_CACHE_VERSION {
-                    Loaded {
-                        value: None,
-                        status: LoadStatus::UnsupportedVersion {
-                            found: version,
-                            expected: PRACTICE_ARTICLE_CACHE_VERSION,
-                        },
-                        updated_at,
-                    }
-                } else {
-                    Loaded {
-                        value,
-                        status: LoadStatus::Loaded,
-                        updated_at,
-                    }
-                }
-            }
-            Err(_) => {
-                // 缓存损坏时直接丢弃，不阻断启动。
-                let path = self.file_path("practice-article.json");
-                let _ = self.quarantine(&path);
-                Loaded {
-                    value: None,
-                    status: LoadStatus::Corrupt("文章练习缓存损坏，已丢弃".to_string()),
-                    updated_at: None,
-                }
-            }
-        }
+        // 缓存损坏时直接丢弃，不阻断启动。
+        self.load_cache(
+            "practice-article.json",
+            PRACTICE_ARTICLE_CACHE_VERSION,
+            "文章练习缓存损坏，已丢弃",
+        )
     }
 
     pub fn save_practice_article(&self, cache: Option<&ArticleCacheEnvelope>) -> Result<()> {
