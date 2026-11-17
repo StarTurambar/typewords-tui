@@ -84,14 +84,16 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 
 | 参数 | 含义 | 备注 |
 | --- | --- | --- |
-| `--assets DIR` / `--home DIR` | 只读资源目录（需含 `list/word.json`）/ 数据目录（存档、导入词库、主题） | 全局参数，可放在子命令前后；等价 `TYPEWORDS_ASSETS` / `TYPEWORDS_HOME` |
-| `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`）；三本内置词典用 `wordCollect` / `wordWrong` / `wordKnown` | 写入当前学习词库（与词库页 `Enter` 同效）；找不到词库时报错退出 |
+| `--assets DIR` / `--home DIR` | 只读资源目录（需含 `list/word.json`）/ 数据目录（存档、导入词库、主题） | 等价 `TYPEWORDS_ASSETS` / `TYPEWORDS_HOME` |
+| `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`）；三本内置词典用 `wordCollect` / `wordWrong` / `wordKnown` | 写入当前学习词库（与词库页 `Enter` 同效）；找不到词库时报错退出；`tw export-dict` 缺省也用它 |
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 另接受 `smart` 与中文别名；单词测试与自定义流程只能在界面里用 `m` 选；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
 | `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`，不动词典与设置，仅 TUI 生效 |
-| `--log FILE` | 运行日志文件 | 全局参数，可放在子命令前后；缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
-| `--no-log` | 关闭运行日志 | 全局参数；崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
-| `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 全局参数，缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |
+| `--log FILE` | 运行日志文件 | 缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
+| `--no-log` | 关闭运行日志 | 崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
+| `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |
+
+上表参数都是**全局参数**：放在子命令前后都可以，`tw task --seed 42` 与 `tw --seed 42 task` 等价；`tw doctor` / `tw export-dict` 等子命令也接受它们（与具体子命令无关的参数会被忽略）。
 
 `-h` / `--help` 与 `-V` / `--version` 由 clap 生成，后者输出版本号。
 
@@ -102,7 +104,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `tw doctor` | 打印解析到的路径与词库 / 存档 / 主题状态，不进入界面、不写存档 | 版本行、数据目录、资源目录、日志目录（`<home>/logs`，`--log` 可指定文件、`--no-log` 关闭）；每本词库的 id / enName / 名称 / 目录登记词数 / 实际可练习词数（空词条不计，与程序真正加载的词数一致）与词条文件路径（缺失显示 `<缺失>`，解析失败显示原因）；5 份存档的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
 | `tw task` | 只预览今日任务，不进入界面 | 当前词库与每日词数、学习进度（`已学 N / M` 与百分比同源，分母是有效词数）、今日任务（新词 / 复习，到期数与随机补足数）与前 5 个新词、复习词；需取数据目录锁 |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 打印词库名、词数与 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
-| `tw export-dict [DICT_ID] [--out FILE]` | 把词库词条导出成词条数组 JSON（`import-dict` 的逆操作），可直接再导入 | 缺省写到标准输出（只有 JSON，便于重定向）；`--out` 指定文件时打印词库名、词数与路径。`DICT_ID` 取 id 或 enName，缺省用全局 `--dict`，再缺省用当前学习词库；收藏 / 错词 / 已掌握的词条只在存档里，也能导出；只读，不取锁 |
+| `tw export-dict [DICT_ID] [--out FILE]` | 把词库词条导出成词条数组 JSON（`import-dict` 的逆操作），可直接再导入 | 缺省写到标准输出（只有 JSON，便于重定向）；`--out` 指定文件时打印词库名、词数与路径。`DICT_ID` 取 id 或 enName，缺省用 `--dict`，再缺省用当前学习词库；收藏 / 错词 / 已掌握的词条只在存档里，也能导出；只读，不取锁 |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份；导入后需重启程序 |
 | `tw export-web [--out FILE]` | 把当前数据目录导出成网页版能导入的备份 JSON | 缺省写到标准输出；`--out` 指定文件时打印路径；只读，不取锁 |
 
@@ -117,7 +119,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 ```bash
 tw --dict cet4                       # 直接进入 CET-4；内置词典用 wordWrong / wordCollect / wordKnown
 tw doctor --home D:\tmp\twhome       # 全局参数也可放在子命令之后
-tw task --seed 42                    # 预览今日任务，固定随机种子
+tw task --seed 42                    # 预览今日任务，固定随机种子（参数在子命令前后都行）
 tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict my-words 切换
 tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict cet4 导出到标准输出
 ```
