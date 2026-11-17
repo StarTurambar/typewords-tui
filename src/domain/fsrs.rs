@@ -32,6 +32,21 @@ const W17_W18_CEILING: f64 = 2.0;
 /// 学习步进里的分钟数上限：达到一天即毕业进 Review。
 const MINUTES_PER_DAY: f64 = 1440.0;
 
+/// 间隔（天）上限：与「高级 FSRS」页的最大间隔可调区间（1 ~ 36500）以及
+/// `S_MAX` 取同一个值。
+///
+/// 也是「手改 `setting.json` 不至于把到期时间推到 chrono 上界」的兜底：
+/// chrono 的 `TimeDelta` 上界约 1e11 天，而 `request_retention` 取极小值时
+/// `interval_modifier` 能到 1e58 量级，只有把最大间隔封在这里，`now +
+/// Duration::days(_)` 才不可能越界 panic。
+pub const MAX_INTERVAL_DAYS: f64 = 36500.0;
+
+/// 学习步进（分钟）上限：换算后超过 36500 天的步进按上限封顶。
+///
+/// 步进串同样是手改字段（`"1e300d"` 也符合 `step_to_minutes` 的语法），
+/// 原样转成 `Duration::minutes` 会在结算路径上 panic。
+const MAX_STEP_MINUTES: f64 = MAX_INTERVAL_DAYS * MINUTES_PER_DAY;
+
 // ── JS 数值语义 ────────────────────────────────────────────────────────────
 
 /// JS `Math.round`：向 +∞ 取整（半值进位）。与 Rust 的 `f64::round` 在负数上不同。
@@ -291,18 +306,24 @@ pub fn default_w() -> [f64; 21] {
 ///
 /// 单位按**字符**切分而不是字节——步进串来自用户可编辑的 `setting.json`，
 /// `"1分"` 之类的非 ASCII 写法按字节切会落在 UTF-8 边界中间而 panic。
+///
+/// 结果封顶到 [`MAX_STEP_MINUTES`]，非有限数（`"infm"` / `"NaNm"`）按无法解析
+/// 处理：步进串同样能绕过界面直接手改，`"1e300d"` 原样变成到期时间会让
+/// `now + Duration::minutes(_)` 超出 chrono 的 `TimeDelta` 上界而在结算路径上
+/// panic。
 pub fn step_to_minutes(step: &str) -> Option<f64> {
     let unit = step.chars().last()?;
     let value: f64 = step[..step.len() - unit.len_utf8()].parse().ok()?;
-    if value < 0.0 {
+    if !value.is_finite() || value < 0.0 {
         return None;
     }
-    match unit {
-        'm' => Some(value),
-        'h' => Some(value * 60.0),
-        'd' => Some(value * 1440.0),
-        _ => None,
-    }
+    let minutes = match unit {
+        'm' => value,
+        'h' => value * 60.0,
+        'd' => value * 1440.0,
+        _ => return None,
+    };
+    Some(minutes.min(MAX_STEP_MINUTES))
 }
 
 /// 学习步进策略的结果。
@@ -423,6 +444,12 @@ impl Fsrs {
         let (decay, factor) = compute_decay_factor(&w);
         // 留存率必须落在 (0, 1)：取 1 时 interval_modifier 恒为 0，所有复习卡
         // 都会被排到次日；最大间隔至少一天，否则卡片当天反复到期。
+        //
+        // 上界也要兜住：留存率取极小值（手改 `1e-9`）时 interval_modifier 会被
+        // 推向 ~1e58，再叠加不加限制的最大间隔（`1e300`），
+        // `now + Duration::days(_)` 就会超出 chrono 的 TimeDelta 上界，结算
+        // 路径 panic、当轮进度在写盘前丢失。最大间隔与「高级 FSRS」页的可调
+        // 区间同源，统一夹到 1 ~ MAX_INTERVAL_DAYS。
         let request_retention =
             if parameters.request_retention > 0.0 && parameters.request_retention < 1.0 {
                 parameters.request_retention
@@ -430,9 +457,9 @@ impl Fsrs {
                 0.9
             };
         let maximum_interval = if parameters.maximum_interval >= 1.0 {
-            parameters.maximum_interval
+            parameters.maximum_interval.min(MAX_INTERVAL_DAYS)
         } else {
-            36500.0
+            MAX_INTERVAL_DAYS
         };
         let interval_modifier = round_to((request_retention.powf(1.0 / decay) - 1.0) / factor, 8);
         Self {
@@ -1038,6 +1065,49 @@ mod tests {
         assert_eq!(step_to_minutes("2h"), Some(120.0));
         assert_eq!(step_to_minutes("1d"), Some(1440.0));
         assert_eq!(step_to_minutes("x"), None);
+    }
+
+    /// 极端步进串不能把到期时间推到 chrono 的上界之外。
+    ///
+    /// 步进串可以手改 `setting.json`：`"1e300d"` 语法合法，原样转成
+    /// `Duration::minutes` 会让结算路径 panic；非有限数按无法解析处理。
+    #[test]
+    fn extreme_learning_steps_are_capped() {
+        assert_eq!(step_to_minutes("1e300d"), Some(MAX_STEP_MINUTES));
+        assert_eq!(step_to_minutes("999999999999999d"), Some(MAX_STEP_MINUTES));
+        assert_eq!(step_to_minutes("infm"), None);
+        assert_eq!(step_to_minutes("NaNm"), None);
+
+        // 走完整调度也不崩：Again 把卡片排到封顶后的首步。
+        let scheduler = Fsrs::new(&FsrsParameters {
+            learning_steps: vec!["1e300d".to_string()],
+            ..FsrsParameters::default()
+        });
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, RATING_AGAIN, now);
+        assert_eq!(card.due, now + Duration::days(MAX_INTERVAL_DAYS as i64));
+    }
+
+    /// 最大间隔超出界面可调区间时按 36500 生效。
+    ///
+    /// 手改 `setting.json` 写 `1e300` 能通过 serde（任意 f64 都合法），原样参与
+    /// 调度会让 `next_interval` 返回天文数字、`now + Duration::days(_)` 越界
+    /// panic。
+    #[test]
+    fn maximum_interval_outside_the_documented_range_falls_back_to_the_default() {
+        let capped = |value: f64| {
+            Fsrs::new(&FsrsParameters {
+                maximum_interval: value,
+                ..FsrsParameters::default()
+            })
+            .maximum_interval
+        };
+        assert_eq!(capped(1e300), MAX_INTERVAL_DAYS);
+        assert_eq!(capped(f64::INFINITY), MAX_INTERVAL_DAYS);
+        assert_eq!(capped(0.0), MAX_INTERVAL_DAYS);
+        assert_eq!(capped(MAX_INTERVAL_DAYS), MAX_INTERVAL_DAYS);
+        // 区间内的值保持原样，不破坏与上游一致的调度
+        assert_eq!(capped(30.0), 30.0);
     }
 
     /// 非 ASCII 的步进串不能按字节切分。

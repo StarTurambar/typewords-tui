@@ -273,7 +273,10 @@ fn row_value(app: &App, row: AdvFsrsRow, theme: &Theme) -> (String, Color, Optio
         AdvFsrsRow::MaximumInterval => (
             format!("{} 天", app.fsrs_maximum_interval().round() as i64),
             theme.fg,
-            Some("1 ~ 36500".to_string()),
+            Some(format!(
+                "1 ~ {}",
+                crate::domain::fsrs::MAX_INTERVAL_DAYS as i64
+            )),
         ),
         AdvFsrsRow::EnableFuzz => bool_value(parameters.enable_fuzz, theme),
         AdvFsrsRow::EnableShortTerm => bool_value(parameters.enable_short_term, theme),
