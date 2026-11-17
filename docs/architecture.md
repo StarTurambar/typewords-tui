@@ -290,6 +290,7 @@ App 是唯一的状态持有者。输入分两条路径：
 
 - 从 last_learn_index 向后扫描，跳过忽略集合（已掌握 + 可选的 SIMPLE_WORDS），取 per_day 个新词。
 - 学完判定只看词表本身（effective_length），不看目录登记 length；最后一个词也必须能学到，学完后 complete 置位。
+- 忽略集合只有一份口径：`BaseState::ignore_words_set(ignore_simple_word)`（全小写）。任务生成与结算推进（session.rs 的 advance_dict_progress）都用它并按 `Word::lower` 比较；两边不一致时，词库尾部只剩首字母大写的忽略词（如 CET-4 的 Christ）会让 complete 永不置位。
 - 到期复习按 Local 自然日判断（due <= 今天），按 due 升序取 per_day * ratio 个再洗牌；ratio 为 0 时，学完 / 到末尾仍按至少 1 处理。
 - 无到期且开启随机填充时，从已学范围排除忽略词、本轮新词与已抽中的词，随机补足。
 - create_shuffle_task 用于随机复习：range 上界在尚未学时取整本词表，否则取 last_learn_index。

@@ -682,8 +682,19 @@ impl PracticeSession {
     /// `dict.length`：删过词 / 换过更短的词库文件后，登记值会大于真实词数，
     /// 按它判完成会让 `complete` 永远不置位，进度也永远追不上登记值。
     /// 进度本身也夹在 `[0, 实际词数]` 内，旧存档里已越过末尾的值会被夹回。
-    pub fn advance_dict_progress(base: &mut BaseState, new_word_number: usize, check_all: bool) {
-        let ignore_list = base.known_words();
+    ///
+    /// 忽略集合必须与任务生成同源（`BaseState::ignore_words_set`：全小写，
+    /// 且受「忽略简单词」开关影响），比较时也统一走 `Word::lower`。两边口径
+    /// 不一致时，词库尾部只剩 `Christ` 这类首字母大写的忽略词会被任务生成
+    /// 当作「没有新词可学」，这里却数不到忽略项，`last_learn_index + ignore_count`
+    /// 永远够不到词数，`complete` 就永不置位。
+    pub fn advance_dict_progress(
+        base: &mut BaseState,
+        settings: &SettingState,
+        new_word_number: usize,
+        check_all: bool,
+    ) {
+        let ignore_set = base.ignore_words_set(settings.ignore_simple_word);
         if let Some(dict) = base.study_dict_mut() {
             let length = dict.effective_length();
             dict.last_learn_index = dict
@@ -691,15 +702,11 @@ impl PracticeSession {
                 .saturating_add(new_word_number)
                 .min(length);
             let start = if check_all { 0 } else { dict.last_learn_index };
-            let words_to_check: Vec<String> = dict
+            let ignore_count = dict
                 .words
                 .iter()
                 .skip(start)
-                .map(|word| word.word.clone())
-                .collect();
-            let ignore_count = ignore_list
-                .iter()
-                .filter(|key| words_to_check.iter().any(|word| word == *key))
+                .filter(|word| ignore_set.contains(&word.lower()))
                 .count();
             if dict.last_learn_index + ignore_count >= length {
                 dict.complete = true;
@@ -717,7 +724,7 @@ impl PracticeSession {
     ) {
         stat.wrong = self.data.all_wrong_words.len();
         if self.mode != WordPracticeMode::Shuffle {
-            Self::advance_dict_progress(base, stat.new_word_number, false);
+            Self::advance_dict_progress(base, settings, stat.new_word_number, false);
         }
         close_open_segment(stat, now);
         let (segments, spend) = timer::normalize_practice_timer(&stat.segments, stat.spend, now);
@@ -791,7 +798,7 @@ impl PracticeSession {
         // 词永远不出现，主页百分比却已经越过它们（旧实现实测第 1 组学完
         // 直接出第 3 组，词表一半没教过）。
         if !was_complete {
-            Self::advance_dict_progress(base, 0, true);
+            Self::advance_dict_progress(base, settings, 0, true);
         }
         crate::domain::study_task::create_study_task(base, settings, rng).task_words
     }
@@ -999,7 +1006,7 @@ mod tests {
     #[test]
     fn advance_dict_progress_completes_by_the_actual_word_count() {
         let mut base = base_with(8, 5, 0);
-        PracticeSession::advance_dict_progress(&mut base, 5, false);
+        PracticeSession::advance_dict_progress(&mut base, &SettingState::default(), 5, false);
         let dict = base.study_dict().expect("当前词典");
         assert!(dict.complete, "实际 5 个词全部学完应标记完成");
         assert_eq!(dict.last_learn_index, 5, "进度应停在真实词数");
@@ -1009,7 +1016,7 @@ mod tests {
     #[test]
     fn advance_dict_progress_never_exceeds_the_actual_word_count() {
         let mut base = base_with(8, 5, 3);
-        PracticeSession::advance_dict_progress(&mut base, 10, false);
+        PracticeSession::advance_dict_progress(&mut base, &SettingState::default(), 10, false);
         let dict = base.study_dict().expect("当前词典");
         assert_eq!(dict.last_learn_index, 5, "进度不应超过真实词数");
         assert!(dict.complete);
@@ -1019,7 +1026,7 @@ mod tests {
     #[test]
     fn advance_dict_progress_repairs_progress_beyond_the_actual_word_count() {
         let mut base = base_with(8, 5, 8);
-        PracticeSession::advance_dict_progress(&mut base, 0, true);
+        PracticeSession::advance_dict_progress(&mut base, &SettingState::default(), 0, true);
         let dict = base.study_dict().expect("当前词典");
         assert_eq!(dict.last_learn_index, 5, "越过末尾的进度应夹回真实词数");
         assert!(dict.complete);
@@ -1040,9 +1047,42 @@ mod tests {
         });
         // 默认存档里已经有三本内置词典，当前词典是刚追加的那本。
         base.word.study_index = (base.word.book_list.len() - 1) as i32;
-        PracticeSession::advance_dict_progress(&mut base, 12, false);
+        PracticeSession::advance_dict_progress(&mut base, &SettingState::default(), 12, false);
         let dict = base.study_dict().expect("应选中词典");
         assert!(dict.complete, "词表里的词全学完了应标记完成");
         assert_eq!(dict.last_learn_index, 12, "进度夹在有效词数内");
+    }
+
+    /// 忽略集合按小写比较：尾部只剩「首字母大写的已掌握词」时也要判完成。
+    ///
+    /// 内置 CET-4 里确有 Christ / Christian / Candy / Polish 等大写词；任务生成
+    /// 用全小写忽略集合跳过它们，结算推进若拿原大小写比较就数不到，complete 永不置位。
+    #[test]
+    fn advance_dict_progress_counts_capitalized_ignored_words() {
+        let mut base = base_with(0, 12, 11);
+        base.study_dict_mut().expect("当前词典").words[11].word = "Word11".to_string();
+        base.known_mut()
+            .expect("应存在「已掌握」词典")
+            .words
+            .push(Word::new("Word11"));
+        PracticeSession::advance_dict_progress(&mut base, &SettingState::default(), 0, false);
+        let dict = base.study_dict().expect("当前词典");
+        assert!(dict.complete, "尾部大写已掌握词应计入忽略项并判完成");
+        assert_eq!(dict.last_learn_index, 12, "完成时进度应停在真实词数");
+    }
+
+    /// 「忽略简单词」开关也要影响结算推进：尾部只剩大写简单词时同样要判完成。
+    #[test]
+    fn advance_dict_progress_counts_capitalized_simple_words_when_enabled() {
+        let mut base = base_with(0, 12, 11);
+        base.study_dict_mut().expect("当前词典").words[11].word = "Word11".to_string();
+        base.simple_words.push("Word11".to_string());
+        let settings = SettingState {
+            ignore_simple_word: true,
+            ..SettingState::default()
+        };
+        PracticeSession::advance_dict_progress(&mut base, &settings, 0, false);
+        let dict = base.study_dict().expect("当前词典");
+        assert!(dict.complete, "开启忽略简单词后尾部大写简单词应计入忽略项");
     }
 }
