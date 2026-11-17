@@ -80,7 +80,7 @@
 | `practice-article.json` | 1 | `PRACTICE_ARTICLE_CACHE_VERSION` | `PracticeSaveArticle` |
 | `flows.json` | 无 | — | `localStorage['PracticeFlowV2']` |
 
-除 `flows.json` 是裸结构外，其余 4 份都套信封。写入用 `serde_json::to_string` 的紧凑单行格式（`flows.json` 例外，用 `to_string_pretty`）；手写或格式化编辑不影响读取。读取时机：`dict.json` / `setting.json` / `flows.json` 在启动装载时各读一次；两份断点缓存按需读（首页 `Enter` 尝试恢复、进文章页刷新标记）。
+除 `flows.json` 是裸结构外，其余 4 份都套信封。写入用 `serde_json::to_string` 的紧凑单行格式（`flows.json` 例外，用 `to_string_pretty`）；手写或格式化编辑不影响读取。读取时机：`dict.json` / `setting.json` / `flows.json` 在启动装载时各读一次；两份断点缓存在启动时也各读一次（`refresh_practice_resume` / `refresh_article_resume`，用于提示读不出来的缓存、决定主页是否显示「上次任务」与文章列表是否标「上次第 N 句」），之后按需再读（首页 `Enter` 尝试恢复、进文章页刷新标记）。
 
 ### 2.2 原子写
 
@@ -99,7 +99,7 @@
 | `VersionTooNew{found,expected}` | `version >` 期望值 | 默认值，原文件保留 | `存档版本过高（…），本次不会覆盖，请升级后使用` |
 | `UnsupportedVersion{found,expected}` | 缓存版本不符（单词缓存 `!= 2`、文章缓存 `!= 1`） | `None`，原文件保留 | `存档版本不受支持（…），已忽略；下次保存会覆盖` |
 
-`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；单词缓存的提示在恢复流程里弹（`restore_practice_from_cache`），文章缓存的在 `refresh_article_resume`（启动与进文章页各一次）；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
+`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
@@ -207,13 +207,15 @@
 
 **写入与删除时机**（`App::save_practice_now` → `store.save_practice`）：开一轮练习立即保存；单词推进、键入错误、自测操作等进度变化排 500 ms 防抖保存；本次 tick 确实累计时长且跨过 30 秒整数倍时再排一次（`should_schedule_periodic_save`）；`Ctrl+C` 与退出程序立即保存；结算 `finish_session` 删除文件。写入失败弹 `保存练习进度失败: …`，不中断练习。
 
-**恢复条件**（`App::try_resume_saved_practice` → `restore_practice_from_cache`，首页 `Enter` 触发，启动时不自动恢复）。任一步不满足就静默放弃、**不删文件**：
+**恢复条件**（`App::try_resume_saved_practice` → `restore_practice_from_cache`，首页 `Enter` 触发；启动时只读一次状态、不自动恢复）。任一步不满足就静默放弃、**不删文件**：
 
 1. 读到 `version == 2` 的缓存（否则走 2.3 的提示与忽略），且当前学习词典存在、已有词表；
 2. `cache_from_compact` 能按当前词典的 `words` 用单词字符串精确匹配还原任务词表（匹配不到的词被丢弃，任务词表全空则放弃），且 `practiceData`、`statStoreData`、`sessionSnapshot` 三者齐备；
 3. 流程游标合法（`Navigator::restore_snapshot`），且断点里的 flow 模式与本次要跑的模式一致。
 
 恢复成功后进入练习页并 Toast「已继续上次练习」。因此换过词库后旧缓存通常无法恢复；版本不符的缓存不被移动，下次保存时被覆盖。
+
+版本不符或损坏的缓存仍会让文件留在原地，但启动时弹一次 Warning，且主页**不**显示「上次任务」：`App::has_saved_practice` 的判据是「版本可读且 `val` 非空」，不是文件是否存在。否则主页会一直挂着「上次任务」、按 `Enter` 却静默新建，用户无从得知原因。
 
 ## 6. `practice-article.json`（`ArticleCacheEnvelope`，版本 1）
 

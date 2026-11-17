@@ -24,8 +24,8 @@ use crate::domain::statistics::DayTotals;
 use crate::domain::study_task::{create_shuffle_task, create_study_task};
 use crate::domain::timer;
 use crate::domain::types::{
-    BaseState, Dict, PracticeState, SettingState, Statistics, TaskWords, Word, WordPracticeMode,
-    WordPracticeType,
+    BaseState, Dict, PracticeCacheCompact, PracticeState, SettingState, Statistics, TaskWords,
+    Word, WordPracticeMode, WordPracticeType,
 };
 use crate::domain::typing::{KeyInput, TypingContext, TypingEngine, TypingEvent, TypingNotice};
 use crate::logging;
@@ -758,6 +758,13 @@ pub struct App {
     pub fatal: Option<String>,
     pub last_activity: i64,
     last_timer_tick: i64,
+    /// 单词断点缓存当前是否可恢复（版本可读且内容非空）。
+    ///
+    /// 主页每次重绘都要问「有没有上次任务」，所以在启动与恢复流程里读一次
+    /// 缓存、把结论存在这里；渲染路径上不碰磁盘。文件存在但版本不受支持或
+    /// 已损坏时为 `false`——否则主页会一直挂着「上次任务」，按 Enter 却
+    /// 静默新建。
+    saved_practice_resumable: bool,
     pending_practice_save: Option<i64>,
     /// 文章跟打进度的延迟保存截止时间。
     pending_article_save: Option<i64>,
@@ -940,6 +947,7 @@ impl App {
             fatal: None,
             last_activity: now,
             last_timer_tick: now,
+            saved_practice_resumable: false,
             pending_practice_save: None,
             pending_article_save: None,
         };
@@ -968,8 +976,7 @@ impl App {
 
         if cli.reset_practice {
             // 两个练习的断点都清：启动参数的用途是「复现问题时清干净」。
-            let _ = app.store.remove_practice();
-            let _ = app.store.remove_practice_article();
+            app.clear_practice_cache();
             app.toast(NoticeLevel::Success, "已清空练习进度");
         } else {
             // 启动固定在主页：断点缓存只作为「继续」入口的数据源，
@@ -980,6 +987,9 @@ impl App {
             // 占位框），两份缓存同时存在时还会叠成「单词会话 + 文章练习」
             // 的非法状态，按 Esc 后没有任何页面能画出来。
             app.refresh_article_resume();
+            // 单词缓存同样先读一次：损坏 / 版本不符的提示要弹出来，主页的
+            // 「上次任务」也不能只看文件在不在。
+            app.refresh_practice_resume();
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -996,22 +1006,38 @@ impl App {
         Ok(app)
     }
 
-    /// 从断点缓存恢复练习会话。
+    /// 读单词断点缓存：顺带弹出读不出来的提示，并刷新
+    /// [`App::has_saved_practice`] 的结论。
     ///
-    /// 返回是否恢复成功——主页按 Enter（启动后第一次，或在同一次运行内）
-    /// 用它决定是接着练还是重新生成任务。
-    fn restore_practice_from_cache(&mut self) -> bool {
+    /// 读缓存只有这一处：启动刷新（`refresh_practice_resume`）与恢复流程
+    /// 共用。提示因此在启动时弹一次；恢复流程里再读时若仍读不出来，也会
+    /// 补一次（文件在同一次运行内被外部改坏的边角情况）。
+    fn load_practice_cache(&mut self) -> Option<PracticeCacheCompact> {
         let loaded = self.store.load_practice();
         if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
-        let Some(compact) = loaded.value else {
-            return false;
-        };
+        self.saved_practice_resumable = loaded.value.is_some();
+        loaded.value
+    }
+
+    /// 启动时读一次单词断点缓存。
+    ///
+    /// 损坏 / 版本不符的提示在这里弹出（与文章缓存的 `refresh_article_resume`
+    /// 同一时机），主页的「上次任务」也据此决定：文件在但读不出来不算断点。
+    fn refresh_practice_resume(&mut self) {
+        let _ = self.load_practice_cache();
+    }
+
+    /// 用已读出的断点缓存恢复练习会话。
+    ///
+    /// 返回是否恢复成功——主页按 Enter（启动后第一次，或在同一次运行内）
+    /// 用它决定是接着练还是重新生成任务。
+    fn restore_practice_from_cache(&mut self, compact: &PracticeCacheCompact) -> bool {
         let Some(dict) = self.boot.base.study_dict() else {
             return false;
         };
-        let Some(cache) = cache_from_compact(&compact, &dict.words) else {
+        let Some(cache) = cache_from_compact(compact, &dict.words) else {
             return false;
         };
         let flow = match self.flow_store.flows.get(&cache.session_snapshot.flow_id) {
@@ -1045,8 +1071,7 @@ impl App {
             return false;
         }
         // 先看一眼断点里的模式，对不上就别费劲恢复。
-        let loaded = self.store.load_practice();
-        let Some(compact) = loaded.value else {
+        let Some(compact) = self.load_practice_cache() else {
             return false;
         };
         let Some(dict) = self.boot.base.study_dict() else {
@@ -1062,7 +1087,7 @@ impl App {
         if flow.mode != mode {
             return false;
         }
-        if !self.restore_practice_from_cache() {
+        if !self.restore_practice_from_cache(&compact) {
             return false;
         }
         self.toast(NoticeLevel::Info, "已继续上次练习");
@@ -1095,8 +1120,9 @@ impl App {
         let mut cache = session.build_cache();
         cache.stat_store_data = self.stat.clone();
         let compact = cache_to_compact(&cache);
-        if let Err(err) = self.store.save_practice(Some(&compact)) {
-            self.toast(NoticeLevel::Error, format!("保存练习进度失败: {err}"));
+        match self.store.save_practice(Some(&compact)) {
+            Ok(()) => self.saved_practice_resumable = true,
+            Err(err) => self.toast(NoticeLevel::Error, format!("保存练习进度失败: {err}")),
         }
         self.pending_practice_save = None;
     }
@@ -1108,6 +1134,7 @@ impl App {
     pub fn clear_practice_cache(&mut self) {
         let _ = self.store.remove_practice();
         let _ = self.store.remove_practice_article();
+        self.saved_practice_resumable = false;
         self.pending_practice_save = None;
         self.pending_article_save = None;
         self.article_resume = None;
@@ -1170,13 +1197,14 @@ impl App {
 
     // ── 统计 / 任务预览 ──────────────────────────────────────────────────
 
-    /// 是否有未完成的单词练习进度（断点缓存存在）。
+    /// 是否有**可恢复**的单词练习进度（断点缓存版本可读且内容非空）。
     ///
     /// 主页据此把「今日任务」改成「上次任务」——对齐上游 `words.vue` 的
-    /// `isSaveData`。只查文件在不在，不解析内容：主页每次重绘都问一次，
-    /// 解析整个缓存太贵。
+    /// `isSaveData`。只看文件在不在会把版本不受支持 / 已损坏的缓存也算成
+    /// 断点：主页一直显示「上次任务」，按 Enter 却静默新建。结论由
+    /// `load_practice_cache` 在启动与恢复流程里更新，渲染路径上不碰磁盘。
     pub fn has_saved_practice(&self) -> bool {
-        self.store.practice_exists()
+        self.saved_practice_resumable
     }
 
     /// 是否有未完成的文章跟打进度。
@@ -1485,6 +1513,7 @@ impl App {
         // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
         self.pending_practice_save = None;
         let _ = self.store.remove_practice();
+        self.saved_practice_resumable = false;
         self.refresh_stats();
         self.refresh_task_preview();
     }

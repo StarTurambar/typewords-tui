@@ -35,6 +35,7 @@
 - **发布前强制跑完整套检查**：`release.yml` 在打包前先跑与 `ci.yml` 同一组 fmt / clippy / Ubuntu + Windows 测试，`package` 依赖两个 `verify` 作业，测试红灯不再产出归档或发布。
 - **参数放在子命令之后无法解析**：`--seed` / `--dict` / `--mode` / `--theme` / `--reset-practice` 过去不是全局参数，使用手册的示例 `tw task --seed 42` 会直接报 `error: unexpected argument '--seed' found`（退出码 2），只有 `tw --seed 42 task` 能用。现在这五个参数与 `--home` / `--assets` 一样是全局参数，放在子命令前后都能解析，`tw export-dict --dict cet4` 也直接生效；使用手册与 README 的参数表同步注明，并补了一条 CLI 解析回归测试。
 - **收藏弹层命中区溢出**：弹层只把可视区里真正画出来的词典行登记为命中区，提示行（`↑↓ 选择 · Enter 收藏 · Esc 取消`）和弹层下方空白不再能改变选中项；可收藏词典超过 8 个时列表跟随光标滚动，选中行始终可见。旧实现给全部词典生成命中矩形，绘制却在提示行前截断，第 9 个词典的矩形正好压在提示行上。
+- **旧版单词断点缓存的提示与幽灵「上次任务」**：`practice-word.json` 版本不受支持或已损坏时，原本应该在恢复流程里弹的提示永远走不到——`try_resume_saved_practice` 在调用 `restore_practice_from_cache` 之前就因缓存为空返回；主页又只看文件是否存在，于是一直显示「上次任务」、按 `Enter` 却静默新建。现在启动时与文章缓存一样先读一次并弹 Warning，`has_saved_practice` 改判「版本可读且内容非空」，读不出来的缓存文件仍原样保留。
 
 ## [0.3.3] - 2026-11-15
 
