@@ -102,6 +102,48 @@ fn complete_full_session_and_settle() {
     );
 }
 
+/// 手改 `setting.json` 填进极端 FSRS 参数时，结算不能崩、当轮进度仍要落盘。
+///
+/// `request_retention`、`maximum_interval` 与 `learning_steps` 都能绕过界面直接
+/// 改（也可以经 `tw import-web` 导入）；极端值原样参与调度会让
+/// `now + Duration::days/minutes(_)` 越过 chrono 的 `TimeDelta` 上界，结算在
+/// 写盘前 panic，当轮统计、错词与 FSRS 评级全丢（`reviews/panic-audit.md` 问题 1）。
+#[test]
+fn extreme_fsrs_parameters_do_not_break_settlement() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    {
+        // 按「退出程序后手改 setting.json」的形态写入，再走正常启动装载。
+        let mut app = app::build_for_test(paths.clone(), fixture.cli()).unwrap();
+        app.boot.settings.fsrs_parameters.request_retention = 1e-9;
+        app.boot.settings.fsrs_parameters.maximum_interval = 1e300;
+        app.boot.settings.fsrs_parameters.learning_steps = vec!["1e300d".to_string()];
+        app.save_settings_now();
+    }
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    app.boot.settings.word_practice_mode = WordPracticeMode::System;
+    app.start_practice();
+    assert_eq!(app.screen, app::Screen::Practice);
+    assert!(drive_to_settlement(&mut app, 0, 5000), "会话应正常结束");
+    assert!(app.summary.is_some(), "应弹出结算");
+
+    // 结算结果必须已经落盘：重启后 FSRS 卡、统计与学习进度都还在。
+    let store = typewords_tui::store::FileStore::new(fixture.home()).unwrap();
+    let loaded = store.load_dict();
+    assert!(loaded.is_ok(), "结算后 dict.json 应可正常装载");
+    let base = loaded.value;
+    assert!(!base.fsrs_data.is_empty(), "FSRS 卡应落盘");
+    let dict = base.study_dict().expect("toy 应是当前词典");
+    assert!(!dict.statistics.is_empty(), "统计应落盘");
+    assert!(dict.last_learn_index > 0, "学习进度应推进");
+    // 极端参数被夹到安全区间：到期时间不会排到几万年以后。
+    let horizon = chrono::Utc::now() + chrono::Duration::days(36_503);
+    for (word, card) in &base.fsrs_data {
+        assert!(card.due <= horizon, "{word} 的到期时间越界：{}", card.due);
+    }
+}
+
 #[test]
 fn mastered_word_is_excluded_next_session() {
     let fixture = common::Fixture::new();

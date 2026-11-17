@@ -4259,10 +4259,16 @@ impl App {
         }
     }
 
-    /// 调度器实际使用的最大间隔（天）：小于 1 时 `Fsrs::new` 回退 36500。
+    /// 调度器实际使用的最大间隔（天）：`Fsrs::new` 把 1 ~ 36500 之外的值
+    /// 统一夹到 36500（手改 `setting.json` 写成 `1e300` 时就是这种情况），
+    /// 界面显示生效值，与实际调度用的上限一致。
     pub fn fsrs_maximum_interval(&self) -> f64 {
         let value = self.boot.settings.fsrs_parameters.maximum_interval;
-        if value >= 1.0 { value } else { 36_500.0 }
+        if value >= 1.0 {
+            value.min(crate::domain::fsrs::MAX_INTERVAL_DAYS)
+        } else {
+            crate::domain::fsrs::MAX_INTERVAL_DAYS
+        }
     }
 
     /// 权重行的当前值（显示与编辑预填共用）。
@@ -4383,7 +4389,8 @@ impl App {
                             (value.clamp(50, 99) as f64) / 100.0
                     }
                     EditTarget::MaximumInterval => {
-                        settings.fsrs_parameters.maximum_interval = value.clamp(1, 36_500) as f64
+                        settings.fsrs_parameters.maximum_interval =
+                            value.clamp(1, crate::domain::fsrs::MAX_INTERVAL_DAYS as i64) as f64
                     }
                     EditTarget::PerDay => {}
                     EditTarget::Note => {}

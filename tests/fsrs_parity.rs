@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use typewords_tui::domain::fsrs::Fsrs;
-use typewords_tui::domain::types::{Card, FsrsParameters};
+use typewords_tui::domain::types::{Card, FsrsParameters, RATING_AGAIN, RATING_EASY, RATING_GOOD};
 
 #[derive(Deserialize)]
 struct Golden {
@@ -143,4 +143,72 @@ fn fsrs_matches_upstream_golden_sample() {
             }
         }
     }
+}
+
+/// 手改 `setting.json` 的 FSRS 参数填进极端值时，结算路径不能 panic。
+///
+/// 参数兜底只在 `Fsrs::new` 与 `step_to_minutes` 做：留存率取 `1e-9` 时
+/// `interval_modifier` 会被推向 ~1e58，最大间隔写 `1e300`、学习步进写
+/// `"1e300d"` 也都能通过 serde 与类型校验；原样参与调度会让
+/// `now + Duration::days/minutes(_)` 越过 chrono 的 `TimeDelta` 上界
+/// （`TimeDelta::days out of bounds`）。结算在写盘前崩溃，当轮进度全丢，且
+/// 同一存档每次结算都复现。这里锁定「极端值先夹到安全区间，再排到期」。
+///
+/// 上游 ts-fsrs 两条路径都不会崩：留存率 / 间隔在 `Math.min/max` 里被夹住，
+/// 步进用 `parseInt` 加 `Date` 毫秒加法，溢出只会得到无效日期。
+///
+/// 与 `reviews/panic-audit.md` 问题 1 同源。
+#[test]
+fn extreme_fsrs_parameters_do_not_panic_at_settle() {
+    let now = parse_time("2026-01-05T00:00:00.000Z");
+    // 复习态对 again / hard / good / easy 依次叠加 +1 天约束（长期调度器最远 +3 天），
+    // 上限因此略高于最大间隔；这里锁的是「别排到天文数字」，不是精确天数。
+    let horizon_at = |base: DateTime<Utc>| base + chrono::Duration::days(36_503);
+    let steps = |list: Vec<&str>| FsrsParameters {
+        learning_steps: list.into_iter().map(str::to_string).collect(),
+        ..FsrsParameters::default()
+    };
+
+    // 路径 A：极小留存率 + 极大最大间隔，新卡 Easy 直接毕业进复习。
+    let extreme = FsrsParameters {
+        request_retention: 1e-9,
+        maximum_interval: 1e300,
+        ..FsrsParameters::default()
+    };
+    let scheduler = Fsrs::new(&extreme);
+    let card = scheduler.next_card(None, RATING_EASY, now);
+    assert!(card.scheduled_days <= 36_500.0, "间隔应夹到最大间隔");
+    assert!(
+        card.due <= horizon_at(now),
+        "到期不能越过 chrono 的安全范围"
+    );
+
+    // 路径 A-2：同一组参数落在复习卡上，`review_state` 一次算四张卡的到期时间。
+    let later = parse_time("2026-02-05T00:00:00.000Z");
+    for enable_short_term in [true, false] {
+        let scheduler = Fsrs::new(&FsrsParameters {
+            enable_short_term,
+            ..extreme.clone()
+        });
+        let next = scheduler.next_card(Some(&card), RATING_EASY, later);
+        assert!(
+            next.due <= horizon_at(later),
+            "复习态到期越界（enable_short_term = {enable_short_term}）：{next:?}"
+        );
+    }
+
+    // 路径 B-1：首步极大，Again 会把卡片排到首步时间。
+    let scheduler = Fsrs::new(&steps(vec!["999999999999999d"]));
+    let card = scheduler.next_card(None, RATING_AGAIN, now);
+    assert!(card.due <= horizon_at(now));
+
+    // 路径 B-2：次步极大，Good 会走到下一步。
+    let scheduler = Fsrs::new(&steps(vec!["1m", "1e300d"]));
+    let card = scheduler.next_card(None, RATING_GOOD, now);
+    assert!(card.due <= horizon_at(now));
+
+    // 路径 B-3：非有限数按无法解析处理，退化成「立即毕业」，同样不崩。
+    let scheduler = Fsrs::new(&steps(vec!["infm"]));
+    let card = scheduler.next_card(None, RATING_AGAIN, now);
+    assert!(card.due <= horizon_at(now));
 }
