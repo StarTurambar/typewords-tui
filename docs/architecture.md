@@ -70,7 +70,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 | --- | --- | --- | --- |
 | domain | src/domain/ | 与终端无关的类型、词库、今日任务、FSRS、流程、键入、会话、文章、统计 | 不依赖 app / ui / store / theme，也不引入终端相关 crate；tests/layering.rs 守护 |
 | store | src/store/ | 5 份 JSON 存档的读写、版本校验、损坏隔离 | 依赖 domain 与 fs |
-| theme | src/theme/ | 主题模型、6 套内置主题、用户主题加载与校验 | 不依赖 ratatui，也不依赖 ui |
+| theme | src/theme/ | 主题模型、6 套内置主题、用户主题加载与校验 | 不依赖 app / ui，也不引入终端相关 crate；tests/layering.rs 守护 |
 | fs | src/fs.rs | 原子写（唯一临时名 + fsync + rename）与数据目录锁 | 只依赖 std；domain 与 store 共用，避免两层成环 |
 | app | src/app/ | App 状态机、Action、键鼠映射、焦点、事件循环、保存时机 | 依赖 domain / store / bootstrap / cli / paths；渲染入口调用 ui |
 | ui | src/ui/ | ratatui 布局与绘制、token → Color、鼠标命中 | 只读 App 与 domain 数据，不修改状态 |
