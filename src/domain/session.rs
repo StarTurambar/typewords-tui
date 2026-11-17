@@ -870,6 +870,10 @@ pub fn cache_to_compact(cache: &PracticeCache) -> PracticeCacheCompact {
 }
 
 pub fn cache_from_compact(compact: &PracticeCacheCompact, words: &[Word]) -> Option<PracticeCache> {
+    // 结构上就不可恢复的缓存直接拒绝；与主页「上次任务」的判据同源。
+    if !compact.has_restorable_content() {
+        return None;
+    }
     let word_map: HashMap<&str, &Word> = words
         .iter()
         .map(|word| (word.word.as_str(), word))

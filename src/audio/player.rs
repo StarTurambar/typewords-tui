@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 /// 有道发音接口。
 const PRONUNCIATION_API: &str = "https://dict.youdao.com/dictvoice?audio=";
@@ -38,9 +39,16 @@ const SHELL: &str = if cfg!(target_os = "windows") {
     "sh"
 };
 
-/// `CreateProcess` 的「无窗口」标志：子进程不创建可见的控制台窗口。
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// 脚本实际调用的 curl 名称。
+///
+/// Windows 的 PowerShell 把 `curl` 当成 `Invoke-WebRequest` 的别名，脚本因此
+/// 固定调用 `curl.exe`；PATH 预检必须用同一个名字，否则只装了 `curl.cmd`
+/// 的机器会「预检通过、脚本找不到命令」，既不发音也不降级。
+const CURL: &str = if cfg!(target_os = "windows") {
+    "curl.exe"
+} else {
+    "curl"
+};
 
 /// 下载并播放单词发音。
 ///
@@ -58,12 +66,10 @@ pub fn play_remote_pronunciation(word: &str, sound_type: &str) -> bool {
     let Some(path) = audio_path(word, kind) else {
         return false;
     };
-    // 工具不全就别白跑一趟：直接让调用方降级回系统 TTS。日志里留一行原因，
-    // 否则用户切到有道后只会听到「系统 TTS」，不知道是缺 curl 还是缺播放器。
-    if let Some(missing) = missing_tool() {
-        crate::logging::warn(format!(
-            "有道发音不可用：PATH 里找不到 {missing}，本次改用系统 TTS"
-        ));
+    // 工具不全就别白跑一趟：直接让调用方降级回系统 TTS。探测结果（以及那条
+    // 「缺什么」的日志）在一次运行里只算一次，否则每个新词都会重扫 PATH 并往
+    // 日志里追加一条相同的告警。
+    if missing_tool().is_some() {
         return false;
     }
     spawn_pipeline(&path, &url)
@@ -87,13 +93,30 @@ fn audio_path(word: &str, kind: u8) -> Option<PathBuf> {
 /// 脚本依赖但 PATH 里缺失的命令（全都在时为 `None`）。
 ///
 /// 只查文件系统、不起进程；真正的下载失败发生在后台，那时已经来不及降级，
-/// 所以「能不能跑」必须在这里一次性判定完。
+/// 所以「能不能跑」必须在这里一次性判定完。工具可用性在一次运行内是常量，
+/// 探测结果缓存下来：每个新词都重扫 PATH 并重复写同一条日志没有意义。
 fn missing_tool() -> Option<String> {
+    static MISSING: OnceLock<Option<String>> = OnceLock::new();
+    MISSING
+        .get_or_init(|| {
+            let missing = probe_missing_tool();
+            if let Some(missing) = &missing {
+                crate::logging::warn(format!(
+                    "有道发音不可用：PATH 里找不到 {missing}，本次运行改用系统 TTS"
+                ));
+            }
+            missing
+        })
+        .clone()
+}
+
+/// 实际探测：解释器、curl、任一播放器缺一不可。
+fn probe_missing_tool() -> Option<String> {
     if !has_program(SHELL) {
         return Some(SHELL.to_string());
     }
-    if !has_program("curl") {
-        return Some("curl".to_string());
+    if !has_program(CURL) {
+        return Some(CURL.to_string());
     }
     if !PLAYERS.iter().any(|player| has_program(player)) {
         return Some(PLAYERS.join(" / "));
@@ -101,7 +124,7 @@ fn missing_tool() -> Option<String> {
     None
 }
 
-/// 程序是否在 PATH 里（只查文件系统，不起进程）。
+/// 程序是否在 PATH 里且能执行（只查文件系统，不起进程）。
 fn has_program(program: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
@@ -116,7 +139,26 @@ fn has_program(program: &str) -> bool {
     } else {
         vec![program.to_string()]
     };
-    std::env::split_paths(&path).any(|dir| candidates.iter().any(|name| dir.join(name).is_file()))
+    std::env::split_paths(&path)
+        .any(|dir| candidates.iter().any(|name| is_runnable(&dir.join(name))))
+}
+
+/// PATH 项是否是可执行文件。
+///
+/// Unix 上只检查 `is_file()` 会把没有执行位的同名文件当成可用工具：脚本里的
+/// `command -v` 判定失败，一行都没跑，调用方却以为已交给后台、不再降级。
+fn is_runnable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return std::fs::metadata(path)
+            .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 /// 后台跑「下载 → 播放 → 删除」这条链，界面不等它。
@@ -126,7 +168,22 @@ fn spawn_pipeline(path: &Path, url: &str) -> bool {
             // 进程创建成功不等于脚本开始执行（解释器可能是个立刻退出的桩）。
             // 这里不等待——等待会卡住界面——只顺手收一次已经退出的子进程：
             // 真退了就说明这条链路没跑起来，交给调用方降级。
-            !matches!(child.try_wait(), Ok(Some(_)))
+            match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(status)) => {
+                    crate::logging::warn(format!(
+                        "有道发音：下载 / 播放进程启动后立即退出（{status}），本次改用系统 TTS"
+                    ));
+                    false
+                }
+                Err(error) => {
+                    // 检查失败说明不了脚本没跑起来，维持原来的「已交给后台」判断。
+                    crate::logging::warn(format!(
+                        "有道发音：检查下载 / 播放进程状态失败（{error}）"
+                    ));
+                    true
+                }
+            }
         }
         Err(error) => {
             crate::logging::warn(format!("有道发音：启动下载 / 播放进程失败（{error}）"));
@@ -137,22 +194,20 @@ fn spawn_pipeline(path: &Path, url: &str) -> bool {
 
 /// 构造「下载 → 播放 → 删除」的命令。
 ///
-/// 路径与 URL 走环境变量而不是 argv：见模块文档。
+/// 路径与 URL 走环境变量而不是 argv：见模块文档。解释器只用 [`SHELL`] 一处
+/// 名字，预检与实际 spawn 不会各说各话。
 fn pipeline_command(path: &Path, url: &str) -> Command {
     let script = if cfg!(target_os = "windows") {
         windows_script()
     } else {
         unix_script()
     };
-    let mut command = if cfg!(target_os = "windows") {
-        let mut command = Command::new("powershell");
+    let mut command = Command::new(SHELL);
+    if cfg!(target_os = "windows") {
         command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        command
     } else {
-        let mut command = Command::new("sh");
         command.args(["-c", &script]);
-        command
-    };
+    }
     command
         .env(ENV_PATH, path)
         .env(ENV_URL, url)
@@ -160,12 +215,7 @@ fn pipeline_command(path: &Path, url: &str) -> Command {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // 不用 `-WindowStyle Hidden`：那正是安全软件「隐藏执行 PowerShell」
-        // 规则最典型的匹配特征（同 `tts::command`）。CREATE_NO_WINDOW 同样不出窗口。
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    crate::audio::no_console_window(&mut command);
     command
 }
 
@@ -262,6 +312,24 @@ mod tests {
         assert!(script.contains("$TYPEWORDS_AUDIO_URL"));
         assert!(!script.contains("$1"), "位置参数不再使用");
         assert!(!script.contains("$2"), "位置参数不再使用");
+    }
+
+    /// PATH 预检必须检查脚本真正调用的那个 curl 名字。
+    ///
+    /// Windows 的 `curl` 在 PowerShell 里是 `Invoke-WebRequest` 别名，脚本
+    /// 固定调 `curl.exe`；预检若仍查 `curl`，只装 `curl.cmd` 的机器会
+    /// 「预检通过、脚本找不到命令」，静默不出声也不降级。
+    #[test]
+    fn the_path_precheck_uses_the_curl_name_the_script_runs() {
+        let script = if cfg!(target_os = "windows") {
+            windows_script()
+        } else {
+            unix_script()
+        };
+        assert!(
+            script.contains(CURL),
+            "预检名 {CURL} 必须与脚本实际调用的 curl 一致"
+        );
     }
 
     #[test]

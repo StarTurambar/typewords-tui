@@ -102,13 +102,16 @@ impl ForbiddenVisitor<'_> {
         }
     }
 
-    /// 宏体是未解析的 token 流，单独扫一遍 `crate::…` 与外层 crate 名。
-    fn record_macro_tokens(&mut self, tokens: TokenStream) {
+    /// 宏体与属性参数都是未解析的 token 流，单独扫一遍 `crate::…` 与外层 crate 名。
+    ///
+    /// syn 默认的 `visit_token_stream` 是空实现；宏调用（`visit_macro`）和
+    /// 属性参数（`visit_meta_list`）最终都会走到这里，因此只需覆写这一处。
+    fn record_token_stream(&mut self, tokens: TokenStream) {
         let trees: Vec<TokenTree> = tokens.into_iter().collect();
         let mut index = 0;
         while index < trees.len() {
             match &trees[index] {
-                TokenTree::Group(group) => self.record_macro_tokens(group.stream()),
+                TokenTree::Group(group) => self.record_token_stream(group.stream()),
                 TokenTree::Ident(ident) if ident == "crate" => {
                     for root in crate_paths_in(&trees[index..]) {
                         self.record(root);
@@ -140,9 +143,8 @@ impl<'ast> Visit<'ast> for ForbiddenVisitor<'_> {
         syn::visit::visit_item_extern_crate(self, item);
     }
 
-    fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        self.record_macro_tokens(node.tokens.clone());
-        syn::visit::visit_macro(self, node);
+    fn visit_token_stream(&mut self, tokens: &'ast TokenStream) {
+        self.record_token_stream(tokens.clone());
     }
 }
 
@@ -280,6 +282,19 @@ fn the_layering_guard_sees_grouped_imports() {
 #[test]
 fn the_layering_guard_sees_references_inside_macros() {
     let source = "fn f() { assert!(crate::store::FileStore::new().is_ok()); }";
+    assert_eq!(
+        forbidden_references(source, DOMAIN_FORBIDDEN),
+        ["crate::store"]
+    );
+}
+
+/// 属性参数也是 token 流：`#[attr(crate::store::X)]` 不能被漏掉。
+///
+/// syn 默认的 `visit_token_stream` 是空实现，只覆写 `visit_macro` 会漏掉
+/// 属性里的路径（旧的手写扫描器反而能抓到）。
+#[test]
+fn the_layering_guard_sees_references_inside_attribute_tokens() {
+    let source = "#[some_attr(crate::store::FileStore)] fn f() {}";
     assert_eq!(
         forbidden_references(source, DOMAIN_FORBIDDEN),
         ["crate::store"]

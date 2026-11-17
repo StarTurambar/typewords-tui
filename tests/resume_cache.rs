@@ -195,6 +195,32 @@ fn an_unsupported_practice_cache_explains_itself_instead_of_silently_starting_fr
     assert!(app.session.is_some(), "应建立练习会话");
 }
 
+/// 可反序列化但没有可恢复内容的 v2 缓存（`val:{}`）也不能冒充「上次任务」。
+///
+/// `PracticeCacheCompact` 整体带 `serde(default)`，空对象会得到
+/// `Some(默认值)`；`tw import-web` 也会把这种信封原样写进来。只看
+/// `Option::is_some()` 会重现「主页挂着上次任务、按 Enter 却静默新建」。
+#[test]
+fn a_structurally_empty_practice_cache_is_not_advertised_as_resumable() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let cache = paths.home.join("practice-word.json");
+    let original = r#"{"version":2,"val":{}}"#;
+    std::fs::write(&cache, original).unwrap();
+
+    let mut app = app::build_for_test(paths, fixture.cli()).unwrap();
+    let text = render_text(&app, 120, 40);
+    assert!(
+        !text.contains("上次任务"),
+        "没有任务词 / 快照的空壳缓存不该显示「上次任务」: {text}"
+    );
+    assert!(text.contains("今日任务"), "应显示「今日任务」: {text}");
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, app::Screen::Practice, "应正常开始新任务");
+    assert!(app.session.is_some(), "应建立练习会话");
+}
+
 /// 文章跟打：Esc 退出后重启，启动停在主页；进文章页并选中同一篇才续打。
 #[test]
 fn article_practice_progress_persists_and_resumes() {

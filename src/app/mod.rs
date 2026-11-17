@@ -1017,14 +1017,21 @@ impl App {
         if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
-        self.saved_practice_resumable = loaded.value.is_some();
+        // 能反序列化不等于能恢复：`{"val":{}}` 会得到 Some(默认值)，但
+        // `cache_from_compact` 必然拒绝它。主页据此显示「上次任务」，按
+        // Enter 却静默新建，正是本次修复要消掉的幽灵断点。
+        self.saved_practice_resumable = loaded
+            .value
+            .as_ref()
+            .is_some_and(PracticeCacheCompact::has_restorable_content);
         loaded.value
     }
 
-    /// 启动时读一次单词断点缓存。
+    /// 读一次单词断点缓存，刷新 [`App::has_saved_practice`] 的结论。
     ///
-    /// 损坏 / 版本不符的提示在这里弹出（与文章缓存的 `refresh_article_resume`
-    /// 同一时机），主页的「上次任务」也据此决定：文件在但读不出来不算断点。
+    /// 启动时调用一次；运行期切换词库也可能经
+    /// `Bootstrapped::normalize_study_progress` 删掉 `practice-word.json`，
+    /// 切换成功后再调一次，主页才不会挂着已经不存在的「上次任务」。
     fn refresh_practice_resume(&mut self) {
         let _ = self.load_practice_cache();
     }
@@ -1132,9 +1139,15 @@ impl App {
     /// 「清空当前练习进度」与 `--reset-practice` 共用此函数——两者的用途
     /// 都是「从干净状态开始」，留着半个文章的跟打进度没意义。
     pub fn clear_practice_cache(&mut self) {
-        let _ = self.store.remove_practice();
-        let _ = self.store.remove_practice_article();
-        self.saved_practice_resumable = false;
+        match self.store.remove_practice() {
+            Ok(()) => self.saved_practice_resumable = false,
+            // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
+            // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
+            Err(err) => logging::error(format!("清空单词练习缓存失败: {err}")),
+        }
+        if let Err(err) = self.store.remove_practice_article() {
+            logging::error(format!("清空文章练习缓存失败: {err}"));
+        }
         self.pending_practice_save = None;
         self.pending_article_save = None;
         self.article_resume = None;
@@ -1512,8 +1525,12 @@ impl App {
         // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
         // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
         self.pending_practice_save = None;
-        let _ = self.store.remove_practice();
-        self.saved_practice_resumable = false;
+        match self.store.remove_practice() {
+            Ok(()) => self.saved_practice_resumable = false,
+            // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
+            // 而不是谎称「没有上次任务」。
+            Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),
+        }
         self.refresh_stats();
         self.refresh_task_preview();
     }
@@ -3067,6 +3084,8 @@ impl App {
                     return;
                 }
                 self.save_dict_now();
+                // select_dict 可能校正进度并删掉练习断点。
+                self.refresh_practice_resume();
             }
         }
         self.open_words();
@@ -3499,6 +3518,8 @@ impl App {
                     return;
                 }
                 self.save_dict_now();
+                // select_dict 可能校正进度并删掉练习断点。
+                self.refresh_practice_resume();
                 self.refresh_task_preview();
                 self.toast(NoticeLevel::Success, format!("已新建「{name}」"));
             }

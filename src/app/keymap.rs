@@ -422,9 +422,11 @@ pub fn screen_action(app: &App, key: KeyEvent) -> Option<Action> {
             }
             // Tab 已改为换栏，流程编辑的「下一个节点」换到 `]`。
             KeyCode::Char(']') => Some(Action::FlowNextNode),
-            KeyCode::Char('n') => Some(Action::FlowDuplicate),
+            // 新建副本 / 删除流程都会改「启用中的流程」并落盘；编辑态下它们是
+            // 误按（编辑键位里没有），放过去会静默换掉正在编辑的对象。
+            KeyCode::Char('n') if !app.flow_editing => Some(Action::FlowDuplicate),
             KeyCode::Char('e') => Some(Action::FlowEdit),
-            KeyCode::Delete => Some(Action::FlowDelete),
+            KeyCode::Delete if !app.flow_editing => Some(Action::FlowDelete),
             // h / l：在当前节点内左右移动步骤光标（节点光标由 ↑/↓ 移动）。
             KeyCode::Char('h') if app.flow_editing => Some(Action::FlowStepMove(-1)),
             KeyCode::Char('l') if app.flow_editing => Some(Action::FlowStepMove(1)),

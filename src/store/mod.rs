@@ -81,12 +81,14 @@ impl<T> Loaded<T> {
 /// 存档信封的版本头：只解析 `version` / `updated_at`，故意不声明 `val`。
 ///
 /// serde 默认忽略未知字段，因此高版本存档里结构已经变化的 `val` 不会
-/// 影响这里的解析。
+/// 影响这里的解析。`updated_at` 用 `Value` 接住：它只是展示用的元数据，
+/// 未来版本即使换类型（例如改成毫秒时间戳）也不能让「版本过高」退化成
+/// 「损坏」——否则高版本存档仍会被隔离、再被默认值覆盖。
 #[derive(Deserialize)]
 struct EnvelopeHeader {
     version: u32,
     #[serde(default)]
-    updated_at: Option<String>,
+    updated_at: Option<serde_json::Value>,
 }
 
 /// 已读入内存、但只解析了版本头的信封。
@@ -153,7 +155,10 @@ impl FileStore {
         Ok(Some(RawEnvelope {
             text,
             version: header.version,
-            updated_at: header.updated_at,
+            // 只保留能用于展示的字符串形式；其它类型视为没有时间戳。
+            updated_at: header
+                .updated_at
+                .and_then(|value| value.as_str().map(str::to_string)),
         }))
     }
 

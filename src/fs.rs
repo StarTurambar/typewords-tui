@@ -51,9 +51,16 @@ pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
 /// `fs::copy` 是「打开目标 → 截断 → 逐块写」，中途失败会留下半截目标文件；
 /// 把备份还原成存档时正好相反——需要的是「要么是完整旧内容，要么原样不动」。
 /// 存档都是几百 KB 到几 MB 的 JSON，整份读进内存的代价可以忽略。
+///
+/// 权限位按源文件复制（`fs::copy` 也这样做）：用户手工收紧过 0600 的存档，
+/// 备份与回滚不应把它放宽成 umask 默认值。复制权限失败不影响已写好的内容。
 pub fn copy_atomic(from: &Path, to: &Path) -> Result<()> {
     let bytes = fs::read(from).with_context(|| format!("读取文件失败: {}", from.display()))?;
-    write_atomic_bytes(to, &bytes)
+    write_atomic_bytes(to, &bytes)?;
+    if let Ok(metadata) = fs::metadata(from) {
+        let _ = fs::set_permissions(to, metadata.permissions());
+    }
+    Ok(())
 }
 
 /// `write_atomic` 的实现；`before_rename` 只给单测注入「临时文件被外部删除」
@@ -282,6 +289,24 @@ mod tests {
             "{\"val\":{},\"version\":4}"
         );
         assert!(temp_files(dir.path()).is_empty(), "回滚不应留下临时文件");
+    }
+
+    /// `fs::copy` 会保留源文件权限；原子复制也必须如此。
+    #[cfg(unix)]
+    #[test]
+    fn copy_atomic_preserves_source_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("dict.json");
+        let to = dir.path().join("dict.json.bak-20260101-120000.json");
+        fs::write(&from, "{\"val\":{},\"version\":4}").unwrap();
+        fs::set_permissions(&from, fs::Permissions::from_mode(0o600)).unwrap();
+
+        copy_atomic(&from, &to).unwrap();
+
+        let mode = fs::metadata(&to).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "备份/回滚不应放宽源存档的权限");
     }
 
     #[test]

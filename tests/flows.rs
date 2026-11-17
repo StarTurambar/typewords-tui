@@ -254,6 +254,53 @@ fn enter_while_editing_a_flow_does_not_change_the_active_flow() {
     );
 }
 
+/// 编辑态下 `n` / `Delete` 也不能新建副本或删除流程。
+///
+/// 它们与 `Enter` 一样会改「启用中的流程」并写 `flows.json`，而编辑键位里
+/// 只有 h/l/a/d/s/g——编辑时按到它们同样是在改结构，不该换掉正在编辑的对象。
+#[test]
+fn duplicate_and_delete_keys_are_inert_while_editing_a_flow() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    ctrl(&mut app, 'f');
+
+    // 建一份自建流程（新建即启用），光标停在它上面，再进入结构编辑。
+    press(&mut app, KeyCode::Char('n'));
+    let custom_id = app.flow_store.active_id.clone();
+    assert!(!custom_id.is_empty(), "新建副本应启用它");
+    press(&mut app, KeyCode::Char('e'));
+    assert!(app.flow_editing, "自建流程应能进入编辑模式");
+
+    let store = typewords_tui::store::FileStore::new(fixture.home()).expect("store");
+    let before_disk = store.load_flows().value;
+    let entries_before = app.flow_entries().len();
+
+    press(&mut app, KeyCode::Char('n'));
+    assert!(app.flow_editing, "n 不应退出编辑");
+    assert_eq!(
+        app.flow_entries().len(),
+        entries_before,
+        "编辑中 n 不应新建副本"
+    );
+    assert_eq!(app.flow_store.active_id, custom_id, "编辑中 n 不应改启用项");
+
+    press(&mut app, KeyCode::Delete);
+    assert!(app.flow_editing, "Delete 不应退出编辑");
+    assert_eq!(
+        app.flow_entries().len(),
+        entries_before,
+        "编辑中 Delete 不应删除流程"
+    );
+    assert_eq!(
+        app.flow_store.active_id, custom_id,
+        "编辑中 Delete 不应改启用项"
+    );
+
+    let after_disk = store.load_flows().value;
+    assert_eq!(after_disk.active_id, before_disk.active_id);
+    assert_eq!(after_disk.flows.len(), before_disk.flows.len());
+}
+
 /// 编辑流程时步骤光标要能单独移动，删除的才是选中的那一步。
 ///
 /// 早期实现只有节点光标（↑/↓）能移动，步骤光标写死在 0 号或刚新增的那一步，

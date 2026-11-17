@@ -143,6 +143,17 @@ pub fn speak_sentence(settings: &SettingState, sentence: &str) {
     );
 }
 
+/// Windows 子进程不创建可见的控制台窗口。
+///
+/// 不用 `-WindowStyle Hidden`：那正是安全软件「隐藏执行 PowerShell」规则最
+/// 典型的匹配特征。系统 TTS 与有道播放共用这一处平台粘合，避免两份常量与
+/// 调用各改各的。
+#[cfg(windows)]
+pub(crate) fn no_console_window(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x0800_0000);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +167,9 @@ mod tests {
 
     /// 开始记录本线程的朗读文本，并清掉可能残留的记录。
     fn start_recording() {
+        // 单元测试跑在 lib 测试二进制里，没人调用 `App::build_for_test`；
+        // 不静音的话 `deliver` 会真的启动系统 TTS 念出 hello。
+        mute_speech();
         let _ = take_recorded_speech();
         record_speech();
     }
