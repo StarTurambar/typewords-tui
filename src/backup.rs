@@ -170,7 +170,7 @@ pub fn import_web_value(store: &FileStore, backup: &Value) -> Result<ImportRepor
             _ => unreachable!("targets 表与校验分支必须一一对应"),
         };
         if let Err(reason) = checked {
-            report.rejected.push(format!("{key}（{reason}）"));
+            report.rejected.push(format!("{file_name}（{reason}）"));
             continue;
         }
 

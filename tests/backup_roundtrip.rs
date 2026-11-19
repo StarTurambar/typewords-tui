@@ -786,8 +786,11 @@ fn import_rejects_unparsable_envelopes() {
         report.written
     );
     assert!(
-        report.rejected.iter().any(|item| item.contains("dict")),
-        "应报告拒绝 dict: {:?}",
+        report
+            .rejected
+            .iter()
+            .any(|item| item.contains("dict.json")),
+        "应报告拒绝 dict.json: {:?}",
         report.rejected
     );
     assert!(
@@ -846,8 +849,11 @@ fn import_rejects_only_the_unparsable_save() {
     let report = backup::import_web(&store, &path).expect("导入");
     assert_eq!(report.written, vec!["dict.json".to_string()]);
     assert!(
-        report.rejected.iter().any(|item| item.contains("setting")),
-        "应只拒绝 setting: {:?}",
+        report
+            .rejected
+            .iter()
+            .any(|item| item.contains("setting.json")),
+        "应只拒绝 setting.json: {:?}",
         report.rejected
     );
     assert_eq!(
