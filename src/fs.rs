@@ -79,7 +79,10 @@ pub fn read_text_limited(path: &Path, limit: u64) -> Result<String> {
             limit
         ));
     }
-    fs::read_to_string(path).with_context(|| format!("读取 {} 失败", path.display()))
+    // IO 错误原样交给调用方补上下文（两个导入入口分别说「读取词库失败」与
+    // 「读取 <path> 失败」）；这里再拼一次会在错误链里出现两遍路径。
+    let text = fs::read_to_string(path)?;
+    Ok(text)
 }
 
 /// 原子复制：读出 `from` 的全部字节，再用 `write_atomic_bytes` 写到 `to`。

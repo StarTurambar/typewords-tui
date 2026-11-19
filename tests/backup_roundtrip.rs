@@ -421,6 +421,23 @@ fn import_web_rejects_a_newer_backup_version() {
     );
 }
 
+/// 读不到备份时，错误信息里的路径只该出现一次。
+#[test]
+fn import_web_does_not_repeat_the_path_in_a_missing_file_error() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let missing = fixture.home().join("nope.json");
+
+    let error = backup::import_web(&store, &missing).expect_err("文件不存在应报错");
+    let message = format!("{error:#}");
+    let path = missing.display().to_string();
+    assert_eq!(
+        message.matches(&path).count(),
+        1,
+        "路径不该在「读取失败」的上下文里重复出现: {message}"
+    );
+}
+
 /// 「缺 version 字段」与「version 类型不对」是两种失败，文案不能混。
 #[test]
 fn import_web_reports_a_missing_backup_version() {
