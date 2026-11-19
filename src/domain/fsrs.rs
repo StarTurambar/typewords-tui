@@ -484,6 +484,12 @@ impl Fsrs {
         // 留存率必须落在 (0, 1)：取 1 时 interval_modifier 恒为 0，所有复习卡
         // 都会被排到次日；最大间隔至少一天，否则卡片当天反复到期。
         //
+        // **与上游的有意差异**：ts-fsrs 的 `calculate_interval_modifier` 只拒绝
+        // `<= 0 || > 1`，`1.0` 是合法值（interval_modifier = 0，间隔恒为 1 天）。
+        // TUI 把 `1.0` 与越界值一起回退 0.9：宁可比上游保守，也不接受「所有
+        // 复习卡都排到次日」这种退化调度。这条差异登记在 docs/upstream-parity.md
+        // 的 FSRS 对照表里，改这里之前先改文档。
+        //
         // 上界也要兜住：留存率取极小值（手改 `1e-9`）时 interval_modifier 会被
         // 推向 ~1e58，再叠加不加限制的最大间隔（`1e300`），
         // `now + Duration::days(_)` 就会超出 chrono 的 TimeDelta 上界，结算
@@ -1316,5 +1322,35 @@ mod tests {
         longer.push(9.0);
         longer.push(9.0);
         assert_eq!(migrate_parameters(&longer, 1, true), defaults.to_vec());
+    }
+
+    /// `request_retention == 1.0` 回退 0.9，这是登记过的有意差异。
+    ///
+    /// 上游 `calculate_interval_modifier` 只拒绝 `<= 0 || > 1`，`1.0` 合法，
+    /// 但会让 `interval_modifier` 恒为 0、所有复习卡都排到次日。TUI 选择回退
+    /// 到文档里的默认值 0.9（与越界值同一口径），行为与「填 0.9」完全一致。
+    #[test]
+    fn request_retention_of_one_falls_back_to_the_documented_default() {
+        let with = |retention: f64| {
+            Fsrs::new(&FsrsParameters {
+                request_retention: retention,
+                ..FsrsParameters::default()
+            })
+        };
+        let baseline = with(0.9);
+        for retention in [1.0, 1.000_000_1, 95.0, 0.0, -0.5] {
+            assert_eq!(
+                with(retention).interval_modifier,
+                baseline.interval_modifier,
+                "留存率 {retention} 应回退到 0.9"
+            );
+        }
+
+        // 行为上等价：同一张新卡评 Easy 的到期与 0.9 一致。
+        let now = at("2026-01-01T00:00:00Z");
+        let one = with(1.0).next_card(None, RATING_EASY, now);
+        let default = baseline.next_card(None, RATING_EASY, now);
+        assert_eq!(one.due, default.due);
+        assert_eq!(one.scheduled_days, default.scheduled_days);
     }
 }

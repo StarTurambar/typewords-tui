@@ -74,6 +74,7 @@
 | 学习与重学步进 | `learning_steps` / `relearning_steps`，`enable_short_term` 切换调度器 | 同左，读设置 |
 | 非 21 项权重 | `migrateParameters`：19 项补 `[0, 0.5]`、17 项先把 `w[4]` / `w[5]` / `w[6]` 按 FSRS-5 → FSRS-6 的公式变换再补 `[0, 0, 0, 0.5]`、其它长度整组默认 | 同左（`migrate_parameters`）；设置页改权重前也先迁移，避免改一项丢其余项 |
 | 复习间隔、fuzz 与到期判断 | FSRS-6（21 个权重 `w`）+ `maximum_interval`；`enable_fuzz` 分段 ±15% / ±10% / ±5%；`dayjs(due).isSameOrBefore(now, 'day')` | 同左，权重按上游 `CLAMP_PARAMETERS` 夹取、随机源移植上游 Alea；`due` 换算本地日期后 `<= today`。另加参数上界兜底：最大间隔夹到 1 ~ 36500 天、学习步进换算后 ≤ 36500 天（上游只校验下界，极端手改值在 TUI 会被夹住而不是算到天文数字） |
+| 目标留存率边界 | `calculate_interval_modifier` 只拒绝 `<= 0` 与 `> 1`：`1.0` 合法，此时 `interval_modifier` 恒为 0、复习卡全被排到次日 | 有意不同：`1.0` 与越界值一起回退 0.9（设置页显示、编辑预填与调度都用这个生效值）。宁可比上游保守，也不接受「所有复习卡都排到次日」的退化调度 |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 
 一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。仍存在的差异有两处：「已掌握词不删卡片」——两端卡片集合可能不同，但调度结果一致；以及参数上界的兜底——上游对 `maximum_interval` 只校验 ≥ 1、学习步进按 `parseInt` 解析，TUI 把两者夹到 36500 天以内，避免手改出极端值时 chrono 的 `Duration` 越界（见 `src/domain/fsrs.rs` 的 `MAX_INTERVAL_DAYS`）。
