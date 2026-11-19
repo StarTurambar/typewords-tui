@@ -112,7 +112,7 @@
 
 ### 2.4 损坏隔离
 
-解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`，隔离失败则记 `（隔离失败: <原因>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。IO 读错误（`Unreadable`）**不进入**这条流程。
+解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间；同一秒重名追加 `-2`、`-3`……，不覆盖既有隔离副本），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`，隔离失败则记 `（隔离失败: <原因>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。IO 读错误（`Unreadable`）**不进入**这条流程。
 
 ### 2.5 版本策略
 
@@ -251,7 +251,7 @@
 - **没有信封、没有版本号**：上游用 localStorage，本来就没有版本概念；`config.version` 是流程配置自身的版本，与 `CURRENT_FLOW_VERSION`（当前 6）一致。
 - `config` 是 `src/domain/flow/mod.rs` 的 `PracticeFlowConfig`：`id` / `version` / `mode` / `label` / `nodes`；节点为 `id` / `label` / `source` / `steps`；步骤为 `templateId` / `wordAdvance` / `onEnd` / `shuffleOnEnter`。`wordAdvance` 为 `wordLoop` 时带 `groupSize` 与 `subSteps`（`{ templateId }` 对象数组，不是裸 id 数组）。字段名逐字对齐上游，因此可与上游 localStorage 内容互换。
 - `activeId` 为空表示走内置流程（`FlowStore::active` 返回 `None`）。写入用 pretty JSON + 原子写，启停 / 新建 / 删除 / 编辑流程后立即 `App::save_flow_store`，失败弹 `保存流程失败: …`。
-- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`，启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。读不出来（IO 错误）时不隔离、不删除，本次运行不保存流程并提示一次。
+- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`（同一秒重名追加 `-2`、`-3`），启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。读不出来（IO 错误）时不隔离、不删除，本次运行不保存流程并提示一次。
 
 ## 8. 资源词库与文章格式
 

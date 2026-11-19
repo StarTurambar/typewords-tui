@@ -139,6 +139,31 @@ enum RawRead {
     Text(RawEnvelope),
 }
 
+/// 隔离文件名：`<文件名>.corrupt-<stamp>.json`，同一秒重名时追加 `-2`、`-3`……
+///
+/// 不能直接 `rename` 到固定名：`rename` 会替换既有目标，同一秒第二次隔离
+/// 就会把上一次的隔离副本（坏数据的手工恢复依据）静默覆盖掉。与
+/// `backup::ImportWriter::next_backup_path` 同一套占名思路。
+fn unique_corrupt_path(path: &Path, stamp: &str) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "state.json".to_string());
+    let mut index = 1;
+    loop {
+        let suffix = if index == 1 {
+            String::new()
+        } else {
+            format!("-{index}")
+        };
+        let candidate = path.with_file_name(format!("{file_name}.corrupt-{stamp}{suffix}.json"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -166,11 +191,7 @@ impl FileStore {
 
     fn quarantine(&self, path: &Path) -> Result<PathBuf> {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "state.json".to_string());
-        let target = path.with_file_name(format!("{file_name}.corrupt-{stamp}.json"));
+        let target = unique_corrupt_path(path, &stamp);
         fs::rename(path, &target)
             .with_context(|| format!("隔离损坏存档失败: {}", path.display()))?;
         Ok(target)
@@ -495,6 +516,30 @@ impl FileStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_names_do_not_overwrite_an_existing_copy_in_the_same_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dict.json");
+        let first = unique_corrupt_path(&path, "20260101-120000");
+        assert_eq!(
+            first.file_name().unwrap(),
+            "dict.json.corrupt-20260101-120000.json"
+        );
+        // 同一秒的第一次隔离已经落盘：第二次必须换名，不能把它覆盖掉。
+        fs::write(&first, "{ 上一次的隔离副本 }").unwrap();
+
+        let second = unique_corrupt_path(&path, "20260101-120000");
+        assert_eq!(
+            second.file_name().unwrap(),
+            "dict.json.corrupt-20260101-120000-2.json"
+        );
+        assert_ne!(first, second);
+        assert!(
+            fs::read_to_string(&first).unwrap().contains("上一次"),
+            "既有隔离副本不能被静默覆盖"
+        );
+    }
 
     #[test]
     fn an_unreadable_cache_is_reported_as_unreadable_instead_of_corrupt() {
