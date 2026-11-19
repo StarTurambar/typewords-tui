@@ -541,14 +541,20 @@ fn updated_at_ms(envelope: &Value) -> i64 {
 }
 
 /// 读取一份存档的原始 JSON 文本；文件不存在时返回 `None`。
+///
+/// 直接 `read_to_string` 而不是先 `exists()`：后者是 TOCTOU（检查与读取之间
+/// 文件可能被删 / 换成目录），也会把「路径是目录」这类 IO 错误误判成不存在，
+/// 于是导出一份缺了这份存档的备份。与 `FileStore::read_text` 同一套判定。
 fn read_envelope_raw(store: &FileStore, name: &str) -> Result<Option<Value>> {
     let path = store.file_path(name);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("读取 {} 失败", path.display()))?;
-    let value: Value = serde_json::from_str(&text)
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).with_context(|| format!("读取 {} 失败", path.display())),
+    };
+    // 与存档读取同一口径：容忍开头的 UTF-8 BOM。否则同一份被记事本另存过的
+    // `dict.json`，`tw` 能正常启动、`tw export-web` 却报「不是合法的 JSON」。
+    let value: Value = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
         .with_context(|| format!("{} 不是合法的 JSON", path.display()))?;
     Ok(Some(value))
 }

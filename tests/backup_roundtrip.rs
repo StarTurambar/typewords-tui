@@ -62,6 +62,24 @@ fn export_web_produces_the_upstream_backup_shape() {
     );
 }
 
+/// 带 BOM 的存档：`tw` 能启动，`tw export-web` 也要能读。
+#[test]
+fn export_web_reads_a_save_that_starts_with_a_bom() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    store.save_dict(&BaseState::default()).expect("写词典存档");
+    let path = fixture.home().join("dict.json");
+    let text = std::fs::read_to_string(&path).expect("读词典存档");
+    std::fs::write(&path, format!("\u{feff}{text}")).expect("写回带 BOM 的词典存档");
+
+    let exported = backup::export_web(&store).expect("带 BOM 的存档不该让导出失败");
+    let value: serde_json::Value = serde_json::from_str(&exported).expect("JSON");
+    assert_eq!(
+        value["val"]["dict"]["version"], 4,
+        "应导出真实存档，而不是当成解析失败退成空信封"
+    );
+}
+
 #[test]
 fn export_web_keeps_a_real_article_cache_in_a_web_safe_envelope() {
     let fixture = common::Fixture::new();
