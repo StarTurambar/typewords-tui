@@ -73,7 +73,10 @@ impl Bootstrapped {
         if repaired {
             // 读不出来的缓存不能删：与 `App::clear_practice_cache` 同一条不变量
             // ——文件还在，内容只是本次读不到，删掉等于替用户丢弃好档。
-            if self.store.practice_cache_discardable() {
+            if self
+                .store
+                .cache_discardable(crate::store::PRACTICE_FILE_NAME)
+            {
                 let _ = self.store.remove_practice();
             } else {
                 logging::warn(format!(

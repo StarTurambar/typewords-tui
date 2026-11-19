@@ -231,12 +231,18 @@ impl FileStore {
             Err(err) => return Err(format!("{}（{err}）", path.display())),
         };
         // 读取容忍开头的 UTF-8 BOM（Windows 记事本等工具的默认行为）；
-        // 只剥一个字符，写回时序列化器本来就不会带 BOM。
-        let text = crate::fs::strip_utf8_bom(&text);
+        // 只剥一个字符，写回时序列化器本来就不会带 BOM。无 BOM 是常见情况，
+        // 直接交出原 String，避免为每份存档多拷一次。
+        let text = match text.strip_prefix('\u{feff}') {
+            Some(rest) => rest.to_string(),
+            None => text,
+        };
+        // 空白判定放在剥离之后：只含 BOM 的文件与空文件一样是「缺失」，
+        // 不能拿空串去解析、再把好档判成损坏。
         if text.trim().is_empty() {
             return Ok(None);
         }
-        Ok(Some(text.to_string()))
+        Ok(Some(text))
     }
 
     /// 读入存档文件，但**只解析版本头**（`version` / `updated_at`），不碰 `val`。
@@ -424,16 +430,20 @@ impl FileStore {
         }
     }
 
-    /// 练习缓存能否安全删除：读得出来（或本来就不存在）时为 true。
+    /// 一份缓存读不出来的原因；读得出来（或本来就不存在）时为 `None`。
+    ///
+    /// 只走读取判定，不解析、不隔离，因此没有副作用——给「删除 / 写入前先探
+    /// 一下」的入口用（`--reset-practice` 与启动时的进度校正）。
+    pub fn cache_read_error(&self, name: &str) -> Option<String> {
+        self.read_text(name).err()
+    }
+
+    /// 缓存能否安全删除：读得出来（或本来就不存在）时为 true。
     ///
     /// 「读不出来的缓存不能删」是 store 层的判定：文件还在，内容只是本次读不到
-    /// （被同步盘 / 杀毒软件占用），删掉等于替用户丢弃好档。这里只做一次
-    /// `fs::read` 探测，不解析、不隔离，因此没有副作用。
-    pub fn practice_cache_discardable(&self) -> bool {
-        match fs::read(self.file_path(PRACTICE_FILE_NAME)) {
-            Ok(_) => true,
-            Err(err) => err.kind() == ErrorKind::NotFound,
-        }
+    /// （被同步盘 / 杀毒软件占用），删掉等于替用户丢弃好档。
+    pub fn cache_discardable(&self, name: &str) -> bool {
+        self.cache_read_error(name).is_none()
     }
 
     pub fn remove_practice(&self) -> Result<()> {
@@ -593,6 +603,26 @@ mod tests {
         );
     }
 
+    /// 只含一个 BOM 的文件等于空文件：是「缺失」，不是「损坏」。
+    ///
+    /// 剥离 BOM 必须先于空白判定，否则空串会被送进解析器、再按损坏隔离。
+    #[test]
+    fn a_file_with_only_a_bom_counts_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path()).unwrap();
+        fs::write(store.file_path("dict.json"), "\u{feff}").unwrap();
+
+        let loaded = store.load_dict();
+        assert!(matches!(loaded.status, LoadStatus::Missing));
+        assert!(
+            fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry.file_name().to_string_lossy().contains("corrupt")),
+            "只有 BOM 的文件不该被隔离"
+        );
+    }
+
     #[test]
     fn a_cache_that_cannot_be_read_is_not_discardable() {
         let dir = tempfile::tempdir().unwrap();
@@ -600,13 +630,14 @@ mod tests {
         let path = store.file_path(PRACTICE_FILE_NAME);
 
         // 不存在：删也无所谓。
-        assert!(store.practice_cache_discardable());
+        assert!(store.cache_discardable(PRACTICE_FILE_NAME));
         fs::write(&path, "{\"val\":null,\"version\":2}").unwrap();
-        assert!(store.practice_cache_discardable());
+        assert!(store.cache_discardable(PRACTICE_FILE_NAME));
 
         // 路径是目录：读不出来，不能删（与 App::clear_practice_cache 同一条不变量）。
         fs::remove_file(&path).unwrap();
         fs::create_dir(&path).unwrap();
-        assert!(!store.practice_cache_discardable());
+        assert!(!store.cache_discardable(PRACTICE_FILE_NAME));
+        assert!(store.cache_read_error(PRACTICE_FILE_NAME).is_some());
     }
 }
