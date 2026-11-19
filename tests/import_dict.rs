@@ -266,6 +266,21 @@ fn import_dict_accepts_a_word_file_with_a_utf8_bom() {
     assert!(!written.starts_with('\u{feff}'), "写出的词条文件不应带 BOM");
 }
 
+/// 读不出来的 `dict.json` 要说清是「读不到」，而不是「还没有当前学习词库」：
+/// 后者会把人引向错误的方向（以为数据没了）。
+#[test]
+fn export_dict_reports_an_unreadable_save() {
+    let fixture = common::Fixture::new();
+    fs::create_dir(fixture.home().join("dict.json")).expect("把 dict.json 做成目录");
+
+    let mut sink: Vec<u8> = Vec::new();
+    let err = cli::export_dict_to(&mut sink, &fixture.paths(), None, None)
+        .expect_err("读不出来的存档应报错");
+    let message = format!("{err:#}");
+    assert!(message.contains("读取词典存档失败"), "{message}");
+    assert!(message.contains("关闭占用"), "{message}");
+}
+
 /// 还没有当前学习词库（空数据目录）时，缺省导出要给出可执行的提示，
 /// 而不是一句「未找到词库: 」。
 #[test]

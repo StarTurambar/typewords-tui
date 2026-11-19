@@ -359,9 +359,15 @@ fn resolve_export_target(paths: &Paths, id: Option<&str>) -> Result<ExportTarget
         return target_from_catalog(&catalog, resource);
     }
 
-    let base = crate::store::FileStore::new(paths.home.clone())?
-        .load_dict()
-        .value;
+    let loaded = crate::store::FileStore::new(paths.home.clone())?.load_dict();
+    if let crate::store::LoadStatus::Unreadable(reason) = &loaded.status {
+        // 读不到 ≠ 内容坏了：说清原因，别让「文件被占用」显示成
+        // 「还没有当前学习词库」——后者会把人引向错误的方向（以为数据没了）。
+        return Err(anyhow!(
+            "读取词典存档失败：{reason}；请关闭占用该文件的程序（同步盘 / 杀毒软件）后重试"
+        ));
+    }
+    let base = loaded.value;
     let dict = match id {
         Some(id) => base
             .system_dict_index(id)
