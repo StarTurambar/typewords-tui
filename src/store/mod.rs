@@ -25,6 +25,15 @@ use crate::domain::types::{BaseState, PracticeCacheCompact, SettingState};
 /// 原子写（实现在 `crate::fs`，与 `domain` 共用，避免 `domain ↔ store` 成环）。
 pub use crate::fs::write_atomic;
 
+/// 单词练习断点缓存的文件名。
+///
+/// 导出成常量，是因为「读不出来的缓存不能删 / 不能写」的判定分散在 app 层：
+/// 文件名在两边各写一遍字面量，拼错就等于静默关掉保护。
+pub const PRACTICE_FILE_NAME: &str = "practice-word.json";
+
+/// 文章跟打断点缓存的文件名。
+pub const PRACTICE_ARTICLE_FILE_NAME: &str = "practice-article.json";
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SaveEnvelope<T> {
     pub val: T,
@@ -67,6 +76,18 @@ pub struct Loaded<T> {
 impl<T> Loaded<T> {
     pub fn is_ok(&self) -> bool {
         matches!(self.status, LoadStatus::Loaded | LoadStatus::Missing)
+    }
+
+    /// 断点缓存的提示：损坏时只说「哪份缓存被丢弃」。
+    ///
+    /// `notice()` 的「存档已损坏，已隔离并恢复默认值」是词典 / 设置存档的口径；
+    /// 缓存损坏的后果是丢弃，套上那层前缀会在一句话里出现两次「损坏」，
+    /// 也与 persistence.md 记的文案对不上。
+    pub fn cache_notice(&self) -> Option<String> {
+        match &self.status {
+            LoadStatus::Corrupt(reason) => Some(reason.clone()),
+            _ => self.notice(),
+        }
     }
 
     pub fn notice(&self) -> Option<String> {
@@ -388,7 +409,7 @@ impl FileStore {
     pub fn load_practice(&self) -> Loaded<Option<PracticeCacheCompact>> {
         // 练习缓存损坏时直接丢弃，不阻断启动。
         self.load_cache(
-            "practice-word.json",
+            PRACTICE_FILE_NAME,
             PRACTICE_CACHE_VERSION,
             "练习缓存损坏，已丢弃",
         )
@@ -397,14 +418,26 @@ impl FileStore {
     pub fn save_practice(&self, cache: Option<&PracticeCacheCompact>) -> Result<()> {
         match cache {
             Some(value) => {
-                self.save_typed("practice-word.json", &Some(value), PRACTICE_CACHE_VERSION)
+                self.save_typed(PRACTICE_FILE_NAME, &Some(value), PRACTICE_CACHE_VERSION)
             }
             None => self.remove_practice(),
         }
     }
 
+    /// 练习缓存能否安全删除：读得出来（或本来就不存在）时为 true。
+    ///
+    /// 「读不出来的缓存不能删」是 store 层的判定：文件还在，内容只是本次读不到
+    /// （被同步盘 / 杀毒软件占用），删掉等于替用户丢弃好档。这里只做一次
+    /// `fs::read` 探测，不解析、不隔离，因此没有副作用。
+    pub fn practice_cache_discardable(&self) -> bool {
+        match fs::read(self.file_path(PRACTICE_FILE_NAME)) {
+            Ok(_) => true,
+            Err(err) => err.kind() == ErrorKind::NotFound,
+        }
+    }
+
     pub fn remove_practice(&self) -> Result<()> {
-        let path = self.file_path("practice-word.json");
+        let path = self.file_path(PRACTICE_FILE_NAME);
         if path.is_file() {
             fs::remove_file(&path)
                 .with_context(|| format!("删除练习缓存失败: {}", path.display()))?;
@@ -413,7 +446,7 @@ impl FileStore {
     }
 
     pub fn practice_exists(&self) -> bool {
-        self.file_path("practice-word.json").is_file()
+        self.file_path(PRACTICE_FILE_NAME).is_file()
     }
 
     /// 读取文章练习缓存（`practice-article.json`）。
@@ -423,7 +456,7 @@ impl FileStore {
     pub fn load_practice_article(&self) -> Loaded<Option<ArticleCacheEnvelope>> {
         // 缓存损坏时直接丢弃，不阻断启动。
         self.load_cache(
-            "practice-article.json",
+            PRACTICE_ARTICLE_FILE_NAME,
             PRACTICE_ARTICLE_CACHE_VERSION,
             "文章练习缓存损坏，已丢弃",
         )
@@ -432,7 +465,7 @@ impl FileStore {
     pub fn save_practice_article(&self, cache: Option<&ArticleCacheEnvelope>) -> Result<()> {
         match cache {
             Some(value) => self.save_typed(
-                "practice-article.json",
+                PRACTICE_ARTICLE_FILE_NAME,
                 &Some(value),
                 PRACTICE_ARTICLE_CACHE_VERSION,
             ),
@@ -441,7 +474,7 @@ impl FileStore {
     }
 
     pub fn remove_practice_article(&self) -> Result<()> {
-        let path = self.file_path("practice-article.json");
+        let path = self.file_path(PRACTICE_ARTICLE_FILE_NAME);
         if path.is_file() {
             fs::remove_file(&path)
                 .with_context(|| format!("删除文章练习缓存失败: {}", path.display()))?;
@@ -450,7 +483,7 @@ impl FileStore {
     }
 
     pub fn practice_article_exists(&self) -> bool {
-        self.file_path("practice-article.json").is_file()
+        self.file_path(PRACTICE_ARTICLE_FILE_NAME).is_file()
     }
 
     /// 读取自建流程存档（`flows.json`）。
@@ -499,8 +532,8 @@ impl FileStore {
         [
             "dict.json",
             "setting.json",
-            "practice-word.json",
-            "practice-article.json",
+            PRACTICE_FILE_NAME,
+            PRACTICE_ARTICLE_FILE_NAME,
             FLOW_FILE_NAME,
         ]
         .iter()
@@ -558,5 +591,22 @@ mod tests {
                 .all(|entry| !entry.file_name().to_string_lossy().contains("corrupt")),
             "读不到不能隔离"
         );
+    }
+
+    #[test]
+    fn a_cache_that_cannot_be_read_is_not_discardable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path()).unwrap();
+        let path = store.file_path(PRACTICE_FILE_NAME);
+
+        // 不存在：删也无所谓。
+        assert!(store.practice_cache_discardable());
+        fs::write(&path, "{\"val\":null,\"version\":2}").unwrap();
+        assert!(store.practice_cache_discardable());
+
+        // 路径是目录：读不出来，不能删（与 App::clear_practice_cache 同一条不变量）。
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(!store.practice_cache_discardable());
     }
 }

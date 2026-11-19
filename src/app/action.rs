@@ -525,14 +525,21 @@ impl App {
                 // 已经学过的时长一起抹掉。
                 self.flush_practice_stats();
                 self.save_dict_now();
-                self.clear_practice_cache();
+                // 读不出来的缓存不会被删：提示要说清「没清」而不是「已清空」。
+                if self.clear_practice_cache() {
+                    self.toast(
+                        crate::domain::flow::navigator::NoticeLevel::Success,
+                        "已清空练习进度",
+                    );
+                } else {
+                    self.toast(
+                        crate::domain::flow::navigator::NoticeLevel::Warning,
+                        "练习进度未清空：缓存读不出来，已保留原文件",
+                    );
+                }
                 self.session = None;
                 self.stat = crate::domain::types::PracticeState::default();
                 self.typing = crate::domain::typing::TypingEngine::new();
-                self.toast(
-                    crate::domain::flow::navigator::NoticeLevel::Success,
-                    "已清空练习进度",
-                );
             }
             ConfirmAction::ClearAllData => {
                 self.clear_all_data();

@@ -637,6 +637,29 @@ impl ConfirmState {
     }
 }
 
+/// 本次运行内可能读不出来的三份存档。
+///
+/// 读不到 ≠ 内容坏了：不隔离、不删除、不写回默认值。用枚举而不是文件名
+/// 字面量做分发，是为了让保存 / 删除入口的跳过判定在编译期就跟文件一一对应
+/// ——文件名拼错会让保护静默失效，而 `match` 漏掉一项编译不过。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnreadableSave {
+    PracticeWord,
+    ArticlePractice,
+    Flows,
+}
+
+impl UnreadableSave {
+    /// 文件名（提示文案与日志用）。
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::PracticeWord => crate::store::PRACTICE_FILE_NAME,
+            Self::ArticlePractice => crate::store::PRACTICE_ARTICLE_FILE_NAME,
+            Self::Flows => crate::domain::flow::store::FILE_NAME,
+        }
+    }
+}
+
 pub struct App {
     /// 解析后的路径（新建词典、写词条文件时需要）
     pub paths: Option<crate::paths::Paths>,
@@ -772,8 +795,11 @@ pub struct App {
     practice_unreadable: Option<String>,
     article_unreadable: Option<String>,
     flows_unreadable: Option<String>,
-    /// 「读不出来的存档本次不会写入」是否已经提示过（每次运行只提示一次）。
-    unreadable_save_notice_shown: bool,
+    /// 已经提示过「读不出来，本次不会写入」的存档。
+    ///
+    /// 按文件各提示一次：两份缓存同时读不出来时，只报第一份会让另一份
+    /// 静默跳过，用户以为那份照常保存了。
+    notified_unreadable_saves: Vec<UnreadableSave>,
     pending_practice_save: Option<i64>,
     /// 文章跟打进度的延迟保存截止时间。
     pending_article_save: Option<i64>,
@@ -960,7 +986,7 @@ impl App {
             practice_unreadable: None,
             article_unreadable: None,
             flows_unreadable: None,
-            unreadable_save_notice_shown: false,
+            notified_unreadable_saves: Vec::new(),
             pending_practice_save: None,
             pending_article_save: None,
         };
@@ -1001,22 +1027,31 @@ impl App {
             );
         }
 
+        // 两份断点缓存无论是否 `--reset-practice` 都要先读一次：
+        // - 主页的「上次任务」与文章列表的「上次第 N 句」来自这里；
+        // - 读不出来的缓存本次运行只读，保存 / 删除入口据此跳过。清缓存的
+        //   分支若不读，保护就永远不武装：读不到的文件被当成「没有断点」，
+        //   清空与保存照常执行。
+        //
+        // 启动固定在主页：断点缓存只作为「继续」入口的数据源，由用户按键
+        // （主页 Enter / 文章列表 Enter）触发恢复。早期实现会在启动时直接
+        // 恢复练习或文章跟打，初始画面取决于磁盘上残留了哪个缓存：单词练习
+        // 可能停在默写子步骤（大字全是占位框），两份缓存同时存在时还会叠成
+        // 「单词会话 + 文章练习」的非法状态，按 Esc 后没有任何页面能画出来。
+        app.refresh_article_resume();
+        app.refresh_practice_resume();
+
         if cli.reset_practice {
             // 两个练习的断点都清：启动参数的用途是「复现问题时清干净」。
-            app.clear_practice_cache();
-            app.toast(NoticeLevel::Success, "已清空练习进度");
-        } else {
-            // 启动固定在主页：断点缓存只作为「继续」入口的数据源，
-            // 由用户按键（主页 Enter / 文章列表 Enter）触发恢复。
-            //
-            // 早期实现会在启动时直接恢复练习或文章跟打，初始画面取决于
-            // 磁盘上残留了哪个缓存：单词练习可能停在默写子步骤（大字全是
-            // 占位框），两份缓存同时存在时还会叠成「单词会话 + 文章练习」
-            // 的非法状态，按 Esc 后没有任何页面能画出来。
-            app.refresh_article_resume();
-            // 单词缓存同样先读一次：损坏 / 版本不符的提示要弹出来，主页的
-            // 「上次任务」也不能只看文件在不在。
-            app.refresh_practice_resume();
+            // 读不出来的缓存不会被删，提示要说清「没清」而不是「已清空」。
+            if app.clear_practice_cache() {
+                app.toast(NoticeLevel::Success, "已清空练习进度");
+            } else {
+                app.toast(
+                    NoticeLevel::Warning,
+                    "练习进度未清空：缓存读不出来，已保留原文件",
+                );
+            }
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -1046,11 +1081,11 @@ impl App {
             // 状态在本次运行内是持续的。
             if self.practice_unreadable.is_none() {
                 self.practice_unreadable = Some(reason.clone());
-                if let Some(notice) = loaded.notice() {
+                if let Some(notice) = loaded.cache_notice() {
                     self.toast(NoticeLevel::Warning, notice);
                 }
             }
-        } else if let Some(notice) = loaded.notice() {
+        } else if let Some(notice) = loaded.cache_notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
         // 能反序列化不等于能恢复：`{"val":{}}` 会得到 Some(默认值)，但
@@ -1163,25 +1198,22 @@ impl App {
     ///
     /// 读不到 ≠ 内容坏了——写回默认值会把好档覆盖成默认档，隔离还会把它
     /// 改名移走。跳过写入、保留原文件，等用户关掉占用它的程序后重启。
-    fn skip_unreadable_save(&mut self, name: &str) -> bool {
-        let reason = if name == "practice-word.json" {
-            self.practice_unreadable.clone()
-        } else if name == "practice-article.json" {
-            self.article_unreadable.clone()
-        } else if name == crate::domain::flow::store::FILE_NAME {
-            self.flows_unreadable.clone()
-        } else {
-            None
+    fn skip_unreadable_save(&mut self, save: UnreadableSave) -> bool {
+        let reason = match save {
+            UnreadableSave::PracticeWord => self.practice_unreadable.clone(),
+            UnreadableSave::ArticlePractice => self.article_unreadable.clone(),
+            UnreadableSave::Flows => self.flows_unreadable.clone(),
         };
         let Some(reason) = reason else {
             return false;
         };
-        if !self.unreadable_save_notice_shown {
-            self.unreadable_save_notice_shown = true;
+        if !self.notified_unreadable_saves.contains(&save) {
+            self.notified_unreadable_saves.push(save);
             self.toast(
                 NoticeLevel::Warning,
                 format!(
-                    "{name} 本次读不出来（{reason}），本次运行不会写入或删除它；请关闭占用它的程序后重启"
+                    "{} 本次读不出来（{reason}），本次运行不会写入或删除它；请关闭占用它的程序后重启",
+                    save.file_name()
                 ),
             );
         }
@@ -1189,7 +1221,7 @@ impl App {
     }
 
     pub fn save_practice_now(&mut self) {
-        if self.skip_unreadable_save("practice-word.json") {
+        if self.skip_unreadable_save(UnreadableSave::PracticeWord) {
             self.pending_practice_save = None;
             return;
         }
@@ -1210,27 +1242,37 @@ impl App {
     ///
     /// 「清空当前练习进度」与 `--reset-practice` 共用此函数——两者的用途
     /// 都是「从干净状态开始」，留着半个文章的跟打进度没意义。
-    pub fn clear_practice_cache(&mut self) {
-        // 读不出来的缓存不能删：文件还在，内容只是本次读不到，删了等于
-        // 替用户丢弃好档。保留原文件，只清内存里的结论。
-        if self.skip_unreadable_save("practice-word.json") {
+    ///
+    /// 返回是否**真的**清干净了：读不出来的缓存不删（文件还在，内容只是本次
+    /// 读不到，删了等于替用户丢弃好档），删除失败时原文件也还在。调用方据此
+    /// 决定提示「已清空」还是「没清掉」，而不是一律报成功。
+    pub fn clear_practice_cache(&mut self) -> bool {
+        let mut cleared = true;
+        // 读不出来的缓存不能删：保留原文件，只清内存里的结论。
+        if self.skip_unreadable_save(UnreadableSave::PracticeWord) {
             self.saved_practice_resumable = false;
+            cleared = false;
         } else {
             match self.store.remove_practice() {
                 Ok(()) => self.saved_practice_resumable = false,
                 // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
                 // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
-                Err(err) => logging::error(format!("清空单词练习缓存失败: {err}")),
+                Err(err) => {
+                    logging::error(format!("清空单词练习缓存失败: {err}"));
+                    cleared = false;
+                }
             }
         }
-        if !self.skip_unreadable_save("practice-article.json")
-            && let Err(err) = self.store.remove_practice_article()
-        {
+        if self.skip_unreadable_save(UnreadableSave::ArticlePractice) {
+            cleared = false;
+        } else if let Err(err) = self.store.remove_practice_article() {
             logging::error(format!("清空文章练习缓存失败: {err}"));
+            cleared = false;
         }
         self.pending_practice_save = None;
         self.pending_article_save = None;
         self.article_resume = None;
+        cleared
     }
 
     /// 清除所有数据：`dict.json` 与 `setting.json` 都回到默认值，并删掉断点缓存。
@@ -1609,7 +1651,7 @@ impl App {
         // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
         // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
         self.pending_practice_save = None;
-        if self.skip_unreadable_save("practice-word.json") {
+        if self.skip_unreadable_save(UnreadableSave::PracticeWord) {
             // 读不出来的缓存不能删，内存里也不能声称「没有上次任务」。
             self.saved_practice_resumable = false;
         } else {
@@ -2749,7 +2791,7 @@ impl App {
     fn save_flow_store(&mut self) {
         // 启动时读不出来的 flows.json 本次运行只读：写回会用内存里的空集合
         // 覆盖原档，把用户的流程全删掉。
-        if self.skip_unreadable_save(crate::domain::flow::store::FILE_NAME) {
+        if self.skip_unreadable_save(UnreadableSave::Flows) {
             return;
         }
         if let Err(err) = self.store.save_flows(&self.flow_store) {
@@ -2947,7 +2989,7 @@ impl App {
     /// 跟单词练习一样是「防抖 + 定期」：每完成一句立刻排一次延迟保存，
     /// 另有 30 秒整点兜底，避免用户直接杀进程时丢掉最后几句。
     pub fn save_article_practice_now(&mut self) {
-        if self.skip_unreadable_save("practice-article.json") {
+        if self.skip_unreadable_save(UnreadableSave::ArticlePractice) {
             self.pending_article_save = None;
             return;
         }
@@ -2991,11 +3033,11 @@ impl App {
             // 读不出来的缓存只提示一次；本次运行内对这份文件只读。
             if self.article_unreadable.is_none() {
                 self.article_unreadable = Some(reason.clone());
-                if let Some(notice) = loaded.notice() {
+                if let Some(notice) = loaded.cache_notice() {
                     self.toast(NoticeLevel::Warning, notice);
                 }
             }
-        } else if let Some(notice) = loaded.notice() {
+        } else if let Some(notice) = loaded.cache_notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
         self.article_resume = loaded
@@ -3163,7 +3205,7 @@ impl App {
         self.set_screen(Screen::Home);
         // 整篇练完了，断点缓存没有意义——删掉，否则下次进文章页会「恢复」
         // 一篇已经练完的文章。读不出来的缓存不能删（内容只是本次读不到）。
-        if !self.skip_unreadable_save("practice-article.json") {
+        if !self.skip_unreadable_save(UnreadableSave::ArticlePractice) {
             let _ = self.store.remove_practice_article();
         }
         self.pending_article_save = None;

@@ -71,7 +71,16 @@ impl Bootstrapped {
             _ => false,
         };
         if repaired {
-            let _ = self.store.remove_practice();
+            // 读不出来的缓存不能删：与 `App::clear_practice_cache` 同一条不变量
+            // ——文件还在，内容只是本次读不到，删掉等于替用户丢弃好档。
+            if self.store.practice_cache_discardable() {
+                let _ = self.store.remove_practice();
+            } else {
+                logging::warn(format!(
+                    "练习缓存 {} 读不出来，校正进度时未删除；请关闭占用它的程序后重启",
+                    crate::store::PRACTICE_FILE_NAME
+                ));
+            }
         }
     }
 
