@@ -270,13 +270,13 @@ impl FileStore {
         }
     }
 
-    /// 断点缓存解析失败：隔离坏档并回退默认值。
-    fn corrupt_cache<T: Default>(&self, name: &str, label: &str) -> Loaded<T> {
-        let path = self.file_path(name);
-        let _ = self.quarantine(&path);
+    /// 断点缓存损坏：文案保留「哪份缓存 + 丢弃原因」，隔离结果由
+    /// `quarantine_reason` 追加，用户能据此找到隔离副本。
+    fn corrupt_cache<T: Default>(&self, name: &str, label: &str, err: &anyhow::Error) -> Loaded<T> {
+        let reason = format!("{label}：{err}");
         Loaded {
             value: T::default(),
-            status: LoadStatus::Corrupt(label.to_string()),
+            status: LoadStatus::Corrupt(self.quarantine_reason(name, &reason)),
             updated_at: None,
         }
     }
@@ -325,7 +325,7 @@ impl FileStore {
         let raw = match self.read_raw(name) {
             RawRead::Missing => return Loaded::missing(),
             RawRead::Unreadable(reason) => return Loaded::unreadable(reason),
-            RawRead::Invalid(_) => return self.corrupt_cache(name, corrupt_label),
+            RawRead::Invalid(err) => return self.corrupt_cache(name, corrupt_label, &err),
             RawRead::Text(raw) => raw,
         };
         if raw.version != expected_version {
@@ -344,7 +344,7 @@ impl FileStore {
                 status: LoadStatus::Loaded,
                 updated_at: raw.updated_at,
             },
-            Err(_) => self.corrupt_cache(name, corrupt_label),
+            Err(err) => self.corrupt_cache(name, corrupt_label, &err),
         }
     }
 

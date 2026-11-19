@@ -344,10 +344,10 @@ fn a_corrupt_article_cache_does_not_block_startup() {
     assert!(app.fatal.is_none(), "缓存损坏不该是致命错误");
     assert!(app.article_resume.is_none(), "损坏的缓存不该被读入");
     assert!(
-        app.toasts
-            .iter()
-            .any(|toast| toast.message.contains("文章练习缓存损坏")),
-        "启动时应提示缓存损坏: {:?}",
+        app.toasts.iter().any(|toast| {
+            toast.message.contains("文章练习缓存损坏，已丢弃") && toast.message.contains("已移动到")
+        }),
+        "启动时应提示缓存损坏、丢弃原因与隔离路径: {:?}",
         app.toasts
             .iter()
             .map(|toast| &toast.message)

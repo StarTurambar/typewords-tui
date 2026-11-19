@@ -280,3 +280,27 @@ fn a_flow_store_saved_with_a_utf8_bom_is_loaded() {
     assert!(loaded.value.flows.contains_key("demo"));
     assert!(corrupt_files(&fixture.home()).is_empty());
 }
+
+/// 隔离提示要带「哪份缓存、为什么丢、丢到哪」——只给一句固定文案等于把
+/// 排障线索全丢了。
+#[test]
+fn a_corrupt_practice_cache_reports_the_reason_and_the_quarantine_path() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    std::fs::write(
+        store.file_path("practice-word.json"),
+        r#"{"version":2,"val":{"practiceData":"not-an-object"}}"#,
+    )
+    .unwrap();
+
+    let loaded = store.load_practice();
+    let LoadStatus::Corrupt(reason) = &loaded.status else {
+        panic!("坏缓存应被隔离，实际: {:?}", loaded.status);
+    };
+    assert!(reason.contains("练习缓存损坏，已丢弃"), "{reason}");
+    assert!(reason.contains("已移动到"), "提示要含隔离结果: {reason}");
+    assert!(reason.contains(".corrupt-"), "提示要含隔离路径: {reason}");
+    assert!(loaded.value.is_none());
+    let notice = loaded.notice().expect("应有提示");
+    assert!(notice.contains("已移动到"), "{notice}");
+}
