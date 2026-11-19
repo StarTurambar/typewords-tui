@@ -8,7 +8,7 @@
 
 - **位置**：`<home>/setting.json`。外层是 `SaveEnvelope`：`{ "val": { … }, "version": 23, "updated_at": "RFC3339" }`。
 - **字段命名**：`val` 下的具名字段为 camelCase（与 Web 的 `typing-word-setting` v23 同名，如 `wordPracticeMode` / `fsrsEasyLimit`）；`fsrsParameters` 内部沿用 ts-fsrs 的 snake_case。
-- **载入**：启动时读取一次。文件缺失用默认值；JSON 解析失败会隔离为 `setting.json.corrupt-<时间戳>.json` 并提示「存档已损坏，已隔离并恢复默认值」；`version` 高于 23 时以默认值启动、**本次运行只读**（`readonly_settings`，不覆盖原文件）。
+- **载入**：启动时读取一次。文件缺失用默认值；JSON 解析失败会隔离为 `setting.json.corrupt-<时间戳>.json` 并提示「存档已损坏，已隔离并恢复默认值」；`version` 高于 23 时以默认值启动、**本次运行只读**（`readonly_settings`，不覆盖原文件）；文件**读不出来**（权限不足、被同步盘 / 杀毒软件独占、路径是目录等 IO 错误）时不隔离、不改写，直接在进入终端前报错退出（文案含路径、原因与「请关闭占用该文件的程序（同步盘 / 杀毒软件）后重试」）——读不到就用默认值继续跑，退出时会把好档覆盖掉。
 - **保存时机**：每次修改立即写盘（「每日词数」写 `dict.json`，其余写 `setting.json`）；数字项在输入框按 `Enter` 时写盘；返回主页与退出程序时各再保存一次；`--mode` / `--theme` 的启动覆盖也会在退出时写回。只读模式跳过全部设置保存；「每日词数」还受 `readonly_dict` 约束。
 - **写盘方式**：同目录临时文件 + fsync + rename（`src/fs.rs` / `src/store/mod.rs`），不会写出半截 JSON。
 - **手工修改**：先退出程序再改文件，否则内存状态会在下次保存时覆盖它。

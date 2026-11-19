@@ -130,7 +130,7 @@ src/ 共 67 个 Rust 文件，按目录分组：
    - bootstrap::load 创建 FileStore、读 dict.json / setting.json、加载 Catalog 与 ThemeRegistry；损坏、版本过高、主题告警收进 notices。--dict 先匹配三本系统词典 id，否则按 id / enName 选择资源词库。
    - 应用 --mode（cli::parse_mode）与 --theme 覆盖；构造 Rng（--seed 或随机种子）。
    - notices 转 Warning Toast；主题回退时追加提示。
-   - --reset-practice 删除两份断点缓存；否则只读入文章断点做列表标记。
+   - 先读入两份断点缓存（主页「上次任务」、文章列表「上次第 N 句」与只读保护都靠它）；--reset-practice 再删除两份缓存，读不出来的不删、提示「练习进度未清空」。
    - ensure_study_dict：系统词典保持不动；资源词库缺词表时按 id 重载，找不到则回退 cet4 或第一本；装载后按实际词数校正 length 与进度，丢弃不匹配的旧断点。
    - refresh_stats 与 refresh_task_preview 计算主页缓存。
    - 词库加载失败记 fatal；app::run 在进入终端前 bail!，不留下半初始化界面。
@@ -360,8 +360,9 @@ FSRS（fsrs.rs + scheduler.rs）：
 - 前 4 份（dict / setting / practice-word / practice-article）外层是 SaveEnvelope { val, version, updated_at }；flows.json 是裸 FlowStore，无信封、无版本号。写入用 serde_json 紧凑格式。
 - 原子写：同目录唯一临时文件 .<文件名>.tw-<pid>-<n>.tmp（create_new，撞名换序号）→ write_all → sync_all → rename；失败清理临时文件。原子性只覆盖单份文件，多份文件之间可能来自不同时刻。
 - 数据目录锁：写入口在启动时对 <home>/.tw.lock 取独占锁；锁随进程退出释放，锁文件常驻不删。doctor / export-dict / export-web 是只读入口，不取锁。
-- 读取状态：Missing（默认值）、Loaded、Corrupt（隔离为 *.corrupt-<时间戳>.json）、VersionTooNew（dict / setting 只读不覆盖）、UnsupportedVersion（练习缓存忽略，不移动文件）。
+- 读取状态：Missing（默认值）、Loaded、Corrupt（隔离为 *.corrupt-<时间戳>.json）、Unreadable（IO 读失败：不隔离、不改写、不删除，本次运行只读）、VersionTooNew（dict / setting 只读不覆盖）、UnsupportedVersion（练习缓存忽略，不移动文件）。
 - dict / setting 版本高于程序支持版本时置 readonly_dict / readonly_settings，本次运行不写回；练习缓存只接受 v2。
+- dict / setting 为 Unreadable 时进入终端前 bail!（用默认值继续跑会在退出时覆盖好档）；两份断点缓存与 flows.json 为 Unreadable 时本次运行只读：保存 / 删除入口跳过（清空练习进度按实际结果提示），启动校正进度时也不会删除它。
 - 字段与备份细节见 persistence.md。
 
 ### 7.3 theme

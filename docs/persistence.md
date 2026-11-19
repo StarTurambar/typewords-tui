@@ -106,9 +106,9 @@
 
 - `dict.json` / `setting.json` 为 `Unreadable` 时**启动直接失败**（进入终端前 `bail!`），文案含路径、原因与「关闭占用后重试」，不会以默认值继续运行、退出时再覆盖原档。
 - `practice-word.json` / `practice-article.json` / `flows.json` 为 `Unreadable` 时**不隔离、不删除、当次不恢复**，本次运行内对这几份文件只读：保存 / 删除入口跳过并提示一次，退出时也不写默认值；`has_saved_practice` 与 `has_saved_article_practice` 都返回 false，不会谎称有可恢复的断点。
-- 读取容忍开头的 UTF-8 BOM：5 份存档（含 `flows.json` 的独立读路径）与两个导入入口（`tw import-dict` 的词条文件、`tw import-web` 的备份）都会在 JSON 解析前剥离开头的一个 U+FEFF；**写回一律不带 BOM**。上游网页版的 `JSON.parse` 不接受 BOM，这里接受是有意的宽容（Windows 记事本等工具默认带 BOM），不是与上游不一致的缺陷。
+- 读取容忍开头的 UTF-8 BOM：5 份存档（含 `flows.json` 的独立读路径）、`tw export-web` 的读入与两个导入入口（`tw import-dict` 的词条文件、`tw import-web` 的备份）都会在 JSON 解析前剥离开头的一个 U+FEFF；**写回一律不带 BOM**。上游网页版的 `JSON.parse` 不接受 BOM，这里接受是有意的宽容（Windows 记事本等工具默认带 BOM），不是与上游不一致的缺陷。
 
-`bootstrap::load` 把 dict / setting 的损坏、版本过高等提示交给 `App::bootstrap` 转成 Warning Toast（`Unreadable` 是启动错误，不走 Toast）；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。读不出来的缓存 / 流程只弹一次「本次运行不会写入」提示。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
+`bootstrap::load` 把 dict / setting 的损坏、版本过高等提示交给 `App::bootstrap` 转成 Warning Toast（`Unreadable` 是启动错误，不走 Toast）；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。读不出来的缓存 / 流程按文件各弹一次「本次运行不会写入」提示。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
@@ -331,7 +331,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 - **完整备份**：退出所有 tw 实例后复制整个 `<home>`（5 份存档 + `.tw.lock` + `themes/` + 导入的 `dicts/` 与 `list/word.json`；`.tw.lock` 只是 PID 记录，复制或删除都无害；`logs/` 是运行日志与崩溃报告，可留可删）。只拷 `dict.json` 会丢设置、断点与导入词库。
 - **恢复**：退出所有实例 → 用备份覆盖 `<home>` → 启动；先 `tw doctor` 核对路径与存档大小，再检查主题与设置。
-- **只重置练习**：`tw --reset-practice`（启动时删除两份断点缓存）或设置页「清空当前练习进度」（先把本轮统计落盘再做清理）。两者都只删 `practice-word.json` 与 `practice-article.json`，不动 `dict.json` 里的统计、FSRS 卡片与三本系统词典。
+- **只重置练习**：`tw --reset-practice`（启动时删除两份断点缓存）或设置页「清空当前练习进度」（先把本轮统计落盘再做清理）。两者都只删 `practice-word.json` 与 `practice-article.json`，不动 `dict.json` 里的统计、FSRS 卡片与三本系统词典；读不出来的缓存不删（内容只是本次读不到），提示改为「练习进度未清空」。
 - **重置学习记录**：设置页「清除所有数据」确认后 `boot.base` / `boot.settings` 回到默认值、删除两份缓存并立即落盘，再按全新安装重新选一本学习词典；任一存档版本过高（本次只读）时拒绝执行并提示，避免假成功（`flows.json` 不在清除范围）。**彻底重置**则关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢），下次启动重建目录。
 - **清理与退回**：隔离文件 `*.corrupt-<时间戳>.json` 与导入产生的 `*.bak-<时间戳>.json` 都不自动清理，确认无用后手工删除；需要退回导入前的状态时退出所有实例，用 `.bak` 覆盖同名存档即可。版本降级不会破坏原文件（过高只读、缓存版本不符忽略并覆盖），但新版本保存后格式会升级，降级前先备份。
 
