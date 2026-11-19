@@ -541,13 +541,8 @@ impl App {
                 self.stat = crate::domain::types::PracticeState::default();
                 self.typing = crate::domain::typing::TypingEngine::new();
             }
-            ConfirmAction::ClearAllData => {
-                self.clear_all_data();
-                self.toast(
-                    crate::domain::flow::navigator::NoticeLevel::Success,
-                    crate::domain::i18n::tr("clear_success"),
-                );
-            }
+            // 成功 / 未清干净的提示由 `clear_all_data` 自己按实际结果弹。
+            ConfirmAction::ClearAllData => self.clear_all_data(),
             ConfirmAction::ResetFsrs => self.reset_fsrs_parameters(),
         }
     }

@@ -1027,21 +1027,21 @@ impl App {
             );
         }
 
-        // 两份断点缓存无论是否 `--reset-practice` 都要先读一次：
-        // - 主页的「上次任务」与文章列表的「上次第 N 句」来自这里；
-        // - 读不出来的缓存本次运行只读，保存 / 删除入口据此跳过。清缓存的
-        //   分支若不读，保护就永远不武装：读不到的文件被当成「没有断点」，
-        //   清空与保存照常执行。
+        // 两份断点缓存的处理分两条路：
+        // - 正常启动：读入内容（主页「上次任务」、文章列表「上次第 N 句」都靠它），
+        //   读不出来的缓存本次运行只读，保存 / 删除入口据此跳过。
+        // - `--reset-practice`：只探测可读性、不读内容——读入会把损坏的缓存先
+        //   隔离成 `.corrupt-*` 副本，而这条启动参数的用途是「复现问题时清干净」，
+        //   多留一份副本与它相反；但探测仍要做，否则读不到的文件会被当成
+        //   「没有断点」，清空与保存照常执行、把好档覆盖掉。
         //
         // 启动固定在主页：断点缓存只作为「继续」入口的数据源，由用户按键
         // （主页 Enter / 文章列表 Enter）触发恢复。早期实现会在启动时直接
         // 恢复练习或文章跟打，初始画面取决于磁盘上残留了哪个缓存：单词练习
         // 可能停在默写子步骤（大字全是占位框），两份缓存同时存在时还会叠成
         // 「单词会话 + 文章练习」的非法状态，按 Esc 后没有任何页面能画出来。
-        app.refresh_article_resume();
-        app.refresh_practice_resume();
-
         if cli.reset_practice {
+            app.probe_unreadable_caches();
             // 两个练习的断点都清：启动参数的用途是「复现问题时清干净」。
             // 读不出来的缓存不会被删，提示要说清「没清」而不是「已清空」。
             if app.clear_practice_cache() {
@@ -1052,6 +1052,9 @@ impl App {
                     "练习进度未清空：缓存读不出来，已保留原文件",
                 );
             }
+        } else {
+            app.refresh_article_resume();
+            app.refresh_practice_resume();
         }
 
         if let Err(err) = app.boot.ensure_study_dict() {
@@ -1108,6 +1111,27 @@ impl App {
     /// 切换成功后再调一次，主页才不会挂着已经不存在的「上次任务」。
     fn refresh_practice_resume(&mut self) {
         let _ = self.load_practice_cache();
+    }
+
+    /// `--reset-practice` 的探测：只判断两份缓存读不读得出来，不读内容。
+    ///
+    /// 这条分支不能走 `load_practice_cache`：那会把损坏的缓存先隔离成副本，
+    /// 而 `--reset-practice` 的用途是「从干净状态开始」，多留一份 `.corrupt-*`
+    /// 与它相反（损坏内容本来就要被删掉）。读不出来的仍要记下来，否则保存
+    /// 入口会把「没有断点」当真，照常写默认值把好档覆盖掉。
+    fn probe_unreadable_caches(&mut self) {
+        if let Some(reason) = self
+            .store
+            .cache_read_error(crate::store::PRACTICE_FILE_NAME)
+        {
+            self.practice_unreadable = Some(reason);
+        }
+        if let Some(reason) = self
+            .store
+            .cache_read_error(crate::store::PRACTICE_ARTICLE_FILE_NAME)
+        {
+            self.article_unreadable = Some(reason);
+        }
     }
 
     /// 用已读出的断点缓存恢复练习会话。
@@ -1283,12 +1307,16 @@ impl App {
     ///
     /// 存档版本高于程序支持版本时是只读的（`readonly_*`），此时不清也不落盘，
     /// 否则会在界面上报「清除成功」而重启后数据原样回来。
+    ///
+    /// 读不出来的断点缓存不会被删（见 `clear_practice_cache`），提示按实际结果
+    /// 分流——和「清空当前练习进度」同一条口径，不能一边说「未清空」、另一边
+    /// 报「清除成功」。
     pub fn clear_all_data(&mut self) {
         if self.boot.readonly_dict || self.boot.readonly_settings {
             self.toast(NoticeLevel::Error, "存档版本高于当前程序，只读模式无法清除");
             return;
         }
-        self.clear_practice_cache();
+        let cleared = self.clear_practice_cache();
         self.article_practice = None;
         self.session = None;
         self.typing = TypingEngine::new();
@@ -1312,6 +1340,17 @@ impl App {
         self.save_settings_now();
         self.refresh_stats();
         self.refresh_task_preview();
+        if cleared {
+            self.toast(
+                NoticeLevel::Success,
+                crate::domain::i18n::tr("clear_success"),
+            );
+        } else {
+            self.toast(
+                NoticeLevel::Warning,
+                "已清除学习数据，但练习缓存读不出来，已保留原文件；请关闭占用它的程序后重试",
+            );
+        }
     }
 
     fn schedule_practice_save(&mut self) {

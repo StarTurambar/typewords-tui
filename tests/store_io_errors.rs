@@ -10,7 +10,8 @@ use std::fs;
 use std::path::Path;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use typewords_tui::{app, bootstrap};
+use typewords_tui::app::{self, ConfirmAction, ConfirmState};
+use typewords_tui::bootstrap;
 
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
@@ -311,4 +312,64 @@ fn progress_repair_does_not_delete_an_unreadable_cache() {
         return;
     }
     assert!(cache.is_file(), "校正进度时不能删掉读不出来的缓存");
+}
+
+/// `--reset-practice` 的用途是「复现问题时清干净」：损坏的缓存直接删掉，
+/// 不该先隔离成 `.corrupt-*` 副本、再弹一句「已丢弃」。
+#[test]
+fn reset_practice_discards_a_corrupt_cache_without_quarantining_it() {
+    let fixture = common::Fixture::new();
+    let path = fixture.home().join("practice-word.json");
+    fs::write(&path, "{not json").expect("写坏缓存");
+    let mut cli = fixture.cli();
+    cli.reset_practice = true;
+
+    let app = app::build_for_test(fixture.paths(), cli).expect("损坏缓存不该阻断启动");
+    assert!(!path.exists(), "损坏的缓存应被直接删除");
+    assert!(
+        corrupt_files(&fixture.home()).is_empty(),
+        "reset 不该留下隔离副本: {:?}",
+        corrupt_files(&fixture.home())
+    );
+    let messages = toast_messages(&app);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("已清空练习进度")),
+        "应提示已清空: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("已丢弃")),
+        "reset 分支不该先走隔离提示: {messages:?}"
+    );
+}
+
+/// 「清除所有数据」与「清空练习进度」同一口径：读不出来的缓存没删掉，
+/// 就不能报「清除成功」。
+#[test]
+fn clear_all_data_does_not_report_success_when_a_cache_stays() {
+    let fixture = common::Fixture::new();
+    let path = fixture.home().join("practice-word.json");
+    fs::create_dir(&path).expect("把 practice-word.json 做成目录");
+
+    let mut app =
+        app::build_for_test(fixture.paths(), fixture.cli()).expect("缓存读不出来不该阻断启动");
+    app.confirm = Some(ConfirmState::new(
+        "该操作将会清除所有数据，确认继续？",
+        ConfirmAction::ClearAllData,
+    ));
+    press(&mut app, KeyCode::Enter);
+
+    assert!(path.is_dir(), "读不出来的缓存不能被删除");
+    let messages = toast_messages(&app);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("已保留原文件")),
+        "要说明缓存没删: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("清除成功")),
+        "没删干净不能报「清除成功」: {messages:?}"
+    );
 }
