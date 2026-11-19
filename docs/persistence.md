@@ -92,20 +92,27 @@
 
 ### 2.3 读取状态 `LoadStatus`
 
-`FileStore::read_raw` 先只解析信封的版本头（`version` / `updated_at`），版本判定通过后 `decode_val` 才反序列化 `val`。约定：文件不存在或只有空白 → 视为缺失（`Ok(None)`，不隔离、不报错）；读取或版本头解析失败 → 隔离；版本过高 / 缓存版本不符 → 直接归类，不解析 `val`、不移动文件。`load_typed` / `load_cache` 把结果归类为：
+`FileStore::read_raw` 先只解析信封的版本头（`version` / `updated_at`），版本判定通过后 `decode_val` 才反序列化 `val`。约定：文件不存在或只有空白 → 视为缺失（不隔离、不报错）；**读不到**（权限不足、被同步盘 / 杀毒软件独占、路径是目录等 IO 错误）→ 不隔离、不改写、不算损坏；**读到了但版本头或载荷解析失败** → 隔离（这是隔离的唯一触发条件）；版本过高 / 缓存版本不符 → 直接归类，不解析 `val`、不移动文件。`load_typed` / `load_cache` 把结果归类为：
 
 | 状态 | 触发条件 | 内存值 | 提示（`Loaded::notice`） |
 | --- | --- | --- | --- |
 | `Loaded` / `Missing` | 解析成功且 `version <=` 期望值；或文件不存在、为空 | 文件内容 / 类型的 `Default` | 无 |
-| `Corrupt(reason)` | 读取 / 解析失败，文件已隔离 | 默认值（缓存为 `None`） | `存档已损坏，已隔离并恢复默认值：<reason>` |
+| `Corrupt(reason)` | 版本头或载荷解析失败，文件已隔离 | 默认值（缓存为 `None`） | `存档已损坏，已隔离并恢复默认值：<reason>` |
+| `Unreadable(reason)` | IO 读失败（`PermissionDenied`、Windows 共享冲突、`EISDIR` 等） | 默认值（缓存为 `None`），**不写回** | `存档读不出来：<reason>；可能被同步盘 / 杀毒软件占用，本次运行不会改写它` |
 | `VersionTooNew{found,expected}` | `version >` 期望值 | 默认值，原文件保留 | `存档版本过高（…），本次不会覆盖，请升级后使用` |
 | `UnsupportedVersion{found,expected}` | 缓存版本不符（单词缓存 `!= 2`、文章缓存 `!= 1`） | `None`，原文件保留 | `存档版本不受支持（…），已忽略；下次保存会覆盖` |
 
-`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
+读不到与内容损坏的处理完全不同：
+
+- `dict.json` / `setting.json` 为 `Unreadable` 时**启动直接失败**（进入终端前 `bail!`），文案含路径、原因与「关闭占用后重试」，不会以默认值继续运行、退出时再覆盖原档。
+- `practice-word.json` / `practice-article.json` / `flows.json` 为 `Unreadable` 时**不隔离、不删除、当次不恢复**，本次运行内对这几份文件只读：保存 / 删除入口跳过并提示一次，退出时也不写默认值；`has_saved_practice` 与 `has_saved_article_practice` 都返回 false，不会谎称有可恢复的断点。
+- 读取容忍开头的 UTF-8 BOM：5 份存档（含 `flows.json` 的独立读路径）、`tw export-web` 的读入与两个导入入口（`tw import-dict` 的词条文件、`tw import-web` 的备份）、主题文件（`<home>/themes/*.json`）与文章资源（`assets/list/article.json`、`assets/dicts/en/article/*.json`）都会在 JSON 解析前剥离开头的一个 U+FEFF；**写回一律不带 BOM**。上游网页版的 `JSON.parse` 不接受 BOM，这里接受是有意的宽容（Windows 记事本等工具默认带 BOM），不是与上游不一致的缺陷。
+
+`bootstrap::load` 把 dict / setting 的损坏、版本过高等提示交给 `App::bootstrap` 转成 Warning Toast（`Unreadable` 是启动错误，不走 Toast）；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次；`--reset-practice` 只探测可读性、不读内容，损坏的缓存直接删，因此没有「已丢弃」提示），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。读不出来的缓存 / 流程按文件各弹一次「本次运行不会写入」提示。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
-解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。
+解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间；同一秒重名追加 `-2`、`-3`……，不覆盖既有隔离副本），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`，隔离失败则记 `（隔离失败: <原因>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。IO 读错误（`Unreadable`）**不进入**这条流程。
 
 ### 2.5 版本策略
 
@@ -121,6 +128,8 @@
 | `practice-article.json` | 1 | 不支持 | 接受 | 不支持 |
 
 只读的后果：`readonly_dict` 为真时 `App::save_dict_now` 直接返回，本次运行的词库进度、FSRS 卡片与统计都不落盘（原 `dict.json` 完好）；`readonly_settings` 同理拦住 `save_settings_now`，设置修改与 `--mode` / `--theme` 覆盖都不写回。两种只读都**不影响**断点缓存的保存与删除。降级运行同样受保护，升级前仍建议备份数据目录。
+
+读不出来（IO 错误）与版本过高不是一回事：前者在 `bootstrap::load` 直接报错退出，不进入只读模式、也不隔离或写回默认值（见 2.3）。
 
 ### 2.6 落盘前的 `shake_common_dict`
 
@@ -233,7 +242,7 @@
 - 与上游结构不同：上游 `practiceData` 是「段落 / 句 / 词」三级游标，TUI 在 `gen_sections` 后按扁平句子推进，只存一个 `sentenceIndex`；备份里的映射见第 10 节。
 - 保存：每完成一句排 500 ms 防抖，另有 30 秒整点兜底；离开文章页（`Esc` / `Ctrl+C`）与退出程序立即保存。整篇练完时**删除**文件，否则下次会「恢复」一篇已练完的文章。
 - 恢复：启动时只读取（`App::refresh_article_resume`）用于列表标记「上次第 N 句」，不直接进跟打页；选中该文章按 `Enter` 才从记录的句子续打。文章 id 在当前书目里找不到就忽略；资源变短时下标按当前句数夹取，0 句的文章不显示标记。
-- 损坏 / 版本不符：同 2.3，损坏提示「文章练习缓存损坏，已丢弃」，不阻断启动。
+- 损坏 / 版本不符：同 2.3，损坏提示「文章练习缓存损坏，已丢弃：<原因>（已移动到 <隔离路径>）」，不阻断启动；读不出来时不隔离、不删除，本次运行只读。
 
 ## 7. `flows.json`（`FlowStore`，无版本号）
 
@@ -242,7 +251,7 @@
 - **没有信封、没有版本号**：上游用 localStorage，本来就没有版本概念；`config.version` 是流程配置自身的版本，与 `CURRENT_FLOW_VERSION`（当前 6）一致。
 - `config` 是 `src/domain/flow/mod.rs` 的 `PracticeFlowConfig`：`id` / `version` / `mode` / `label` / `nodes`；节点为 `id` / `label` / `source` / `steps`；步骤为 `templateId` / `wordAdvance` / `onEnd` / `shuffleOnEnter`。`wordAdvance` 为 `wordLoop` 时带 `groupSize` 与 `subSteps`（`{ templateId }` 对象数组，不是裸 id 数组）。字段名逐字对齐上游，因此可与上游 localStorage 内容互换。
 - `activeId` 为空表示走内置流程（`FlowStore::active` 返回 `None`）。写入用 pretty JSON + 原子写，启停 / 新建 / 删除 / 编辑流程后立即 `App::save_flow_store`，失败弹 `保存流程失败: …`。
-- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`，启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。
+- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`（同一秒重名追加 `-2`、`-3`），启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。读不出来（IO 错误）时不隔离、不删除，本次运行不保存流程并提示一次。
 
 ## 8. 资源词库与文章格式
 
@@ -322,7 +331,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 - **完整备份**：退出所有 tw 实例后复制整个 `<home>`（5 份存档 + `.tw.lock` + `themes/` + 导入的 `dicts/` 与 `list/word.json`；`.tw.lock` 只是 PID 记录，复制或删除都无害；`logs/` 是运行日志与崩溃报告，可留可删）。只拷 `dict.json` 会丢设置、断点与导入词库。
 - **恢复**：退出所有实例 → 用备份覆盖 `<home>` → 启动；先 `tw doctor` 核对路径与存档大小，再检查主题与设置。
-- **只重置练习**：`tw --reset-practice`（启动时删除两份断点缓存）或设置页「清空当前练习进度」（先把本轮统计落盘再做清理）。两者都只删 `practice-word.json` 与 `practice-article.json`，不动 `dict.json` 里的统计、FSRS 卡片与三本系统词典。
+- **只重置练习**：`tw --reset-practice`（启动时删除两份断点缓存）或设置页「清空当前练习进度」（先把本轮统计落盘再做清理）。两者都只删 `practice-word.json` 与 `practice-article.json`，不动 `dict.json` 里的统计、FSRS 卡片与三本系统词典；读不出来的缓存不删（内容只是本次读不到），提示改为「练习进度未清空」。`--reset-practice` 只探测可读性、不读缓存内容，因此损坏的缓存被**直接删除**而不是先隔离成 `.corrupt-*` 副本（这条启动参数的用途是「复现问题时清干净」）；「清空当前练习进度」与「清除所有数据」同样按实际结果提示，没删掉时不会报「已清空 / 清除成功」。
 - **重置学习记录**：设置页「清除所有数据」确认后 `boot.base` / `boot.settings` 回到默认值、删除两份缓存并立即落盘，再按全新安装重新选一本学习词典；任一存档版本过高（本次只读）时拒绝执行并提示，避免假成功（`flows.json` 不在清除范围）。**彻底重置**则关闭程序后删除整个 `<home>`（内置词库在 `assets/`，不会丢），下次启动重建目录。
 - **清理与退回**：隔离文件 `*.corrupt-<时间戳>.json` 与导入产生的 `*.bak-<时间戳>.json` 都不自动清理，确认无用后手工删除；需要退回导入前的状态时退出所有实例，用 `.bak` 覆盖同名存档即可。版本降级不会破坏原文件（过高只读、缓存版本不符忽略并覆盖），但新版本保存后格式会升级，降级前先备份。
 
@@ -332,7 +341,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 - **默认离线**：程序不主动联网；只有开启有道发音（`ttsSource = youdao`）时才下载音频，播放走外部播放器（`src/audio/player.rs`）。无账号、无云同步、无遥测。
 - **明文存储**：存档是可读 JSON，没有加密；笔记、进度、收藏对同机有文件读权限的用户可见，取决于操作系统权限。
-- **手工编辑与并发**：先退出程序并备份，保持信封结构、UTF-8 编码、合法 JSON（不能有注释 / 尾逗号），改坏会在下次启动被隔离为 `*.corrupt-*.json`；运行时编辑会被退出时的内存状态覆盖。写入口互斥靠数据目录锁（1.3），但把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜。
+- **手工编辑与并发**：先退出程序并备份，保持信封结构、UTF-8 编码（读取容忍开头的 BOM，写回不带）、合法 JSON（不能有注释 / 尾逗号），改坏会在下次启动被隔离为 `*.corrupt-*.json`；运行时编辑会被退出时的内存状态覆盖。写入口互斥靠数据目录锁（1.3），但把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜。
 
 ## 相关文档
 

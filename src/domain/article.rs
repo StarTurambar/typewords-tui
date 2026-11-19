@@ -689,7 +689,9 @@ fn article_file(paths: &Paths, book: &ArticleBook) -> std::path::PathBuf {
 fn count_articles(paths: &Paths, book: &ArticleBook) -> Option<usize> {
     let file = article_file(paths, book);
     let text = std::fs::read_to_string(&file).ok()?;
-    let articles: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
+    // 与存档 / 词库同一口径：读取容忍开头的 UTF-8 BOM（外部编辑常见）。
+    let articles: Vec<serde_json::Value> =
+        serde_json::from_str(crate::fs::strip_utf8_bom(&text)).ok()?;
     Some(articles.len())
 }
 
@@ -707,7 +709,7 @@ pub fn load_books(paths: &Paths) -> Result<Vec<ArticleBook>> {
     }
     let text = std::fs::read_to_string(&file)
         .with_context(|| format!("读取文章目录失败: {}", file.display()))?;
-    let mut books: Vec<ArticleBook> = serde_json::from_str(&text)
+    let mut books: Vec<ArticleBook> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
         .with_context(|| format!("解析文章目录失败: {}", file.display()))?;
     for book in &mut books {
         book.length = count_articles(paths, book);
@@ -720,8 +722,8 @@ pub fn load_articles(paths: &Paths, book: &ArticleBook) -> Result<Vec<Article>> 
     let file = article_file(paths, book);
     let text = std::fs::read_to_string(&file)
         .with_context(|| format!("读取文章失败: {}", file.display()))?;
-    let mut articles: Vec<Article> =
-        serde_json::from_str(&text).with_context(|| format!("解析文章失败: {}", file.display()))?;
+    let mut articles: Vec<Article> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
+        .with_context(|| format!("解析文章失败: {}", file.display()))?;
     for article in &mut articles {
         gen_sections(article);
     }

@@ -1266,3 +1266,22 @@ fn backspace_removes_the_typed_character_but_keeps_the_wrong_mark() {
         "本句出现过错误，补完时仍应计入错误句数"
     );
 }
+
+/// 文章资源被记事本另存成「带 BOM 的 UTF-8」时也要能读：与存档 / 词库同一口径。
+#[test]
+fn article_assets_saved_with_a_utf8_bom_are_loaded() {
+    let fixture = common::Fixture::new();
+    for relative in ["list/article.json", "dicts/en/article/toy.json"] {
+        let path = fixture.assets().join(relative);
+        let text = std::fs::read_to_string(&path).expect("读资源文件");
+        std::fs::write(&path, format!("\u{feff}{text}")).expect("写回带 BOM 的资源文件");
+    }
+
+    let books = typewords_tui::domain::article::load_books(&fixture.paths())
+        .expect("带 BOM 的文章目录应能读取");
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0].length, Some(2), "篇数应按文章文件数出来");
+    let articles = typewords_tui::domain::article::load_articles(&fixture.paths(), &books[0])
+        .expect("带 BOM 的文章应能读取");
+    assert_eq!(articles.len(), 2);
+}
