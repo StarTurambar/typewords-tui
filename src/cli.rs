@@ -270,21 +270,29 @@ pub fn import_web(paths: &Paths, file: &Path) -> Result<()> {
 
 /// 导出成网页版能导入的备份。
 pub fn export_web(paths: &Paths, out: Option<&Path>) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut sink = stdout.lock();
+    export_web_to(&mut sink, paths, out)
+}
+
+/// [`export_web`] 的实现。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
+/// 与 [`export_dict_to`] 同一个理由；`--out` 缺省时输出就是可直接重定向的备份 JSON。
+pub fn export_web_to(sink: &mut impl Write, paths: &Paths, out: Option<&Path>) -> Result<()> {
     let store = crate::store::FileStore::new(paths.home.clone())?;
-    let text = crate::backup::export_web(&store)?;
+    let export = crate::backup::export_web(&store)?;
+    // 警告走 stderr：stdout 必须保持「纯 JSON」，脚本才能直接重定向。
+    for warning in &export.warnings {
+        eprintln!("警告：{warning}");
+    }
     match out {
         Some(path) => {
-            std::fs::write(
-                path,
-                format!(
-                    "{text}
-"
-                ),
-            )
-            .with_context(|| format!("写入 {} 失败", path.display()))?;
-            println!("已导出: {}", path.display());
+            std::fs::write(path, format!("{}\n", export.text))
+                .with_context(|| format!("写入 {} 失败", path.display()))?;
+            writeln!(sink, "已导出: {}", path.display())?;
         }
-        None => println!("{text}"),
+        None => writeln!(sink, "{}", export.text)?,
     }
     Ok(())
 }

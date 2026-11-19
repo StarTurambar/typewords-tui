@@ -261,7 +261,7 @@ fn article_cache_survives_web_roundtrip() {
     }
 
     let store = FileStore::new(paths.home.clone()).expect("数据目录");
-    let text = backup::export_web(&store).expect("导出");
+    let text = backup::export_web(&store).expect("导出").text;
     let backup_path = paths.home.join("web-backup.json");
     std::fs::write(&backup_path, text).expect("写备份");
     store.remove_practice_article().expect("清空断点");

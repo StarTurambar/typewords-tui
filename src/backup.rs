@@ -392,31 +392,49 @@ fn abort_with_rollback(writer: &ImportWriter<'_>, err: anyhow::Error) -> anyhow:
     ))
 }
 
+/// `tw export-web` 的产物：可直接重定向的 JSON 文本与需要提示的警告。
+///
+/// 警告与文本分开，标准输出才能保持「纯 JSON」：脚本可以直接
+/// `tw export-web > backup.json`，提示由调用方打到 stderr。
+#[derive(Clone, Debug)]
+pub struct WebExport {
+    pub text: String,
+    /// 被空信封占位的存档（每条含文件名与原因）
+    pub warnings: Vec<String>,
+}
+
 /// 把当前数据目录导出成网页版能导入的备份 JSON。
-pub fn export_web(store: &FileStore) -> Result<String> {
-    let dict = read_envelope_raw(store, "dict.json")?
-        .unwrap_or_else(|| empty_envelope(DICT_STATE_VERSION));
-    let setting = read_envelope_raw(store, "setting.json")?
-        .unwrap_or_else(|| empty_envelope(SETTING_VERSION));
-    let practice = read_envelope_raw(store, "practice-word.json")?;
+///
+/// 导出是抢救数据的通道：某份存档坏了更需要它能用，因此读不到 / 解析失败
+/// 的存档退成空信封，并各留一条警告，而不是让整次导出失败。
+pub fn export_web(store: &FileStore) -> Result<WebExport> {
+    let mut warnings = Vec::new();
+    let dict = read_or_placeholder(store, "dict.json", DICT_STATE_VERSION, &mut warnings);
+    let setting = read_or_placeholder(store, "setting.json", SETTING_VERSION, &mut warnings);
+    let practice = read_or_placeholder(
+        store,
+        "practice-word.json",
+        PRACTICE_CACHE_VERSION,
+        &mut warnings,
+    );
 
     let mut val = serde_json::Map::new();
     val.insert(KEY_SETTING.to_string(), setting);
     val.insert(KEY_DICT.to_string(), dict);
-    val.insert(
-        KEY_PRACTICE_WORD.to_string(),
-        practice.unwrap_or_else(|| empty_envelope(PRACTICE_CACHE_VERSION)),
-    );
+    val.insert(KEY_PRACTICE_WORD.to_string(), practice);
     val.insert(
         KEY_PRACTICE_ARTICLE.to_string(),
-        article_envelope_for_web(store)?,
+        article_envelope_for_web(store, &mut warnings)?,
     );
 
     let backup = serde_json::json!({
         "version": WEB_BACKUP_VERSION,
         "val": Value::Object(val),
     });
-    Ok(serde_json::to_string_pretty(&backup)?)
+    Ok(WebExport {
+        text: serde_json::to_string_pretty(&backup)?,
+        warnings,
+    })
 }
 
 /// 把本地文章断点包装成网页版能安全读取的信封。
@@ -429,10 +447,17 @@ pub fn export_web(store: &FileStore) -> Result<String> {
 ///
 /// 本地文件缺失、版本不是 1、或断点不可用（`articleId` / `total` 缺失）时
 /// 仍写空信封——与上游「没有文章断点」的表示一致。
-fn article_envelope_for_web(store: &FileStore) -> Result<Value> {
+fn article_envelope_for_web(store: &FileStore, warnings: &mut Vec<String>) -> Result<Value> {
     let empty = || empty_envelope(PRACTICE_ARTICLE_CACHE_VERSION);
-    let Some(envelope) = read_envelope_raw(store, FILE_PRACTICE_ARTICLE)? else {
-        return Ok(empty());
+    let envelope = match read_envelope_raw(store, FILE_PRACTICE_ARTICLE) {
+        RawSave::Value(value) => value,
+        RawSave::Missing => return Ok(empty()),
+        RawSave::Unavailable(reason) => {
+            warnings.push(format!(
+                "{FILE_PRACTICE_ARTICLE} 不可解析，已用空信封占位：{reason}"
+            ));
+            return Ok(empty());
+        }
     };
     if envelope.get("version").and_then(Value::as_u64)
         != Some(u64::from(PRACTICE_ARTICLE_CACHE_VERSION))
@@ -540,23 +565,56 @@ fn updated_at_ms(envelope: &Value) -> i64 {
         .unwrap_or(0)
 }
 
-/// 读取一份存档的原始 JSON 文本；文件不存在时返回 `None`。
+/// `read_envelope_raw` 的三类结果。
+///
+/// 「缺失」是正常状态，「读不到 / 解析失败」是坏档：导出时两者都退成空信封，
+/// 但只有后者要留一条警告。用 `Result` 把两者混在 `Err` 里正是导出整体
+/// 失败（问题 3）的根源。
+enum RawSave {
+    Missing,
+    /// 文件在，但读不出来或不是合法 JSON（含原因）
+    Unavailable(String),
+    Value(Value),
+}
+
+/// 读取一份存档的原始 JSON；文件不存在时返回 `Missing`。
 ///
 /// 直接 `read_to_string` 而不是先 `exists()`：后者是 TOCTOU（检查与读取之间
 /// 文件可能被删 / 换成目录），也会把「路径是目录」这类 IO 错误误判成不存在，
-/// 于是导出一份缺了这份存档的备份。与 `FileStore::read_text` 同一套判定。
-fn read_envelope_raw(store: &FileStore, name: &str) -> Result<Option<Value>> {
+/// 于是导出一份缺了这份存档的备份。与 `FileStore::read_text` 同一套判定：
+/// 容忍开头的 UTF-8 BOM，只含空白的文件等同缺失。
+fn read_envelope_raw(store: &FileStore, name: &str) -> RawSave {
     let path = store.file_path(name);
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err).with_context(|| format!("读取 {} 失败", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return RawSave::Missing,
+        Err(err) => return RawSave::Unavailable(format!("读取失败：{err}")),
     };
-    // 与存档读取同一口径：容忍开头的 UTF-8 BOM。否则同一份被记事本另存过的
-    // `dict.json`，`tw` 能正常启动、`tw export-web` 却报「不是合法的 JSON」。
-    let value: Value = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
-        .with_context(|| format!("{} 不是合法的 JSON", path.display()))?;
-    Ok(Some(value))
+    let text = crate::fs::strip_utf8_bom(&text);
+    if text.trim().is_empty() {
+        return RawSave::Missing;
+    }
+    match serde_json::from_str::<Value>(text) {
+        Ok(value) => RawSave::Value(value),
+        Err(err) => RawSave::Unavailable(format!("不是合法的 JSON：{err}")),
+    }
+}
+
+/// 读一份存档；缺失或读不出来时退成空信封，读不出来的再留一条警告。
+fn read_or_placeholder(
+    store: &FileStore,
+    name: &str,
+    version: u32,
+    warnings: &mut Vec<String>,
+) -> Value {
+    match read_envelope_raw(store, name) {
+        RawSave::Value(value) => value,
+        RawSave::Missing => empty_envelope(version),
+        RawSave::Unavailable(reason) => {
+            warnings.push(format!("{name} 不可解析，已用空信封占位：{reason}"));
+            empty_envelope(version)
+        }
+    }
 }
 
 /// 空的存档信封。
