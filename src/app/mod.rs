@@ -4544,9 +4544,11 @@ impl App {
             EditTarget::EasyLimit => settings.fsrs_easy_limit,
             EditTarget::GoodLimit => settings.fsrs_good_limit,
             EditTarget::HardLimit => settings.fsrs_hard_limit,
-            EditTarget::Retention => {
-                (settings.fsrs_parameters.request_retention * 100.0).round() as i64
-            }
+            // 与高级 FSRS 页一样显示**生效值**：手改 `setting.json` 写成 `95`
+            // 这类区间外的数时，调度器按回退后的 0.9 走，主列表若显示原始值
+            // 会出现「9500%」而子页显示 90% 的两套口径。编辑预填也走这里，
+            // 于是预填的就是调度实际使用的值。
+            EditTarget::Retention => (self.fsrs_request_retention() * 100.0).round() as i64,
             EditTarget::Note => 0,
             EditTarget::WordSoundSpeed => (settings.word_sound_speed * 100.0).round() as i64,
             EditTarget::DictName => 0,

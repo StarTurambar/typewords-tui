@@ -41,6 +41,26 @@ fn test_app(size: (u16, u16)) -> (common::Fixture, app::App) {
     (fixture, app)
 }
 
+/// 先用原始 JSON 写一份 `setting.json` 再启动：模拟手改存档 / 导入网页版备份。
+///
+/// `raw` 是 `val` 里的内容（外层 camelCase），信封版本取程序支持的版本。
+fn test_app_with_settings(raw: serde_json::Value) -> (common::Fixture, app::App) {
+    let fixture = common::Fixture::new();
+    let envelope = serde_json::json!({
+        "val": raw,
+        "version": SETTING_VERSION,
+        "updated_at": "2026-01-01T00:00:00.000Z",
+    });
+    std::fs::write(
+        fixture.home().join("setting.json"),
+        serde_json::to_string(&envelope).expect("序列化 setting.json"),
+    )
+    .expect("写 setting.json");
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).expect("build app");
+    app.set_viewport(area_of(WIDE));
+    (fixture, app)
+}
+
 fn press(app: &mut app::App, code: KeyCode) {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
 }
@@ -341,6 +361,73 @@ fn retention_and_maximum_interval_are_clamped_and_persisted() {
         store_settings(&fixture).fsrs_parameters.request_retention,
         0.5,
         "留存率应落盘"
+    );
+}
+
+/// 手改存档把留存率 / 最大间隔写成区间外的值时，设置页主列表与高级 FSRS 页
+/// 显示的是**调度器实际使用的生效值**，两处口径一致。
+///
+/// 此前主列表用原始值 `× 100`（`requestRetention: 95` 会显示「9500%」），
+/// 子页用回退后的生效值（90%）；编辑预填也读主列表那个函数，于是预填的
+/// 同样不是调度真正在用的值。
+#[test]
+fn out_of_range_fsrs_numbers_display_the_effective_values() {
+    // 外层 camelCase、`fsrsParameters` 内部 snake_case（与 ts-fsrs 一致）。
+    let (_fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "request_retention": 95.0, "maximum_interval": 0.0 }
+    }));
+    // 前置：存档里确实是区间外的原始值（否则这条测试测的是别的东西）。
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.request_retention, 95.0,
+        "原始留存率应原样读入"
+    );
+    assert_eq!(app.boot.settings.fsrs_parameters.maximum_interval, 0.0);
+
+    // 设置页主列表：显示 90%（不是 9500%），编辑预填也是 90。
+    press(&mut app, KeyCode::Char('s'));
+    assert_eq!(app.screen, Screen::Settings);
+    goto_setting(&mut app, "request_retention");
+    let rows = render_rows(&app, (100, 60));
+    let row = rows
+        .iter()
+        .find(|line| line.contains("目标留存率"))
+        .expect("设置页应有「目标留存率」行");
+    assert!(row.contains("90%"), "主列表应显示生效值 90%：{row:?}");
+    assert!(!row.contains("9500"), "主列表不该显示原始值 9500%：{row:?}");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("90"),
+        "编辑预填应等于调度实际使用的值"
+    );
+    press(&mut app, KeyCode::Esc);
+    assert!(app.edit.is_none());
+
+    // 高级 FSRS 页：留存率同样是 90%，最大间隔是 36500 天。
+    goto_setting(&mut app, "advanced_fsrs");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::AdvFsrs);
+    let rows = render_rows(&app, WIDE);
+    let retention = rows
+        .iter()
+        .find(|line| line.contains("目标留存率"))
+        .expect("高级 FSRS 页应有「目标留存率」行");
+    assert!(retention.contains("90%"), "子页应显示 90%：{retention:?}");
+    let interval = rows
+        .iter()
+        .find(|line| line.contains("最大间隔"))
+        .expect("高级 FSRS 页应有「最大间隔」行");
+    assert!(
+        interval.contains("36500"),
+        "子页应显示生效的最大间隔 36500 天：{interval:?}"
+    );
+
+    goto_row(&mut app, "最大间隔");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("36500"),
+        "最大间隔的编辑预填也应是生效值"
     );
 }
 
