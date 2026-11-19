@@ -126,7 +126,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | --- | --- |
 | 路径排查 | `tw doctor` 打印数据目录、资源目录、每本词库的文件与实际词数（空词条不计）、5 份存档大小、主题清单与告警；只读、不取锁 |
 | 任务排查 | `tw task` 打印今日新词 / 到期复习 / 随机补足数量与前几个词，不进界面 |
-| 清空断点 | `--reset-practice` 同时清 `practice-word.json` 与 `practice-article.json` |
+| 清空断点 | `--reset-practice` 同时清 `practice-word.json` 与 `practice-article.json`；只探测可读性、不读内容，损坏的直接删（不隔离），读不出来的保留并提示「未清空」 |
 | 练习页可视化 | `cargo run --locked --example dump -- <mode> [typed] [宽] [高] [big 或 plain]`，`mode` 取 `system` / `free` / `review` / `shuffle` / `identify` / `dictation` / `listen` |
 | 任意页面快照 | `cargo run --locked --example shot -- <screen> [宽] [高] [theme] [--plain]`；screen 取第 6 节表内名称，另有 `edit` / `confirm` 两个弹层快照 |
 | panic 定位 | panic 会自动写 `<日志目录>/crash-<时间戳>.txt`：panic 消息与位置、完整回溯、最近 40 行日志，**不需要** `RUST_BACKTRACE`；TUI 里的 panic 由 `src/app/mod.rs` 的 `install_panic_hook` 先恢复终端与鼠标捕获再转交 `crash` 钩子 |

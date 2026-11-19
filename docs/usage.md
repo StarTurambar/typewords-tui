@@ -88,7 +88,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`）；三本内置词典用 `wordCollect` / `wordWrong` / `wordKnown` | 写入当前学习词库（与词库页 `Enter` 同效）；找不到词库时报错退出；`tw export-dict` 缺省也用它 |
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 另接受 `smart` 与中文别名；单词测试与自定义流程只能在界面里用 `m` 选；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
-| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`，不动词典与设置，仅 TUI 生效 |
+| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`（损坏的直接删、不隔离），不动词典与设置，仅 TUI 生效；读不出来的缓存会保留并提示「未清空」 |
 | `--log FILE` | 运行日志文件 | 缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
 | `--no-log` | 关闭运行日志 | 崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
 | `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |

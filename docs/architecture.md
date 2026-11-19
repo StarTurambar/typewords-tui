@@ -130,7 +130,7 @@ src/ 共 67 个 Rust 文件，按目录分组：
    - bootstrap::load 创建 FileStore、读 dict.json / setting.json、加载 Catalog 与 ThemeRegistry；损坏、版本过高、主题告警收进 notices。--dict 先匹配三本系统词典 id，否则按 id / enName 选择资源词库。
    - 应用 --mode（cli::parse_mode）与 --theme 覆盖；构造 Rng（--seed 或随机种子）。
    - notices 转 Warning Toast；主题回退时追加提示。
-   - 先读入两份断点缓存（主页「上次任务」、文章列表「上次第 N 句」与只读保护都靠它）；--reset-practice 再删除两份缓存，读不出来的不删、提示「练习进度未清空」。
+   - 正常启动读入两份断点缓存（主页「上次任务」、文章列表「上次第 N 句」与只读保护都靠它）；--reset-practice 只探测可读性（不读内容，免得把损坏的缓存先隔离成副本）再删除两份缓存，读不出来的不删、提示「练习进度未清空」。
    - ensure_study_dict：系统词典保持不动；资源词库缺词表时按 id 重载，找不到则回退 cet4 或第一本；装载后按实际词数校正 length 与进度，丢弃不匹配的旧断点。
    - refresh_stats 与 refresh_task_preview 计算主页缓存。
    - 词库加载失败记 fatal；app::run 在进入终端前 bail!，不留下半初始化界面。
