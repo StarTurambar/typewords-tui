@@ -338,21 +338,55 @@ pub fn default_w() -> [f64; 21] {
 
 // ── 学习步进 ───────────────────────────────────────────────────────────────
 
+/// JS `parseInt(text, 10)` 的数值部分：可选正负号 + 连续十进制数字。
+///
+/// 与 `f64::parse` 的区别就是上游与 TUI 过去的区别：前导空白与数字后面的
+/// 垃圾都被忽略（`"10 m"` 的前缀是 `"10 "` → 10、`"1.5"` → 1、
+/// `"1e300"` → 1、`"0x10"` → 0）。一个数字都没有、或累加到非有限数
+/// （JS 的 `parseInt` 对超长数字串返回 Infinity）时返回 `None`。
+fn js_parse_int(text: &str) -> Option<f64> {
+    let mut chars = text.trim_start().chars().peekable();
+    let mut negative = false;
+    match chars.peek() {
+        Some('+') => {
+            chars.next();
+        }
+        Some('-') => {
+            negative = true;
+            chars.next();
+        }
+        _ => {}
+    }
+    let mut value = 0.0f64;
+    let mut digits = 0usize;
+    while let Some(character) = chars.next_if(|c| c.is_ascii_digit()) {
+        value = value * 10.0 + f64::from(character.to_digit(10).unwrap_or(0));
+        digits += 1;
+    }
+    if digits == 0 || !value.is_finite() {
+        return None;
+    }
+    Some(if negative { -value } else { value })
+}
+
 /// 步长单位转分钟（对应上游 `ConvertStepUnitToMinutes`）。
 ///
-/// 支持 `m` / `h` / `d`；无法解析时返回 `None`。
+/// 语义与上游逐条一致：**单位是最后一个字符**（`m` / `h` / `d`），前缀按
+/// `parseInt(_, 10)` 解析（见 [`js_parse_int`]）。因此 `"10 m"` 是 10 分钟、
+/// `"1.5m"` 是 1 分钟、`"1e300d"` 是 1 天、`"0x10m"` 是 0 分钟；无数字、
+/// 负数、单位不在 `m` / `h` / `d` 都返回 `None`（上游抛 `FSRSValidationError`）。
 ///
 /// 单位按**字符**切分而不是字节——步进串来自用户可编辑的 `setting.json`，
 /// `"1分"` 之类的非 ASCII 写法按字节切会落在 UTF-8 边界中间而 panic。
 ///
-/// 结果封顶到 [`MAX_STEP_MINUTES`]，非有限数（`"infm"` / `"NaNm"`）按无法解析
-/// 处理：步进串同样能绕过界面直接手改，`"1e300d"` 原样变成到期时间会让
-/// `now + Duration::minutes(_)` 超出 chrono 的 `TimeDelta` 上界而在结算路径上
-/// panic。
+/// 结果封顶到 [`MAX_STEP_MINUTES`]（第二道防线）：`"999999999999999d"` 换算后
+/// 是天文数字，原样变成到期时间会让 `now + Duration::minutes(_)` 超出 chrono
+/// 的 `TimeDelta` 上界而在结算路径上 panic。
 pub fn step_to_minutes(step: &str) -> Option<f64> {
-    let unit = step.chars().last()?;
-    let value: f64 = step[..step.len() - unit.len_utf8()].parse().ok()?;
-    if !value.is_finite() || value < 0.0 {
+    let mut chars = step.chars();
+    let unit = chars.next_back()?;
+    let value = js_parse_int(chars.as_str())?;
+    if value < 0.0 {
         return None;
     }
     let minutes = match unit {
@@ -362,6 +396,41 @@ pub fn step_to_minutes(step: &str) -> Option<f64> {
         _ => return None,
     };
     Some(minutes.min(MAX_STEP_MINUTES))
+}
+
+/// 列出无法解析的步进串（`learning_steps` 与 `relearning_steps` 一起）。
+///
+/// [`Fsrs::new`] 遇到非法步进会把**整组**回退成内置默认值；这个函数把「哪些
+/// 没被采用」交给启动路径（`bootstrap::load` 推进 notices，界面上是 Warning
+/// Toast，同时写进日志）。domain 保持纯函数：不弹 UI、不依赖上层。
+///
+/// 空列表不算非法——那是「用默认值」的正常写法，不会出现在结果里。
+pub fn invalid_steps(parameters: &FsrsParameters) -> Vec<String> {
+    parameters
+        .learning_steps
+        .iter()
+        .chain(parameters.relearning_steps.iter())
+        .filter(|step| step_to_minutes(step).is_none())
+        .cloned()
+        .collect()
+}
+
+/// 内置默认学习步进（与 `FsrsParameters::default` 一致）。
+const DEFAULT_LEARNING_STEPS: [&str; 2] = ["1m", "10m"];
+/// 内置默认重学步进（与 `FsrsParameters::default` 一致）。
+const DEFAULT_RELEARNING_STEPS: [&str; 1] = ["10m"];
+
+/// 步进列表的兜底：空列表或含非法步进时整组回退内置默认值。
+///
+/// 非法步进绝不能按「没有下一步」处理——那会让卡片直接毕业、排到 ≥1 天的
+/// FSRS 间隔，比上游「解析失败抛 `FSRSValidationError`」危险得多。整套回退
+/// 至少保住「学习卡仍留在学习阶段」的语义；「哪些步进没被采用」由
+/// [`invalid_steps`] 交给启动路径提示用户。
+fn sanitized_steps(steps: &[String], defaults: &[&str]) -> Vec<String> {
+    if steps.is_empty() || steps.iter().any(|step| step_to_minutes(step).is_none()) {
+        return defaults.iter().map(|step| (*step).to_string()).collect();
+    }
+    steps.to_vec()
 }
 
 /// 学习步进策略的结果。
@@ -464,16 +533,10 @@ pub struct Fsrs {
 impl Fsrs {
     /// 由设置构造调度器。
     pub fn new(parameters: &FsrsParameters) -> Self {
-        let learning_steps = if parameters.learning_steps.is_empty() {
-            vec!["1m".to_string(), "10m".to_string()]
-        } else {
-            parameters.learning_steps.clone()
-        };
-        let relearning_steps = if parameters.relearning_steps.is_empty() {
-            vec!["10m".to_string()]
-        } else {
-            parameters.relearning_steps.clone()
-        };
+        // 空列表与非法步进都整组回退内置默认值（见 `sanitized_steps`）。
+        let learning_steps = sanitized_steps(&parameters.learning_steps, &DEFAULT_LEARNING_STEPS);
+        let relearning_steps =
+            sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
         // 长度分流（21 / 19 / 17 / 其它）只在 `migrate_parameters` 里做一次。
         let w = migrate_parameters(
             &parameters.w,
@@ -1103,34 +1166,122 @@ mod tests {
         assert_eq!(first.due, second.due);
     }
 
+    /// 步进串的解析语义必须与上游 `ConvertStepUnitToMinutes` 一致。
+    ///
+    /// 单位是最后一个字符，前缀按 `parseInt(_, 10)` 解析（可选正负号 + 连续
+    /// 十进制数字，前导空白与数字后面的垃圾都被忽略）。此前 TUI 用
+    /// `f64::parse`：`"10 m"` 解析失败、`"1.5m"` 得到 1.5 分钟、
+    /// `"1e300d"` 得到天文数字——与上游三处都不一样。
     #[test]
-    fn step_units_are_converted() {
-        assert_eq!(step_to_minutes("1m"), Some(1.0));
-        assert_eq!(step_to_minutes("10m"), Some(10.0));
-        assert_eq!(step_to_minutes("2h"), Some(120.0));
-        assert_eq!(step_to_minutes("1d"), Some(1440.0));
-        assert_eq!(step_to_minutes("x"), None);
+    fn step_units_are_parsed_like_the_upstream_parse_int() {
+        let cases = [
+            ("1m", Some(1.0)),
+            ("10m", Some(10.0)),
+            ("2h", Some(120.0)),
+            ("1d", Some(1440.0)),
+            // parseInt 忽略前导空白与数字后面的垃圾
+            ("10 m", Some(10.0)),
+            ("1.5m", Some(1.0)),
+            // parseInt("1e300", 10) 是 1，不是 1e300
+            ("1e300d", Some(1440.0)),
+            // radix 10：`0x10` 只取到开头的 0
+            ("0x10m", Some(0.0)),
+            // 换算后超过上限的仍按上限封顶（第二道防线）
+            ("999999999999999d", Some(MAX_STEP_MINUTES)),
+            // 无数字 / 负数 / 非法单位
+            ("", None),
+            ("1分", None),
+            ("-1m", None),
+            ("abc", None),
+            ("x", None),
+            ("infm", None),
+            ("NaNm", None),
+        ];
+        for (step, expected) in cases {
+            assert_eq!(step_to_minutes(step), expected, "步进 {step:?} 解析错误");
+        }
     }
 
     /// 极端步进串不能把到期时间推到 chrono 的上界之外。
     ///
-    /// 步进串可以手改 `setting.json`：`"1e300d"` 语法合法，原样转成
-    /// `Duration::minutes` 会让结算路径 panic；非有限数按无法解析处理。
+    /// 步进串可以手改 `setting.json`：`"999999999999999d"` 按上游语义是
+    /// 1e15 天量级，原样转成 `Duration::minutes` 会让结算路径 panic，
+    /// 因此换算结果封顶到 `MAX_STEP_MINUTES`。`"1e300d"` 则因为
+    /// `parseInt("1e300", 10) == 1` 只得到 1 天（与上游一致）。
     #[test]
     fn extreme_learning_steps_are_capped() {
-        assert_eq!(step_to_minutes("1e300d"), Some(MAX_STEP_MINUTES));
         assert_eq!(step_to_minutes("999999999999999d"), Some(MAX_STEP_MINUTES));
+        assert_eq!(step_to_minutes("1e300d"), Some(1440.0));
         assert_eq!(step_to_minutes("infm"), None);
         assert_eq!(step_to_minutes("NaNm"), None);
 
-        // 走完整调度也不崩：Again 把卡片排到封顶后的首步。
+        let now = at("2026-01-01T00:00:00Z");
+        // 封顶生效：Again 把卡片排到上限（36500 天），而不是 1e15 天。
+        let scheduler = Fsrs::new(&FsrsParameters {
+            learning_steps: vec!["999999999999999d".to_string()],
+            ..FsrsParameters::default()
+        });
+        let card = scheduler.next_card(None, RATING_AGAIN, now);
+        assert_eq!(card.due, now + Duration::days(MAX_INTERVAL_DAYS as i64));
+        // parseInt 语义：`"1e300d"` 是 1 天。
         let scheduler = Fsrs::new(&FsrsParameters {
             learning_steps: vec!["1e300d".to_string()],
             ..FsrsParameters::default()
         });
-        let now = at("2026-01-01T00:00:00Z");
         let card = scheduler.next_card(None, RATING_AGAIN, now);
-        assert_eq!(card.due, now + Duration::days(MAX_INTERVAL_DAYS as i64));
+        assert_eq!(card.due, now + Duration::days(1));
+    }
+
+    /// 非法步进整组回退内置默认值：卡片留在学习阶段，而不是直接毕业。
+    ///
+    /// 此前 `step_to_minutes` 返回 `None` 会被 `learning_step_info` 的 `?`
+    /// 一路传上去，`apply_learning_steps` 落到毕业分支——手改一个错别字就把
+    /// 卡片排到 ≥1 天的 FSRS 间隔，与上游「抛 `FSRSValidationError`」的可见
+    /// 错误相比完全是静默的语义改变。
+    #[test]
+    fn invalid_steps_fall_back_to_the_built_in_defaults() {
+        let parameters = FsrsParameters {
+            learning_steps: vec!["abc".to_string(), "10m".to_string()],
+            relearning_steps: vec!["-1m".to_string()],
+            ..FsrsParameters::default()
+        };
+        assert_eq!(
+            invalid_steps(&parameters),
+            vec!["abc".to_string(), "-1m".to_string()]
+        );
+
+        let scheduler = Fsrs::new(&parameters);
+        assert_eq!(
+            scheduler.learning_steps,
+            vec!["1m".to_string(), "10m".to_string()],
+            "非法学习步进应整组回退默认"
+        );
+        assert_eq!(
+            scheduler.relearning_steps,
+            vec!["10m".to_string()],
+            "非法重学步进应整组回退默认"
+        );
+
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, RATING_GOOD, now);
+        assert_eq!(card.state, CARD_STATE_LEARNING, "非法步进不应让新卡毕业");
+        assert_eq!(card.due, now + Duration::minutes(10));
+        assert!(card.scheduled_days < 1.0, "新卡不该被排到 ≥1 天");
+
+        // 全部合法时原样保留，也不产生「非法步进」报告。
+        let defaults = FsrsParameters::default();
+        assert!(invalid_steps(&defaults).is_empty());
+        assert_eq!(
+            Fsrs::new(&defaults).learning_steps,
+            vec!["1m".to_string(), "10m".to_string()]
+        );
+        // 空列表是「用默认值」的正常写法，不算非法。
+        let empty = FsrsParameters {
+            learning_steps: Vec::new(),
+            relearning_steps: Vec::new(),
+            ..FsrsParameters::default()
+        };
+        assert!(invalid_steps(&empty).is_empty());
     }
 
     /// 最大间隔超出界面可调区间时按 36500 生效。
@@ -1158,13 +1309,15 @@ mod tests {
     /// 非 ASCII 的步进串不能按字节切分。
     ///
     /// 步进串来自用户可编辑的 `setting.json`，`"1分"` 按字节切会落在
-    /// UTF-8 边界中间直接 panic。
+    /// UTF-8 边界中间直接 panic。单位取最后一个**字符**（不是字节），因此
+    /// 多字节单位只是「不认识的单位」而返回 `None`。
     #[test]
     fn non_ascii_step_units_do_not_panic() {
         assert_eq!(step_to_minutes("1分"), None);
-        assert_eq!(step_to_minutes("10 m"), None);
         assert_eq!(step_to_minutes(""), None);
-        // 单位是 ASCII、值含非 ASCII 时应正常解析
+        // 单位是 ASCII、前缀里有空格时按 parseInt 取数字
+        assert_eq!(step_to_minutes("10 m"), Some(10.0));
+        assert_eq!(step_to_minutes(" 10m"), Some(10.0));
         assert_eq!(step_to_minutes("10m"), Some(10.0));
     }
 

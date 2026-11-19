@@ -77,7 +77,12 @@
 | 目标留存率边界 | `calculate_interval_modifier` 只拒绝 `<= 0` 与 `> 1`：`1.0` 合法，此时 `interval_modifier` 恒为 0、复习卡全被排到次日 | 有意不同：`1.0` 与越界值一起回退 0.9（设置页显示、编辑预填与调度都用这个生效值）。宁可比上游保守，也不接受「所有复习卡都排到次日」的退化调度 |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 
-一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。仍存在的差异有两处：「已掌握词不删卡片」——两端卡片集合可能不同，但调度结果一致；以及参数上界的兜底——上游对 `maximum_interval` 只校验 ≥ 1、学习步进按 `parseInt` 解析，TUI 把两者夹到 36500 天以内，避免手改出极端值时 chrono 的 `Duration` 越界（见 `src/domain/fsrs.rs` 的 `MAX_INTERVAL_DAYS`）。
+一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。上表里真正会改变单卡调度结果的差异只有两类，都是有意的：
+
+- **参数上界的兜底**：上游对 `maximum_interval` 只校验 ≥ 1，TUI 夹到 1 ~ 36500 天；学习步进的**解析**语义已与上游 `parseInt` 一致（`"10 m"` → 10 分钟、`"1e300d"` → 1 天、`"0x10m"` → 0 分钟），但换算结果仍封顶到 36500 天。两处都是为了手改出极端值时 chrono 的 `Duration` 不越界（见 `src/domain/fsrs.rs` 的 `MAX_INTERVAL_DAYS` 与 `MAX_STEP_MINUTES`）；非法步进另有「整组回退默认步进 + 启动提示」的兜底（上游是抛 `FSRSValidationError`）。
+- **目标留存率 1.0 回退 0.9**：上游接受 1.0（`interval_modifier` 恒为 0，复习卡全排到次日），TUI 选择回退到默认值。
+
+其余各行不改变单卡调度：非 21 项权重的迁移与上游逐条一致，「已掌握词不删卡片」只影响两端各自的卡片集合。
 
 ### 3.2 键位
 

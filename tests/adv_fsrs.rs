@@ -666,6 +666,29 @@ fn weight_precision_survives_a_round_trip_through_the_edit_box() {
     );
 }
 
+/// 手改出非法步进：启动时整组回退默认步进，并用 Toast 点名是哪个串。
+///
+/// 回退发生在 `Fsrs::new`（domain 纯函数），提示由 `bootstrap::load` 推进
+/// notices——没有这层提示，用户只会看到「步进没生效」，无从知道是拼错了。
+#[test]
+fn invalid_learning_steps_are_reported_at_startup() {
+    let (_fixture, app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "learning_steps": ["1m", "abc"] }
+    }));
+    let toasts = toasts_text(&app);
+    assert!(
+        toasts.contains("步进无法解析"),
+        "启动时应提示步进被回退：{toasts}"
+    );
+    assert!(toasts.contains("abc"), "提示里应点名哪个步进：{toasts}");
+
+    // 默认步进仍生效：新卡评 Good 停在 10 分钟那一步，而不是直接毕业。
+    let scheduler = Fsrs::new(&app.boot.settings.fsrs_parameters);
+    let card = scheduler.next_card(None, RATING_GOOD, Utc::now());
+    assert_eq!(card.state, CARD_STATE_LEARNING);
+    assert!(card.scheduled_days < 1.0, "非法步进不应把新卡排到 ≥1 天");
+}
+
 // ── 调度开关 ─────────────────────────────────────────────────────────────
 
 /// 两个开关行直接切换并立即落盘；关掉短期调度后调度器行为也要跟着变。
