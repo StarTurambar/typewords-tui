@@ -140,6 +140,18 @@ pub fn import_web_value(store: &FileStore, backup: &Value) -> Result<ImportRepor
             }
         }
 
+        // 本地存档版本比本程序支持的新时，运行时本来就受只读保护；导入不能
+        // 绕过它把高版本存档悄悄降级覆盖（.bak 能恢复，但用户往往不知道发生
+        // 了降级）。跳过并点名本地版本与支持版本。
+        if let Some(local) = store.envelope_version(file_name)
+            && local > expected
+        {
+            report
+                .skipped
+                .push(local_version_too_new(file_name, local, expected));
+            continue;
+        }
+
         // 校验的就是即将落盘的那份文本，保证「导入通过」与「下次启动能读」一致。
         let text = serde_json::to_string(envelope)?;
         let checked = match key {
@@ -502,6 +514,16 @@ fn article_envelope_for_web(store: &FileStore, warnings: &mut Vec<String>) -> Re
     }))
 }
 
+/// 本地存档版本高于本程序支持版本时的跳过说明（导入路径共用）。
+///
+/// 运行时这类存档受只读保护，导入不该绕开它；提示里点明本地版本、支持版本，
+/// 并给出「先备份 / 升级」的下一步。
+fn local_version_too_new(file_name: &str, local: u32, expected: u32) -> String {
+    format!(
+        "本地 {file_name} 版本 {local} 高于本程序支持的 {expected}，已保留原文件不覆盖；建议先备份数据目录，升级程序后再导入"
+    )
+}
+
 /// 按来源导入备份里的文章断点。
 ///
 /// - TUI 来源（`tuiPracticeData`，或手工塞进来的 TUI 原生 `practiceData`）：
@@ -513,6 +535,17 @@ fn import_article_envelope(
     envelope: &Value,
     report: &mut ImportReport,
 ) -> Result<()> {
+    // 与 dict / setting 同一口径：本地文章断点版本更高时不覆盖。
+    if let Some(local) = writer.store.envelope_version(FILE_PRACTICE_ARTICLE)
+        && local > PRACTICE_ARTICLE_CACHE_VERSION
+    {
+        report.skipped.push(local_version_too_new(
+            FILE_PRACTICE_ARTICLE,
+            local,
+            PRACTICE_ARTICLE_CACHE_VERSION,
+        ));
+        return Ok(());
+    }
     let found = envelope
         .get("version")
         .and_then(Value::as_u64)

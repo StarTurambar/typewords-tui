@@ -442,6 +442,53 @@ fn import_web_skips_entries_with_a_newer_version() {
     );
 }
 
+/// 本地存档版本比程序支持的新时（运行时受只读保护），导入不能悄悄降级覆盖。
+#[test]
+fn import_web_keeps_a_local_save_whose_version_is_newer() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let path = fixture.home().join("dict.json");
+    let future = r#"{"val":{"futureField":true},"version":99}"#;
+    std::fs::write(&path, future).expect("写高版本本地存档");
+
+    let backup_path = fixture.home().join("old-backup.json");
+    std::fs::write(
+        &backup_path,
+        r#"{"version":5,"val":{"dict":{"version":4,"val":{"word":{"bookList":[],"studyIndex":-1}}}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &backup_path).expect("导入");
+    assert!(
+        report.written.is_empty(),
+        "高版本本地存档不该被覆盖: {:?}",
+        report.written
+    );
+    let skipped = report.skipped.join("；");
+    assert!(skipped.contains("dict.json"), "应点名本地存档: {skipped}");
+    assert!(skipped.contains("99"), "文案应含本地版本: {skipped}");
+    assert!(skipped.contains("支持的 4"), "文案应含支持版本: {skipped}");
+    assert!(
+        skipped.contains("备份") && skipped.contains("升级"),
+        "应提示先备份 / 升级: {skipped}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("读本地存档"),
+        future.as_bytes(),
+        "本地 dict.json 字节必须完全不变"
+    );
+    assert!(
+        !std::fs::read_dir(fixture.home())
+            .expect("读目录")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dict.json.bak-")),
+        "跳过的存档不该产生备份"
+    );
+}
+
 /// 导入前必须按目标存档类型校验 `val`：结构不对的条目不写盘，原文件保持原样。
 #[test]
 fn import_rejects_unparsable_envelopes() {
