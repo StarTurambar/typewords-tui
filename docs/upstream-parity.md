@@ -72,6 +72,7 @@
 | --- | --- | --- |
 | 评级阈值 | `getGradeByWrongTimes`，默认 0 / 3 / 6 | 同左（`Scheduler::grade_by_wrong_times`） |
 | 学习与重学步进 | `learning_steps` / `relearning_steps`，`enable_short_term` 切换调度器 | 同左，读设置 |
+| 非 21 项权重 | `migrateParameters`：19 项补 `[0, 0.5]`、17 项先把 `w[4]` / `w[5]` / `w[6]` 按 FSRS-5 → FSRS-6 的公式变换再补 `[0, 0, 0, 0.5]`、其它长度整组默认 | 同左（`migrate_parameters`）；设置页改权重前也先迁移，避免改一项丢其余项 |
 | 复习间隔、fuzz 与到期判断 | FSRS-6（21 个权重 `w`）+ `maximum_interval`；`enable_fuzz` 分段 ±15% / ±10% / ±5%；`dayjs(due).isSameOrBefore(now, 'day')` | 同左，权重按上游 `CLAMP_PARAMETERS` 夹取、随机源移植上游 Alea；`due` 换算本地日期后 `<= today`。另加参数上界兜底：最大间隔夹到 1 ~ 36500 天、学习步进换算后 ≤ 36500 天（上游只校验下界，极端手改值在 TUI 会被夹住而不是算到天文数字） |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 

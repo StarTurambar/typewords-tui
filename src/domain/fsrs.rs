@@ -26,6 +26,11 @@ const S_MAX: f64 = 36500.0;
 const INIT_S_MAX: f64 = 100.0;
 /// FSRS-6 的默认衰减系数（`w[20]`）。
 pub const FSRS6_DEFAULT_DECAY: f64 = 0.1542;
+/// FSRS-5 的默认衰减系数：17 / 19 项权重的旧存档迁移时补的就是它。
+///
+/// 与 [`FSRS6_DEFAULT_DECAY`] 不是一个值——旧存档的权重来自 FSRS-5 时代，
+/// 迁移时按上游补 FSRS-5 的衰减，而不是拿 FSRS-6 的新默认值顶替。
+const FSRS5_DEFAULT_DECAY: f64 = 0.5;
 /// `w[17]` / `w[18]` 的乘积上限。
 const W17_W18_CEILING: f64 = 2.0;
 
@@ -228,30 +233,63 @@ fn clamp_ranges(
     clip
 }
 
-/// 把参数夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
+/// 把参数逐项夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
 ///
-/// 区间与 [`clamp_ranges`] 同源。
+/// 区间与 [`clamp_ranges`] 同源；输出长度与输入一致（上游是
+/// `parameters.map(...)`），不做补齐——17 / 19 项权重的补齐由
+/// [`migrate_parameters`] 在夹取之后做，长度分流只有那一处。
 pub fn clip_parameters(
     parameters: &[f64],
     num_relearning_steps: usize,
     enable_short_term: bool,
 ) -> Vec<f64> {
     let clip = clamp_ranges(parameters, num_relearning_steps, enable_short_term);
-    let count = parameters.len().min(clip.len());
-    let mut result: Vec<f64> = parameters
+    parameters
         .iter()
-        .take(count)
+        .take(clip.len())
         .enumerate()
         .map(|(index, value)| {
             // 上游写的是 `parameters[index] || 0`：0 与 NaN 都当 0
             let value = if value.is_finite() { *value } else { 0.0 };
             clamp(value, clip[index].0, clip[index].1)
         })
-        .collect();
-    // 不足 21 项时用默认值补齐
-    let defaults = default_w();
-    result.extend(defaults.iter().skip(count).copied());
-    result
+        .collect()
+}
+
+/// 把任意长度的权重迁移成 21 项（对应上游 `migrateParameters`）。
+///
+/// 上游按长度分流，这里逐条照搬：
+/// - 21 项：只夹取，行为与逐项夹取完全一致；
+/// - 19 项：夹取后补 `[0, FSRS5_DEFAULT_DECAY]`（FSRS-5 → FSRS-6 新增的两项）；
+/// - 17 项：夹取后先把 `w[4]` / `w[5]` / `w[6]` 按 FSRS-5 → FSRS-6 的公式
+///   变换（各取 8 位小数），再补 `[0, 0, 0, FSRS5_DEFAULT_DECAY]`；
+/// - 其它任何长度（空、22 项及以上）：**整组回退默认权重**，一项都不保留。
+///
+/// 长度分流只在这里做一次：[`Fsrs::new`] 与设置页写权重都走它，界面上的
+/// 合法区间仍由 [`weight_bounds`] 提供。
+pub fn migrate_parameters(
+    parameters: &[f64],
+    num_relearning_steps: usize,
+    enable_short_term: bool,
+) -> Vec<f64> {
+    match parameters.len() {
+        21 => clip_parameters(parameters, num_relearning_steps, enable_short_term),
+        19 => {
+            let mut w = clip_parameters(parameters, num_relearning_steps, enable_short_term);
+            w.extend([0.0, FSRS5_DEFAULT_DECAY]);
+            w
+        }
+        17 => {
+            let mut w = clip_parameters(parameters, num_relearning_steps, enable_short_term);
+            // 顺序与上游一致：`w[4]` 用的是**变换前**的 `w[5]`。
+            w[4] = round_to(w[5] * 2.0 + w[4], 8);
+            w[5] = round_to((w[5] * 3.0 + 1.0).ln() / 3.0, 8);
+            w[6] = round_to(w[6] + 0.5, 8);
+            w.extend([0.0, 0.0, 0.0, FSRS5_DEFAULT_DECAY]);
+            w
+        }
+        _ => default_w().to_vec(),
+    }
 }
 
 /// 第 `index` 项权重在当前设置下的合法区间。
@@ -436,7 +474,8 @@ impl Fsrs {
         } else {
             parameters.relearning_steps.clone()
         };
-        let w = clip_parameters(
+        // 长度分流（21 / 19 / 17 / 其它）只在 `migrate_parameters` 里做一次。
+        let w = migrate_parameters(
             &parameters.w,
             relearning_steps.len(),
             parameters.enable_short_term,
@@ -1206,5 +1245,76 @@ mod tests {
         let clipped = clip_parameters(&w, 2, true);
         assert!((clipped[17] - ceiling).abs() < 1e-12);
         assert!((clipped[18] - ceiling).abs() < 1e-12);
+    }
+
+    /// 上游 `migrateParameters` 的长度分流：21 只夹取、19 补 `[0, 0.5]`、
+    /// 17 先变换 `w[4]` / `w[5]` / `w[6]` 再补 `[0, 0, 0, 0.5]`，其它长度整组
+    /// 回退默认。
+    ///
+    /// 改前是「取前 min(len, 21) 项夹取 + 不足 21 用默认值补齐」：19 项会得到
+    /// FSRS-6 的 `w[19] = 0.0658`（上游是 0），22 项会保留前 21 项（上游整组
+    /// 默认）。这三处差异都锁在这里。
+    #[test]
+    fn migrate_parameters_follows_the_upstream_length_branches() {
+        let defaults = default_w();
+
+        // 21 项：只夹取，逐项与改前完全一致。
+        let mut w = defaults.to_vec();
+        w[0] = 1e9; // 越界 → 夹到 w[0] 的上限
+        let migrated = migrate_parameters(&w, 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert_eq!(migrated[0], INIT_S_MAX);
+        let clipped = clip_parameters(&w, 1, true);
+        for (index, value) in migrated.iter().enumerate() {
+            assert_eq!(
+                *value, clipped[index],
+                "21 项应与逐项夹取一致（w[{index}]）"
+            );
+        }
+
+        // 19 项：夹取前 19 项 + [0, FSRS5_DEFAULT_DECAY]。
+        let migrated = migrate_parameters(&defaults[..19], 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert_eq!(migrated[..19].to_vec(), defaults[..19].to_vec());
+        assert_eq!(migrated[19], 0.0, "w[19] 应是 0，而不是 FSRS-6 的默认值");
+        assert_eq!(migrated[20], FSRS5_DEFAULT_DECAY);
+
+        // 17 项：w[4] / w[5] / w[6] 按 FSRS-5 → FSRS-6 的公式变换（8 位小数）。
+        // 手算（默认权重前 17 项，全部落在夹取区间内）：
+        //   w[4] = 0.8334 * 2 + 6.4133 = 8.0801
+        //   w[5] = ln(0.8334 * 3 + 1) / 3 = 0.41760670…
+        //   w[6] = 3.0194 + 0.5 = 3.5194
+        let migrated = migrate_parameters(&defaults[..17], 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert!(
+            (migrated[4] - 8.0801).abs() < 1e-9,
+            "w[4] 实际 {}",
+            migrated[4]
+        );
+        assert!(
+            (migrated[5] - 0.4176067).abs() < 1e-9,
+            "w[5] 实际 {}",
+            migrated[5]
+        );
+        assert!(
+            (migrated[6] - 3.5194).abs() < 1e-9,
+            "w[6] 实际 {}",
+            migrated[6]
+        );
+        assert_eq!(
+            migrated[17..].to_vec(),
+            vec![0.0, 0.0, 0.0, FSRS5_DEFAULT_DECAY]
+        );
+        // 变换只动这三项，其余 14 项原样保留。
+        for index in [0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] {
+            assert_eq!(migrated[index], defaults[index], "w[{index}] 不应被改动");
+        }
+
+        // 其它长度：空与 22 项都整组回退默认（一项都不保留）。
+        assert_eq!(migrate_parameters(&[], 1, true), defaults.to_vec());
+        let mut longer = defaults.to_vec();
+        longer.push(9.0);
+        longer.push(9.0);
+        assert_eq!(migrate_parameters(&longer, 1, true), defaults.to_vec());
     }
 }

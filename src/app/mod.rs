@@ -4473,8 +4473,9 @@ impl App {
 
     /// 把输入框里的文本写进 `w[index]`，按与调度器同源的区间夹取。
     ///
-    /// 权重必须恰好 21 项才参与调度（长度不对时 `Fsrs::new` 整组回退默认），
-    /// 因此长度不对时先补成默认的 21 项再写，避免「改一个权重把整组打回默认」。
+    /// 权重先按上游 `migrateParameters` 迁移成 21 项（17 / 19 项补齐尾部，
+    /// 其它长度整组回退默认）。写之前迁移一次：否则 17 / 19 项的存档一改某个
+    /// 权重就会把其余项丢掉，与调度器实际使用的迁移结果对不上。
     fn apply_weight_text(&mut self, index: usize, text: &str) {
         if index >= AdvFsrsRow::WEIGHT_COUNT {
             return;
@@ -4489,7 +4490,15 @@ impl App {
             return;
         };
         if self.boot.settings.fsrs_parameters.w.len() != AdvFsrsRow::WEIGHT_COUNT {
-            self.boot.settings.fsrs_parameters.w = crate::domain::fsrs::default_w().to_vec();
+            let migrated = {
+                let parameters = &self.boot.settings.fsrs_parameters;
+                crate::domain::fsrs::migrate_parameters(
+                    &parameters.w,
+                    parameters.relearning_steps.len().max(1),
+                    parameters.enable_short_term,
+                )
+            };
+            self.boot.settings.fsrs_parameters.w = migrated;
         }
         let bounds = crate::domain::fsrs::weight_bounds(&self.boot.settings.fsrs_parameters, index);
         let clamped = parsed.clamp(bounds.0, bounds.1);
