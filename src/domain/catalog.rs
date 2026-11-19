@@ -373,7 +373,9 @@ fn unique_custom_id(catalog: &Catalog, name: &str) -> String {
 
 /// 把外部词库 JSON 导入数据目录，并注册到用户词库目录。
 pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
-    let text = std::fs::read_to_string(source)
+    // 外部文件整读前先预检大小：误喂一个几 GB 的「JSON」时给「文件过大」，
+    // 而不是等系统内存耗尽把进程杀掉。上限只约束导入入口，不约束自家存档。
+    let text = crate::fs::read_text_limited(source, crate::fs::IMPORT_SIZE_LIMIT)
         .with_context(|| format!("读取词库失败: {}", source.display()))?;
     // 读取容忍开头的 UTF-8 BOM；写出的词条文件同样不带 BOM。
     let text = crate::fs::strip_utf8_bom(&text);

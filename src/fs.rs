@@ -55,6 +55,33 @@ pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     write_atomic_with(path, bytes, |_| {})
 }
 
+/// 导入 / 备份读入的大小上限：512 MiB。
+///
+/// 只约束「用户指定的外部文件」：`tw import-dict` 的词条文件与 `tw import-web`
+/// 的备份。整份读进内存前先看 `metadata`，超限直接报「文件过大」，而不是等
+/// 系统内存耗尽把进程杀掉。自家存档的备份 / 回滚走 `copy_atomic`，那里**不设**
+/// 上限——限制它反而会挡住用户备份大存档。
+pub const IMPORT_SIZE_LIMIT: u64 = 512 * 1024 * 1024;
+
+/// 读取外部 JSON 文本；超过 `limit` 字节直接报错，不整读进内存。
+///
+/// 先 `metadata` 预检再整读。`metadata` 失败（文件不存在、权限不足）时继续
+/// 交给 `read_to_string` 报真实错误；预检与读取之间文件变大不追（单用户本地
+/// 工具，不值得为这个窗口引入流式读取）。
+pub fn read_text_limited(path: &Path, limit: u64) -> Result<String> {
+    if let Ok(metadata) = fs::metadata(path)
+        && metadata.len() > limit
+    {
+        return Err(anyhow!(
+            "文件过大: {}（{} 字节，上限 {} 字节）",
+            path.display(),
+            metadata.len(),
+            limit
+        ));
+    }
+    fs::read_to_string(path).with_context(|| format!("读取 {} 失败", path.display()))
+}
+
 /// 原子复制：读出 `from` 的全部字节，再用 `write_atomic_bytes` 写到 `to`。
 ///
 /// `fs::copy` 是「打开目标 → 截断 → 逐块写」，中途失败会留下半截目标文件；
@@ -280,6 +307,24 @@ mod tests {
             "{ 半截外来内容 }",
             "外来文件不能被消费或删除"
         );
+    }
+
+    /// 外部导入文件超限时，在整读进内存之前就报「文件过大」。
+    ///
+    /// 阈值做成参数，单测用 8 字节验证，不需要造 GB 级临时文件。
+    #[test]
+    fn read_text_limited_rejects_a_file_over_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("words.json");
+        fs::write(&path, "12345678").unwrap();
+
+        assert_eq!(
+            read_text_limited(&path, 8).expect("正好等于上限应可读"),
+            "12345678"
+        );
+        let err = read_text_limited(&path, 7).expect_err("超过上限应报错");
+        assert!(err.to_string().contains("文件过大"), "{err}");
+        assert!(err.to_string().contains("8 字节"), "应说明实际大小: {err}");
     }
 
     #[test]

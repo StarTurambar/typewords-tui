@@ -80,8 +80,9 @@ pub struct ImportReport {
 
 /// 读取网页版备份并写入数据目录。
 pub fn import_web(store: &FileStore, file: &Path) -> Result<ImportReport> {
-    let text =
-        std::fs::read_to_string(file).with_context(|| format!("读取 {} 失败", file.display()))?;
+    // 与 import-dict 同一上限：外部备份整读前先预检大小，超限给「文件过大」。
+    let text = crate::fs::read_text_limited(file, crate::fs::IMPORT_SIZE_LIMIT)
+        .with_context(|| format!("读取 {} 失败", file.display()))?;
     // 读取容忍开头的 UTF-8 BOM（网页版导出的文件被记事本另存过很常见）。
     let backup: Value = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
         .with_context(|| format!("{} 不是合法的 JSON", file.display()))?;

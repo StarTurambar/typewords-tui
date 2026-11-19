@@ -293,12 +293,12 @@
 
 只接受**词条数组 JSON**（与 8.2 同格式），不支持词库目录对象、ZIP、Excel。步骤（`Catalog::import_dict`）：
 
-1. 解析为 `Vec<Word>` 并用 `Word::is_usable` 过滤，至少要有一个可用词；文件名必须以 `.json` 结尾，去掉 `.json` 后不能为空（文件名就叫 `.json` 时没有 id，目录项会被装载端跳过，因此直接拒绝），也不能含路径分隔符；
+1. 读入前先按 `metadata` 预检大小，超过 512 MiB（`src/fs.rs` 的 `IMPORT_SIZE_LIMIT`）直接报「文件过大」，不整读进内存；再解析为 `Vec<Word>` 并用 `Word::is_usable` 过滤，至少要有一个可用词；文件名必须以 `.json` 结尾，去掉 `.json` 后不能为空（文件名就叫 `.json` 时没有 id，目录项会被装载端跳过，因此直接拒绝），也不能含路径分隔符；
 2. 加载词库目录（需要可用的 `assets/`），把源文件**原样**写入 `<home>/dicts/en/word/<文件名>`（走原子写，不会留下半个文件；源与目标同路径也安全）；
 3. 生成目录项：`id = enName = name = 文件名去 .json`、`description = 导入词库（N 词）`、`url = 文件名`、`length = N`、`category = 自定义`、`tags = [导入]`、`language = en`、`type = word`、`custom = true`；
 4. 写 `<home>/list/word.json`（pretty JSON + 原子写；按归一化 id 判重，同 id 替换、否则追加），打印导入结果并提示 `tw --dict <id>`；**不会自动切换**当前词库。
 
-要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`词库文件名不能是 .json（需要 <名称>.json）: <path>`、`词库文件名不能包含路径分隔符: <文件名>`、`复制词库失败: <源> → <目标>`。
+要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`词库文件名不能是 .json（需要 <名称>.json）: <path>`、`词库文件名不能包含路径分隔符: <文件名>`、`文件过大: <path>（<N> 字节，上限 <M> 字节）`、`复制词库失败: <源> → <目标>`。
 
 **`tw export-dict [DICT_ID] [--out FILE]`**（只读入口，不取锁）是它的逆操作：
 
@@ -315,6 +315,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 **`tw import-web FILE`**（写入口，取锁）：
 
+- 备份文件读入前按 `metadata` 预检大小，超过 512 MiB（`src/fs.rs` 的 `IMPORT_SIZE_LIMIT`）直接报「文件过大」，不整读进内存；`tw import-dict` 的词条文件同一上限。自家存档的备份 / 回滚（`copy_atomic`）不设上限。
 - 顶层 `version > 5` 整体拒绝；缺 `version` / 缺 `val` 对象报错退出。
 - `dict` / `setting`：信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`PracticeSaveWord` 必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。
 - 校验策略是「校验即将落盘的原文」（`validate_envelope`），通过后**原样写入**（`FileStore::write_envelope_raw`），因此未建模字段不会丢，也不会出现「导入成功、下次启动被判损坏」。
