@@ -66,7 +66,7 @@
 
 ### 3.1 FSRS
 
-评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：同一张卡在 TUI 与 Web 上算出的下次复习时间相同。
+评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：**在下表登记的差异之外**，同一份存档在 TUI 与 Web 上算出的下次复习时间相同。
 
 | 维度 | 上游（ts-fsrs） | TUI（`src/domain/fsrs.rs`） |
 | --- | --- | --- |
@@ -83,6 +83,8 @@
 - **目标留存率 1.0 回退 0.9**：上游接受 1.0（`interval_modifier` 恒为 0，复习卡全排到次日），TUI 选择回退到默认值。
 
 其余各行不改变单卡调度：非 21 项权重的迁移与上游逐条一致，「已掌握词不删卡片」只影响两端各自的卡片集合。
+
+**版本漂移风险**：上游 `package.json` 声明 `ts-fsrs ^5.2.3`，而 TUI 的移植与黄金样本以 **5.4.1** 为基线（`tools/fsrs_golden.mjs` 用 5.4.1 生成 `tests/fixtures/fsrs_golden.json`）。两个版本在 `next_state`（5.2.3 没有 `r` 参数、`t == 0` 没有短期门控）与 scheduler 的内联公式上确有差异，因此上面「同一份存档两端结果相同」只在 Web 端实际安装 5.4.1 时成立。上游快照不含 lockfile，**Web 端实际安装版本无法从本仓库确认**；核对办法是在上游仓库查 `pnpm-lock.yaml` 里 `ts-fsrs` 的解析版本，若确实是 5.2.3，需要按该版本重新生成黄金样本并重新对照。
 
 ### 3.2 键位
 
@@ -106,7 +108,7 @@ TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页�
 | 类别 | 项 |
 | --- | --- |
 | 有 UI 且生效 | 练习模式、主题、音标、大字、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据；高级 FSRS 页另有最大间隔、间隔抖动、短期调度与 21 个权重 |
-| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`learning_steps` / `relearning_steps` 仍只能手改 `setting.json`（练习流程自己的学习步进固定 1 / 6 / 10 分钟，两套互不影响） |
+| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`learning_steps` / `relearning_steps` 仍只能手改 `setting.json`（FSRS 学习步进与练习流程的节点 / 步骤是两套，互不影响） |
 | 上游有、TUI 完全没有 | 声音音量与语速、键音包、TTS 声色、字号、练习内设置弹层、文章音效、`practiceSentence`、`autoPlayFirstSentence`、侧栏折叠、移动端导航 |
 
 逐项取值与默认值见 [设置项参考](settings.md)，透传规则见 [存档与数据格式](persistence.md)。
@@ -166,7 +168,7 @@ Web 备份 data.json                        TUI 数据目录
 | 差异 | 影响 |
 | --- | --- |
 | `tuiBigWord` 与未知字段 | Web 没有 `tuiBigWord`；上游 `checkAndUpgradeSaveSetting` 与 Web 端都只保留自己认识的字段，经 Web 加载再保存会丢失 TUI 补充字段，TUI 再读时回到默认值 |
-| FSRS 卡片与参数 | `due` 用 ISO 时间字符串、其余字段同名；学习卡在 TUI 的 `stability` / `difficulty` 可能为 0，参数结构可互拷但两端调度实现不同，「同一张卡」的后续间隔不可复现 |
+| FSRS 卡片与参数 | `due` 用 ISO 时间字符串、其余字段同名；学习卡在 TUI 的 `stability` / `difficulty` 可能为 0（两端都按新卡处理）。参数结构可互拷，调度算法也与上游对齐（见 3.1）：**同一份存档在两端算出的下次复习时间相同**，前提是不落入 3.1 登记的差异（区间与步进夹取、非 21 项权重迁移、留存率 1.0 回退），且 Web 端实际安装的是 5.4.1（见 3.1 的版本漂移风险） |
 | 文章数据 | 系统「文章收藏」的词条会原样保留；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游更激进）。TUI 不读存档里的文章正文：跟打用的正文来自 `assets/dicts/en/article/*.json` |
 
 ## 5. TUI 独有
