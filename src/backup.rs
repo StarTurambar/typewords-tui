@@ -64,11 +64,15 @@ const KEY_TUI_PRACTICE_DATA: &str = "tuiPracticeData";
 const FILE_PRACTICE_ARTICLE: &str = "practice-article.json";
 
 /// 导入结果摘要。
+///
+/// 所有条目都用本地文件名（`dict.json`、`practice-article.json` …）称呼存档，
+/// 与用户能在数据目录里看到的文件一致；备份里的键名（`PracticeSaveWord` 等）
+/// 只在文档的字段映射表里出现。
 #[derive(Clone, Debug, Default)]
 pub struct ImportReport {
-    /// 实际写入的存档
+    /// 实际写入的存档（文件名）
     pub written: Vec<String>,
-    /// 因版本不受支持而跳过的存档
+    /// 因版本不受支持而跳过的存档（文件名 + 原因）
     pub skipped: Vec<String>,
     /// 结构与目标存档不匹配、被拒绝写入的存档（原文件未改动）
     pub rejected: Vec<String>,
@@ -131,23 +135,23 @@ pub fn import_web_value(store: &FileStore, backup: &Value) -> Result<ImportRepor
             .map(|raw| u32::try_from(raw).unwrap_or(u32::MAX));
         if let Some(found) = found {
             if found > expected {
-                report
-                    .skipped
-                    .push(format!("{key}（版本 {found} > {expected}）"));
+                report.skipped.push(format!(
+                    "{file_name}（备份版本 {found} 高于本程序支持的 {expected}）"
+                ));
                 continue;
             }
             // 练习缓存只认当前版本：低版本 TUI 也读不懂，写进去只会覆盖本地断点。
             if key == KEY_PRACTICE_WORD && found != expected {
-                report
-                    .skipped
-                    .push(format!("{key}（版本 {found} != {expected}，不受支持）"));
+                report.skipped.push(format!(
+                    "{file_name}（备份版本 {found} 与本程序支持的 {expected} 不符，不受支持）"
+                ));
                 continue;
             }
         }
 
-        // 本地存档版本比本程序支持的新时，运行时本来就受只读保护；导入不能
-        // 绕过它把高版本存档悄悄降级覆盖（.bak 能恢复，但用户往往不知道发生
-        // 了降级）。跳过并点名本地版本与支持版本。
+        // 本地存档版本比本程序支持的新时不覆盖。dict / setting 在运行时本来
+        // 就受只读保护；两份练习缓存没有这层保护（版本不符时运行时只是忽略，
+        // 保存时反而会被降级覆盖），导入按同一口径跳过，别动本地文件。
         if let Some(local) = store.envelope_version(file_name)
             && local > expected
         {
@@ -173,7 +177,7 @@ pub fn import_web_value(store: &FileStore, backup: &Value) -> Result<ImportRepor
         if let Err(err) = writer.write_raw(file_name, &text) {
             return Err(abort_with_rollback(&writer, err));
         }
-        report.written.push(key.to_string());
+        report.written.push(file_name.to_string());
     }
 
     // 文章断点不放进上面的原样写入：两边 payload 不同构（TUI 是文章 id +
@@ -521,8 +525,9 @@ fn article_envelope_for_web(store: &FileStore, warnings: &mut Vec<String>) -> Re
 
 /// 本地存档版本高于本程序支持版本时的跳过说明（导入路径共用）。
 ///
-/// 运行时这类存档受只读保护，导入不该绕开它；提示里点明本地版本、支持版本，
-/// 并给出「先备份 / 升级」的下一步。
+/// `dict.json` / `setting.json` 运行时受只读保护；两份练习缓存版本不符时运行时
+/// 只是忽略、保存时更容易被降级覆盖，导入同样不去动本地文件。提示里点明本地
+/// 版本、支持版本，并给出「先备份 / 升级」的下一步。
 fn local_version_too_new(file_name: &str, local: u32, expected: u32) -> String {
     format!(
         "本地 {file_name} 版本 {local} 高于本程序支持的 {expected}，已保留原文件不覆盖；建议先备份数据目录，升级程序后再导入"
@@ -540,17 +545,6 @@ fn import_article_envelope(
     envelope: &Value,
     report: &mut ImportReport,
 ) -> Result<()> {
-    // 与 dict / setting 同一口径：本地文章断点版本更高时不覆盖。
-    if let Some(local) = writer.store.envelope_version(FILE_PRACTICE_ARTICLE)
-        && local > PRACTICE_ARTICLE_CACHE_VERSION
-    {
-        report.skipped.push(local_version_too_new(
-            FILE_PRACTICE_ARTICLE,
-            local,
-            PRACTICE_ARTICLE_CACHE_VERSION,
-        ));
-        return Ok(());
-    }
     let found = envelope
         .get("version")
         .and_then(Value::as_u64)
@@ -558,7 +552,7 @@ fn import_article_envelope(
         .unwrap_or(0);
     if found > PRACTICE_ARTICLE_CACHE_VERSION {
         report.skipped.push(format!(
-            "{KEY_PRACTICE_ARTICLE}（版本 {found} > {PRACTICE_ARTICLE_CACHE_VERSION}）"
+            "{FILE_PRACTICE_ARTICLE}（备份版本 {found} 高于本程序支持的 {PRACTICE_ARTICLE_CACHE_VERSION}）"
         ));
         return Ok(());
     }
@@ -571,7 +565,7 @@ fn import_article_envelope(
             Some(value) => format!("val 不是对象（实际是 {}）", json_kind(value)),
         };
         report.discarded.push(format!(
-            "{KEY_PRACTICE_ARTICLE}（{reason}，无法还原文章断点）"
+            "{FILE_PRACTICE_ARTICLE}（{reason}，无法还原文章断点）"
         ));
         return Ok(());
     };
@@ -581,15 +575,28 @@ fn import_article_envelope(
         .or_else(|| value.get("practiceData").and_then(article_cache_from_value));
 
     if let Some(cache) = cache {
+        // 本地文章断点版本更高时不覆盖。检查放在确认「备份确实带了一个可写
+        // 的断点」之后：空占位 / 网页版游标本来就不会写本地文件，提前报
+        // 「已跳过」是假消息（本地断点 v2 时，任何不带断点的备份都会刷一条）。
+        if let Some(local) = writer.store.envelope_version(FILE_PRACTICE_ARTICLE)
+            && local > PRACTICE_ARTICLE_CACHE_VERSION
+        {
+            report.skipped.push(local_version_too_new(
+                FILE_PRACTICE_ARTICLE,
+                local,
+                PRACTICE_ARTICLE_CACHE_VERSION,
+            ));
+            return Ok(());
+        }
         let local = ArticleCacheEnvelope {
             practice_data: cache,
             stat_store_data: None,
         };
         writer.write_article(FILE_PRACTICE_ARTICLE, Some(&local))?;
-        report.written.push(KEY_PRACTICE_ARTICLE.to_string());
+        report.written.push(FILE_PRACTICE_ARTICLE.to_string());
     } else if value.as_object().is_some_and(|object| !object.is_empty()) {
         report.discarded.push(format!(
-            "{KEY_PRACTICE_ARTICLE}（网页版只记录段落/句/词游标，没有文章 id，无法对应到 TUI 的文章断点）"
+            "{FILE_PRACTICE_ARTICLE}（网页版只记录段落/句/词游标，没有文章 id，无法对应到 TUI 的文章断点）"
         ));
     }
     Ok(())
@@ -633,7 +640,7 @@ fn updated_at_ms(envelope: &Value) -> i64 {
 /// 失败（问题 3）的根源。
 enum RawSave {
     Missing,
-    /// 文件在，但读不出来或不是合法 JSON（含原因）
+    /// 文件在，但读不出来、不是合法 JSON，或不是存档信封（含原因）
     Unavailable(String),
     Value(Value),
 }
@@ -656,8 +663,32 @@ fn read_envelope_raw(store: &FileStore, name: &str) -> RawSave {
         return RawSave::Missing;
     }
     match serde_json::from_str::<Value>(text) {
-        Ok(value) => RawSave::Value(value),
+        // 能解析但不是信封（数组、缺 version / val）同样导不回来：原样导出
+        // 只会产出一份自己都拒绝导入的备份，所以与解析失败同一处理。
+        Ok(value) => match envelope_shape_error(&value) {
+            Some(reason) => RawSave::Unavailable(reason),
+            None => RawSave::Value(value),
+        },
         Err(err) => RawSave::Unavailable(format!("不是合法的 JSON：{err}")),
+    }
+}
+
+/// 判断解析出来的 JSON 是否像一个存档信封：对象、`version` 是非负整数、
+/// 且有 `val` 键（`val` 允许为 `null`，那是练习缓存的「没有缓存」）。
+///
+/// 只检查形状，不检查版本高低：版本高于本程序的存档仍原样导出，导入侧会按
+/// 「版本过高」跳过，不会悄悄降级。
+fn envelope_shape_error(value: &Value) -> Option<String> {
+    let Value::Object(object) = value else {
+        return Some(format!("不是存档信封（实际是 {}）", json_kind(value)));
+    };
+    match object.get("version") {
+        None => Some("不是存档信封（缺少 version 字段）".to_string()),
+        Some(version) if version.as_u64().is_none() => Some(format!(
+            "不是存档信封（version 不是非负整数，实际是 {version}）"
+        )),
+        Some(_) if !object.contains_key("val") => Some("不是存档信封（缺少 val 字段）".to_string()),
+        Some(_) => None,
     }
 }
 

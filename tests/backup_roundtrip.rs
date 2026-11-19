@@ -149,6 +149,40 @@ fn export_web_uses_an_empty_envelope_for_a_corrupt_dict_and_warns() {
     );
 }
 
+/// 能解析但不是存档信封的 JSON（数组 / 缺 version / 缺 val）也要空信封占位并警告。
+///
+/// 原样导出会产出一份连本程序都拒绝导入的备份，等于把坏档从「读不出来」
+/// 变成了「看起来正常」。
+#[test]
+fn export_web_uses_an_empty_envelope_for_json_that_is_not_a_save_envelope() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+
+    for text in ["[]", r#"{"val":{}}"#, r#"{"version":4}"#] {
+        std::fs::write(fixture.home().join("dict.json"), text).expect("写形状不对的存档");
+        let export = backup::export_web(&store).expect("导出");
+        let value: serde_json::Value = serde_json::from_str(&export.text).expect("JSON");
+        assert_eq!(
+            value["val"]["dict"]["version"],
+            typewords_tui::domain::constants::DICT_STATE_VERSION,
+            "{text}"
+        );
+        assert_eq!(
+            value["val"]["dict"]["val"],
+            serde_json::json!({}),
+            "非信封内容要退成空信封: {text}"
+        );
+        assert!(
+            export
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("dict.json") && warning.contains("空信封")),
+            "应警告 {text} 被空信封占位: {:?}",
+            export.warnings
+        );
+    }
+}
+
 #[test]
 fn export_web_keeps_a_real_article_cache_in_a_web_safe_envelope() {
     let fixture = common::Fixture::new();
@@ -238,7 +272,7 @@ fn import_web_writes_the_three_save_files_and_ignores_an_empty_article_envelope(
         !report
             .written
             .iter()
-            .any(|key| key == "PracticeSaveArticle"),
+            .any(|name| name == "practice-article.json"),
         "空占位不该算已导入"
     );
     assert!(
@@ -283,7 +317,7 @@ fn import_web_discards_a_web_article_cursor_without_an_article_id() {
         report
             .discarded
             .iter()
-            .any(|item| item.contains("PracticeSaveArticle") && item.contains("文章 id")),
+            .any(|item| item.contains("practice-article.json") && item.contains("文章 id")),
         "应说明缺少文章 id: {:?}",
         report.discarded
     );
@@ -309,7 +343,7 @@ fn import_web_skips_a_newer_article_cache() {
         report
             .skipped
             .iter()
-            .any(|item| item.contains("PracticeSaveArticle")),
+            .any(|item| item.contains("practice-article.json")),
         "高版本文章缓存应跳过: {:?}",
         report.skipped
     );
@@ -359,7 +393,7 @@ fn import_web_accepts_a_tui_native_article_envelope() {
         report
             .written
             .iter()
-            .any(|key| key == "PracticeSaveArticle"),
+            .any(|name| name == "practice-article.json"),
         "TUI 原生信封应被导入: {:?}",
         report.written
     );
@@ -396,7 +430,7 @@ fn article_cache_survives_a_web_val_roundtrip() {
         report
             .written
             .iter()
-            .any(|key| key == "PracticeSaveArticle"),
+            .any(|name| name == "practice-article.json"),
         "文章断点应随 Web 的 val 往返: {:?}",
         report.written
     );
@@ -435,6 +469,38 @@ fn import_web_does_not_repeat_the_path_in_a_missing_file_error() {
         message.matches(&path).count(),
         1,
         "路径不该在「读取失败」的上下文里重复出现: {message}"
+    );
+}
+
+/// 超限错误里路径只出现一次：调用方已经补了「读取 <path> 失败」。
+///
+/// 用 `set_len` 造稀疏文件，不真的写 512 MiB 数据。
+#[test]
+fn import_web_reports_an_oversized_backup_without_repeating_the_path() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let big = fixture.home().join("big-backup.json");
+    let file = std::fs::File::create(&big).expect("建大文件");
+    file.set_len(typewords_tui::fs::IMPORT_SIZE_LIMIT + 1)
+        .expect("扩到上限以上");
+    drop(file);
+
+    let error = backup::import_web(&store, &big).expect_err("超限应报错");
+    let message = format!("{error:#}");
+    let path = big.display().to_string();
+    assert!(message.contains("文件过大"), "{message}");
+    assert_eq!(
+        message.matches(&path).count(),
+        1,
+        "路径不该在「读取失败」的上下文里重复出现: {message}"
+    );
+    assert!(
+        message.contains("536870913 字节（约 512.0 MiB）"),
+        "越过上限 1 字节要保留精确字节数: {message}"
+    );
+    assert!(
+        message.contains("上限 512 MiB"),
+        "上限应按 MiB 显示: {message}"
     );
 }
 
@@ -490,9 +556,12 @@ fn import_web_skips_entries_with_a_newer_version() {
     )
     .expect("写文件");
     let report = backup::import_web(&store, &path).expect("导入");
-    assert_eq!(report.written, vec!["dict".to_string()]);
+    assert_eq!(report.written, vec!["dict.json".to_string()]);
     assert!(
-        report.skipped.iter().any(|item| item.contains("setting")),
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("setting.json")),
         "高版本的 setting 应被跳过"
     );
 }
@@ -515,13 +584,38 @@ fn import_web_discards_an_article_envelope_with_a_non_object_val() {
         report
             .discarded
             .iter()
-            .any(|item| item.contains("PracticeSaveArticle") && item.contains("文章断点")),
+            .any(|item| item.contains("practice-article.json") && item.contains("文章断点")),
         "应记「已丢弃」并说明是文章断点: {:?}",
         report.discarded
     );
     assert!(
         report.discarded.iter().any(|item| item.contains("null")),
         "文案应说明实际类型: {:?}",
+        report.discarded
+    );
+    assert!(!store.practice_article_exists());
+}
+
+/// 文章信封连 `val` 字段都没有：同样记「已丢弃」，文案点明缺字段而不是类型不对。
+#[test]
+fn import_web_discards_an_article_envelope_without_a_val_field() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let path = fixture.home().join("no-val-article.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"PracticeSaveArticle":{"version":1}}}"#,
+    )
+    .expect("写文件");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert!(report.written.is_empty(), "缺 val 不该被写成本地断点");
+    assert!(
+        report
+            .discarded
+            .iter()
+            .any(|item| item.contains("practice-article.json") && item.contains("缺少 val 字段")),
+        "应记「已丢弃」并说明缺字段: {:?}",
         report.discarded
     );
     assert!(!store.practice_article_exists());
@@ -571,6 +665,99 @@ fn import_web_keeps_a_local_save_whose_version_is_newer() {
                 .to_string_lossy()
                 .starts_with("dict.json.bak-")),
         "跳过的存档不该产生备份"
+    );
+}
+
+/// 四份存档的本地版本保护都要生效：本地版本更高时跳过、字节不变、不留 `.bak`。
+///
+/// 表驱动：dict / setting / practice-word 走同一个循环，practice-article 是独立
+/// 分支（最容易被漏掉）；本地文章断点 v2 正好落在「备份带断点」的场景里。
+#[test]
+fn import_web_keeps_every_local_save_whose_version_is_newer() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+
+    let locals = [
+        ("dict.json", r#"{"val":{"future":true},"version":99}"#),
+        ("setting.json", r#"{"val":{},"version":99}"#),
+        ("practice-word.json", r#"{"val":null,"version":99}"#),
+        ("practice-article.json", r#"{"val":{},"version":2}"#),
+    ];
+    for (name, text) in locals {
+        std::fs::write(fixture.home().join(name), text).expect("写高版本本地存档");
+    }
+
+    let backup_path = fixture.home().join("newer-local.json");
+    std::fs::write(
+        &backup_path,
+        r#"{"version":5,"val":{
+            "dict":{"version":4,"val":{"word":{"bookList":[],"studyIndex":-1}}},
+            "setting":{"version":23,"val":{}},
+            "PracticeSaveWord":{"version":2,"val":null},
+            "PracticeSaveArticle":{"version":1,"val":{
+                "tuiPracticeData":{"articleId":11,"sentenceIndex":1,"finished":1,"wrongSentences":0,"total":2,"spend":1000}
+            }}
+        }}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &backup_path).expect("导入");
+    assert!(
+        report.written.is_empty(),
+        "高版本本地存档都不该被覆盖: {:?}",
+        report.written
+    );
+    for (name, text) in locals {
+        assert!(
+            report.skipped.iter().any(|item| item.contains(name)),
+            "应跳过 {name}: {:?}",
+            report.skipped
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.home().join(name)).expect("读本地存档"),
+            text,
+            "{name} 字节必须完全不变"
+        );
+    }
+    assert!(
+        !std::fs::read_dir(fixture.home())
+            .expect("读目录")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().contains(".bak-")),
+        "跳过的存档不该产生备份"
+    );
+}
+
+/// 本地文章断点版本更高、但备份只带空占位时，不该报「已跳过」。
+///
+/// 空占位本来就不会写本地文件；提前做版本检查会让任何不带断点的备份都刷一条
+/// 误导信息（等文章缓存升到 v2，日常导入 TUI 备份都会中招）。
+#[test]
+fn import_web_does_not_report_a_skipped_article_save_for_an_empty_envelope() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let local = r#"{"val":{},"version":2}"#;
+    std::fs::write(fixture.home().join("practice-article.json"), local).expect("写本地 v2 断点");
+
+    let path = fixture.home().join("empty-article.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"PracticeSaveArticle":{"version":1,"val":{}}}}"#,
+    )
+    .expect("写备份");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert!(report.written.is_empty());
+    assert!(
+        report.skipped.is_empty(),
+        "备份没带断点，不该报已跳过: {:?}",
+        report.skipped
+    );
+    assert!(report.discarded.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(fixture.home().join("practice-article.json")).expect("读本地断点"),
+        local,
+        "本地断点字节不变"
     );
 }
 
@@ -657,7 +844,7 @@ fn import_rejects_only_the_unparsable_save() {
     .expect("写备份");
 
     let report = backup::import_web(&store, &path).expect("导入");
-    assert_eq!(report.written, vec!["dict".to_string()]);
+    assert_eq!(report.written, vec!["dict.json".to_string()]);
     assert!(
         report.rejected.iter().any(|item| item.contains("setting")),
         "应只拒绝 setting: {:?}",
@@ -704,7 +891,7 @@ fn import_backs_up_replaced_saves_and_keeps_unmodelled_fields() {
     .expect("写备份");
 
     let report = backup::import_web(&store, &path).expect("导入");
-    assert_eq!(report.written, vec!["dict".to_string()]);
+    assert_eq!(report.written, vec!["dict.json".to_string()]);
     let backup_name = report
         .backups
         .iter()
@@ -834,7 +1021,7 @@ fn import_skips_an_unsupported_practice_cache_version() {
         report
             .skipped
             .iter()
-            .any(|item| item.contains("PracticeSaveWord")),
+            .any(|item| item.contains("practice-word.json")),
         "旧版本练习缓存应跳过: {:?}",
         report.skipped
     );
@@ -862,7 +1049,7 @@ fn import_accepts_a_null_practice_cache() {
     .expect("写备份");
 
     let report = backup::import_web(&store, &path).expect("导入");
-    assert_eq!(report.written, vec!["PracticeSaveWord".to_string()]);
+    assert_eq!(report.written, vec!["practice-word.json".to_string()]);
     assert!(
         report.rejected.is_empty(),
         "val=null 是加载器接受的练习缓存表示: {:?}",
@@ -893,4 +1080,41 @@ fn import_web_accepts_a_backup_with_a_utf8_bom() {
     let report = backup::import_web(&target_store, &path).expect("带 BOM 的备份应能导入");
     assert_eq!(report.written.len(), 3, "应写入 dict、setting 与练习缓存");
     assert!(target_store.practice_exists());
+}
+
+/// 全部跳过时只打印「已跳过」，不再先打一句「没有可导入的存档」。
+#[test]
+fn import_web_output_does_not_contradict_itself_when_everything_is_skipped() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    std::fs::write(
+        fixture.home().join("dict.json"),
+        r#"{"val":{},"version":99}"#,
+    )
+    .expect("写高版本本地存档");
+    let path = fixture.home().join("skip-all.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"dict":{"version":4,"val":{}}}}"#,
+    )
+    .expect("写备份");
+
+    let mut output: Vec<u8> = Vec::new();
+    typewords_tui::cli::import_web_to(&mut output, &paths, &path).expect("导入");
+    let text = String::from_utf8_lossy(&output);
+    assert!(text.contains("已跳过"), "应逐条说明为什么没导入: {text}");
+    assert!(
+        !text.contains("没有可导入的存档"),
+        "全部跳过时不该说「没有可导入的存档」: {text}"
+    );
+
+    // 备份里确实一条都没有时，这句才成立。
+    let empty = fixture.home().join("empty.json");
+    std::fs::write(&empty, r#"{"version":5,"val":{}}"#).expect("写空备份");
+    let mut output: Vec<u8> = Vec::new();
+    typewords_tui::cli::import_web_to(&mut output, &paths, &empty).expect("导入空备份");
+    assert!(
+        String::from_utf8_lossy(&output).contains("没有可导入的存档。"),
+        "空备份应明确说没有可导入的存档"
+    );
 }

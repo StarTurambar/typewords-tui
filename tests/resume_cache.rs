@@ -277,8 +277,8 @@ fn article_cache_survives_web_roundtrip() {
         report
             .written
             .iter()
-            .any(|key| key == "PracticeSaveArticle"),
-        "应导入 PracticeSaveArticle: {:?}",
+            .any(|name| name == "practice-article.json"),
+        "应导入 practice-article.json: {:?}",
         report.written
     );
 

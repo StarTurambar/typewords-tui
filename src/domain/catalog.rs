@@ -397,7 +397,8 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     // 目录项 id 取文件名去掉 .json。文件名只有 `.json` 时 stem 为空，
     // `Catalog::load` 会跳过空 id 的条目：词条文件与目录项都写进去，词库页 /
     // `tw doctor` / `--dict` 却永远看不到它，CLI 还报「已导入」。
-    // 路径分隔符同理：目录项的 url 必须是单段文件名，不能拼出子路径。
+    // 路径分隔符这条只是防御：`file_name()` 在 Windows 上不会含分隔符，Linux
+    // 上也只挡得住字面反斜杠——它不是目录穿越防护。
     let stem = file_name.trim_end_matches(".json");
     if stem.is_empty() {
         return Err(anyhow!(
