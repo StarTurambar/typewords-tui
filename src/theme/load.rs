@@ -90,8 +90,9 @@ fn parse_theme_file(path: &Path) -> Result<ThemeSpec, String> {
         return Err(format!("主题 id `{stem}` 为内置保留名，请换一个文件名"));
     }
     let text = std::fs::read_to_string(path).map_err(|err| format!("读取失败: {err}"))?;
-    let file: ThemeFile =
-        serde_json::from_str(&text).map_err(|err| format!("JSON 解析失败: {err}"))?;
+    // 主题文件是用户手写的，记事本另存会带 BOM；与存档同一口径容忍开头的一个。
+    let file: ThemeFile = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
+        .map_err(|err| format!("JSON 解析失败: {err}"))?;
 
     let base_mode = match file.base.as_deref() {
         Some(value) => BaseMode::parse(value)?,
@@ -231,6 +232,22 @@ mod tests {
         assert!(specs.is_empty(), "{specs:?}");
         assert_eq!(warnings.len(), 2, "{warnings:?}");
     }
+
+    /// 主题文件是用户手写的：记事本另存会带 BOM，读取要容忍开头的一个 U+FEFF。
+    #[test]
+    fn loads_a_theme_file_saved_with_a_utf8_bom() {
+        let dir = temp_dir();
+        fs::write(
+            dir.path().join("ocean.json"),
+            "\u{feff}{ \"name\": \"Ocean\", \"colors\": { \"bg\": \"#0b1020\" } }",
+        )
+        .unwrap();
+        let (specs, warnings) = load_user_themes(dir.path());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name, "Ocean");
+    }
+
     #[test]
     fn uppercase_filename_is_normalized_to_lowercase_id() {
         let dir = temp_dir();
