@@ -55,6 +55,70 @@ pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     write_atomic_with(path, bytes, |_| {})
 }
 
+/// 导入 / 备份读入的大小上限：512 MiB。
+///
+/// 只约束「用户指定的外部文件」：`tw import-dict` 的词条文件与 `tw import-web`
+/// 的备份。整份读进内存前先看 `metadata`，超限直接报「文件过大」，而不是等
+/// 系统内存耗尽把进程杀掉。自家存档的备份 / 回滚走 `copy_atomic`，那里**不设**
+/// 上限——限制它反而会挡住用户备份大存档。
+pub const IMPORT_SIZE_LIMIT: u64 = 512 * 1024 * 1024;
+
+/// 读取外部 JSON 文本；超过 `limit` 字节直接报错，不整读进内存。
+///
+/// 先 `metadata` 预检再整读。`metadata` 失败（文件不存在、权限不足）时继续
+/// 交给 `read_to_string` 报真实错误；预检与读取之间文件变大不追（单用户本地
+/// 工具，不值得为这个窗口引入流式读取）。
+///
+/// 错误信息只说大小、不带路径：两个导入入口都会用 `with_context` 补上
+/// 「读取 ... 失败」的上下文，这里再拼一次会让同一个路径在错误链里出现两遍。
+pub fn read_text_limited(path: &Path, limit: u64) -> Result<String> {
+    if let Ok(metadata) = fs::metadata(path)
+        && metadata.len() > limit
+    {
+        return Err(anyhow!(
+            "文件过大：{}，上限 {}",
+            human_size(metadata.len()),
+            human_size(limit)
+        ));
+    }
+    // IO 错误原样交给调用方补上下文（两个导入入口分别说「读取词库失败」与
+    // 「读取 <path> 失败」）。
+    let text = fs::read_to_string(path)?;
+    Ok(text)
+}
+
+/// 把字节数写成给人看的大小：≥ 1 MiB 用 MiB、≥ 1 KiB 用 KiB，否则字节。
+///
+/// 只用于「文件过大」这类提示。能用一个十进制精确表示时只写换算值
+/// （`512 MiB` / `1.5 KiB`）；不能时保留字节数再附近似值
+/// （`536870913 字节（约 512.0 MiB）`）——否则「比上限多 1 字节」会被四舍五入
+/// 成和上限一模一样的 `512.0 MiB`。
+fn human_size(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    let (unit, scale) = if bytes >= MIB {
+        ("MiB", MIB)
+    } else if bytes >= KIB {
+        ("KiB", KIB)
+    } else {
+        return format!("{bytes} 字节");
+    };
+    // 以 0.1 为单位判断能否精确表示，避免浮点比较。
+    let tenths = bytes.saturating_mul(10);
+    if !tenths.is_multiple_of(scale) {
+        return format!(
+            "{bytes} 字节（约 {:.1} {unit}）",
+            bytes as f64 / scale as f64
+        );
+    }
+    let value = tenths / scale;
+    if value.is_multiple_of(10) {
+        format!("{} {unit}", value / 10)
+    } else {
+        format!("{}.{} {unit}", value / 10, value % 10)
+    }
+}
+
 /// 原子复制：读出 `from` 的全部字节，再用 `write_atomic_bytes` 写到 `to`。
 ///
 /// `fs::copy` 是「打开目标 → 截断 → 逐块写」，中途失败会留下半截目标文件；
@@ -279,6 +343,45 @@ mod tests {
             fs::read_to_string(&legacy).unwrap(),
             "{ 半截外来内容 }",
             "外来文件不能被消费或删除"
+        );
+    }
+
+    /// 外部导入文件超限时，在整读进内存之前就报「文件过大」。
+    ///
+    /// 阈值做成参数，单测用 8 字节验证，不需要造 GB 级临时文件。
+    #[test]
+    fn read_text_limited_rejects_a_file_over_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("words.json");
+        fs::write(&path, "12345678").unwrap();
+
+        assert_eq!(
+            read_text_limited(&path, 8).expect("正好等于上限应可读"),
+            "12345678"
+        );
+        let err = read_text_limited(&path, 7).expect_err("超过上限应报错");
+        let message = err.to_string();
+        assert!(message.contains("文件过大"), "{message}");
+        assert!(message.contains("8 字节"), "应说明实际大小: {message}");
+        assert!(
+            !message.contains(&path.display().to_string()),
+            "路径由调用方补上下文，这里不该再拼一遍: {message}"
+        );
+    }
+
+    /// 大文件用 MiB 显示：512 MiB 上限不该写成 536870912 字节。
+    ///
+    /// 刚好越过上限 1 字节时不能四舍五入成「512.0 MiB」（看起来等于上限），
+    /// 要保留精确字节数。
+    #[test]
+    fn human_size_prefers_mib_for_large_files() {
+        assert_eq!(human_size(IMPORT_SIZE_LIMIT), "512 MiB");
+        assert_eq!(human_size(514 * 1024 * 1024), "514 MiB");
+        assert_eq!(human_size(1536), "1.5 KiB");
+        assert_eq!(human_size(8), "8 字节");
+        assert_eq!(
+            human_size(IMPORT_SIZE_LIMIT + 1),
+            "536870913 字节（约 512.0 MiB）"
         );
     }
 

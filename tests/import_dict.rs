@@ -49,6 +49,39 @@ fn import_requires_json_extension() {
     assert!(format!("{err:#}").contains(".json"));
 }
 
+/// 文件名就是 `.json` 时 stem 为空：旧实现会写进一条空 id 目录项，CLI 报
+/// 「已导入」但词库页 / `tw doctor` / `--dict` 永远看不到它，词条文件成了孤儿。
+#[test]
+fn import_rejects_a_file_named_only_dot_json() {
+    let fixture = common::Fixture::new();
+    let source = fixture.root.path().join(".json");
+    let words = vec![Word::new("alpha")];
+    fs::write(&source, serde_json::to_string(&words).unwrap()).unwrap();
+
+    let err = import_dict(&fixture.paths(), &source).expect_err("空 stem 应报错");
+    let message = format!("{err:#}");
+    assert!(message.contains("词库文件名不能是 .json"), "{message}");
+    assert!(message.contains("<名称>.json"), "应说明正确形式: {message}");
+
+    let catalog = fixture.home().join("list").join("word.json");
+    let entries: Vec<serde_json::Value> = if catalog.is_file() {
+        serde_json::from_str(&fs::read_to_string(&catalog).unwrap()).unwrap()
+    } else {
+        Vec::new()
+    };
+    assert!(entries.is_empty(), "不该留下空 id 的目录项: {entries:?}");
+    assert!(
+        !fixture
+            .home()
+            .join("dicts")
+            .join("en")
+            .join("word")
+            .join(".json")
+            .exists(),
+        "不该写出孤儿词条文件"
+    );
+}
+
 /// 导入的词库要标成自建词典。
 ///
 /// `shake_common_dict` 会在落盘前清掉「非自建、非系统」词典的词表（词表按需

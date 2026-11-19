@@ -272,6 +272,19 @@ impl FileStore {
         }
     }
 
+    /// 读取一份存档信封的版本头（`version` 字段），不碰 `val`。
+    ///
+    /// 只解析 `version` / `updated_at`：高版本存档的载荷结构可能已经变了。
+    /// 文件不存在 / 读不到 / 版本头解析失败都返回 `None`——那几种情况由装载
+    /// 路径（`load_*`）分类处理，这里只回答「读得到版本号吗」。给「写前先看
+    /// 一眼」的入口复用（`tw import-web` 覆盖前的只读保护）。
+    pub fn envelope_version(&self, name: &str) -> Option<u32> {
+        match self.read_raw(name) {
+            RawRead::Text(raw) => Some(raw.version),
+            _ => None,
+        }
+    }
+
     /// 版本合格后才反序列化整份信封，取出 `val`。
     fn decode_val<T: DeserializeOwned>(&self, name: &str, raw: &RawEnvelope) -> Result<T> {
         let envelope: SaveEnvelope<T> = serde_json::from_str(&raw.text)

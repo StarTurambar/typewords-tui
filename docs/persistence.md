@@ -293,12 +293,12 @@
 
 只接受**词条数组 JSON**（与 8.2 同格式），不支持词库目录对象、ZIP、Excel。步骤（`Catalog::import_dict`）：
 
-1. 解析为 `Vec<Word>` 并用 `Word::is_usable` 过滤，至少要有一个可用词；文件名必须以 `.json` 结尾；
+1. 读入前先按 `metadata` 预检大小，超过 512 MiB（`src/fs.rs` 的 `IMPORT_SIZE_LIMIT`）直接报「文件过大」，不整读进内存；再解析为 `Vec<Word>` 并用 `Word::is_usable` 过滤，至少要有一个可用词；文件名必须以 `.json` 结尾，去掉 `.json` 后不能为空（文件名就叫 `.json` 时没有 id，目录项会被装载端跳过，因此直接拒绝），也不能含路径分隔符；
 2. 加载词库目录（需要可用的 `assets/`），把源文件**原样**写入 `<home>/dicts/en/word/<文件名>`（走原子写，不会留下半个文件；源与目标同路径也安全）；
 3. 生成目录项：`id = enName = name = 文件名去 .json`、`description = 导入词库（N 词）`、`url = 文件名`、`length = N`、`category = 自定义`、`tags = [导入]`、`language = en`、`type = word`、`custom = true`；
 4. 写 `<home>/list/word.json`（pretty JSON + 原子写；按归一化 id 判重，同 id 替换、否则追加），打印导入结果并提示 `tw --dict <id>`；**不会自动切换**当前词库。
 
-要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`复制词库失败: <源> → <目标>`。
+要点：`custom = true` 不能少（见 2.6）；命令**不是事务性的**——先复制词条文件、后写用户目录，用户目录写失败时词条文件已存在但未登记，重跑即可修复。常见失败文案：`读取词库失败: <path>`、`解析词库失败（需要词条数组 JSON）: <path>`、`词库中没有可用单词: <path>`、`词库文件需要是 .json 结尾: <文件名>`、`词库文件名不能是 .json（需要 <名称>.json）: <path>`、`词库文件名不能包含路径分隔符: <文件名>`、`文件过大：<实际大小>，上限 <上限>`（能精确换算时用 MiB / KiB，如 `512 MiB`、`1.5 KiB`；否则保留字节数再附近似值，如 `536870913 字节（约 512.0 MiB）`；路径由前一条「读取词库失败: <path>」给出，不在超限错误里重复）、`复制词库失败: <源> → <目标>`。
 
 **`tw export-dict [DICT_ID] [--out FILE]`**（只读入口，不取锁）是它的逆操作：
 
@@ -315,13 +315,15 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 **`tw import-web FILE`**（写入口，取锁）：
 
-- 顶层 `version > 5` 整体拒绝；缺 `version` / 缺 `val` 对象报错退出。
-- `dict` / `setting`：信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`PracticeSaveWord` 必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。
+- 备份文件读入前按 `metadata` 预检大小，超过 512 MiB（`src/fs.rs` 的 `IMPORT_SIZE_LIMIT`）直接报「文件过大」，不整读进内存；`tw import-dict` 的词条文件同一上限。自家存档的备份 / 回滚（`copy_atomic`）不设上限。
+- 顶层 `version > 5` 整体拒绝；缺 `version` 报「备份缺少 version 字段」，`version` 不是非负整数（如 `-1`、字符串）报「备份的 version 字段不是非负整数（实际：<值>）」；缺 `val` 对象报错退出。
+- 覆盖前先读本地存档的信封版本头：本地 `dict.json` / `setting.json` / `practice-word.json` / `practice-article.json` 的版本高于本程序支持值时**不覆盖**，记「已跳过」并点明本地版本与支持版本，提示先备份数据目录、升级程序后再导入。其中 `dict.json` / `setting.json` 运行时受只读保护（版本过高时只读、不写回默认值）；两份练习缓存的版本不符在运行时只是被忽略、保存时反而会被降级覆盖，导入按同一口径跳过，不去动本地文件。
+- `dict.json` / `setting.json`：备份信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`practice-word.json`（备份键 `PracticeSaveWord`）必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。报告里的条目一律用本地文件名（`dict.json`、`practice-article.json` …），不用备份键名。
 - 校验策略是「校验即将落盘的原文」（`validate_envelope`），通过后**原样写入**（`FileStore::write_envelope_raw`），因此未建模字段不会丢，也不会出现「导入成功、下次启动被判损坏」。
 - 覆盖前先把旧文件复制成 `<文件名>.bak-<时间戳>.json`（同一秒重名加 `-2`、`-3`；备份也走原子写，不会留下半截 `.bak`）。多个文件写入途中失败时按备份逆序回滚，恢复同样是原子写。错误信息按实际情况给：一份都没写成就报「没有存档被改动」，写过则分别列出「已回滚: …」与「未能回滚: …」，每一项都带对应的 `.bak`（导入前不存在的存档回滚时删除，没有 `.bak`）——回滚全部失败时磁盘上已是导入后的内容，不会谎称没改动。`.bak` 不自动清理。
-- 文章断点按来源分流：带 `tuiPracticeData` 扩展（TUI 导出）或本身就是 TUI 原生 `practiceData` 的，规范化写入 `practice-article.json`；空占位（`{}` / `null`）不动本地；网页版自身的三级游标没有文章 id，无法映射，报「已丢弃」。
+- 文章断点按来源分流：带 `tuiPracticeData` 扩展（TUI 导出）或本身就是 TUI 原生 `practiceData` 的，规范化写入 `practice-article.json`；空占位（`{}`）不动本地；`val` 缺失或不是对象（如 `null`）记「已丢弃」并说明原因，本地文件不动；网页版自身的三级游标没有文章 id，无法映射，同样报「已丢弃」。
 
-**`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，缺失或不可解析的用空信封 `{"val": {}, "version": N}` 占位，拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。
+**`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，**缺失、不可解析或不是存档信封的**都用空信封 `{"val": {}, "version": N}` 占位——导出是抢救数据的通道，一份存档坏掉不该让整次导出失败；读不到 / 解析失败 / 形状不对（非对象、缺 `version` 或 `val`）的那几份各在 **stderr** 打一条警告（带文件名与原因，例如 `警告：dict.json 不可解析，已用空信封占位：…`），**标准输出始终只有备份 JSON**，可直接重定向或接管道；`--out` 写文件走原子写（同 `export-dict`），中途失败不会留下半截备份。拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。
 
 **手工迁移**：先在网页版导出备份取 `data.json`（或从开发者工具读 IndexedDB 的两个 key），退出所有 tw 实例并备份 `<home>`，然后 `dict.json = data.val.dict`、`setting.json = data.val.setting`，需要断点时 `practice-word.json = data.val.PracticeSaveWord`（`updated_at` 可缺省）；文章断点不要手工拼。启动后用 `tw doctor` 核对路径与存档大小，再进设置页确认主题等字段。当前学习词典在资源里不存在时，启动按「原 id → `cet4` → 第一本词库」回退（`ensure_study_dict`）；`studyIndex` 指向系统词典时原样保留。
 

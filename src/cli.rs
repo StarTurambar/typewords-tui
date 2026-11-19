@@ -236,55 +236,78 @@ fn dict_progress_lines(dict: &Dict) -> (String, String) {
 
 /// 导入网页版导出的备份。
 pub fn import_web(paths: &Paths, file: &Path) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut sink = stdout.lock();
+    import_web_to(&mut sink, paths, file)
+}
+
+/// [`import_web`] 的实现。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
+/// 与 [`export_web_to`] 同一个理由。
+pub fn import_web_to(sink: &mut impl Write, paths: &Paths, file: &Path) -> Result<()> {
     let store = crate::store::FileStore::new(paths.home.clone())?;
     let report = crate::backup::import_web(&store, file)?;
-    if report.written.is_empty() {
-        println!("没有可导入的存档。");
+    // 「没有可导入的存档」只在备份里确实一条都没有时成立；全部跳过 / 拒绝 /
+    // 丢弃时先打这句，再逐条说明为什么没导入，读起来是自相矛盾的。
+    if report.written.is_empty()
+        && report.skipped.is_empty()
+        && report.rejected.is_empty()
+        && report.discarded.is_empty()
+    {
+        writeln!(sink, "没有可导入的存档。")?;
     }
-    for key in &report.written {
-        println!("已导入: {key}");
+    for name in &report.written {
+        writeln!(sink, "已导入: {name}")?;
     }
-    for key in &report.skipped {
-        println!("已跳过: {key}");
+    for name in &report.skipped {
+        writeln!(sink, "已跳过: {name}")?;
     }
-    for key in &report.rejected {
-        println!("已拒绝: {key}");
+    for name in &report.rejected {
+        writeln!(sink, "已拒绝: {name}")?;
     }
-    for key in &report.discarded {
-        println!("已丢弃: {key}");
+    for name in &report.discarded {
+        writeln!(sink, "已丢弃: {name}")?;
     }
     for name in &report.backups {
-        println!("已备份原存档: {name}");
+        writeln!(sink, "已备份原存档: {name}")?;
     }
     if !report.rejected.is_empty() {
-        println!("被拒绝的存档没有写入，原文件保持不变。");
+        writeln!(sink, "被拒绝的存档没有写入，原文件保持不变。")?;
     }
     if !report.written.is_empty() {
-        println!(
-            "
-请重启程序让新存档生效。"
-        );
+        writeln!(sink, "\n请重启程序让新存档生效。")?;
     }
     Ok(())
 }
 
 /// 导出成网页版能导入的备份。
 pub fn export_web(paths: &Paths, out: Option<&Path>) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut sink = stdout.lock();
+    export_web_to(&mut sink, paths, out)
+}
+
+/// [`export_web`] 的实现。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
+/// 与 [`export_dict_to`] 同一个理由；`--out` 缺省时输出就是可直接重定向的备份 JSON。
+pub fn export_web_to(sink: &mut impl Write, paths: &Paths, out: Option<&Path>) -> Result<()> {
     let store = crate::store::FileStore::new(paths.home.clone())?;
-    let text = crate::backup::export_web(&store)?;
+    let export = crate::backup::export_web(&store)?;
+    // 警告走 stderr：stdout 必须保持「纯 JSON」，脚本才能直接重定向。
+    for warning in &export.warnings {
+        eprintln!("警告：{warning}");
+    }
     match out {
         Some(path) => {
-            std::fs::write(
-                path,
-                format!(
-                    "{text}
-"
-                ),
-            )
-            .with_context(|| format!("写入 {} 失败", path.display()))?;
-            println!("已导出: {}", path.display());
+            // 与 export-dict 一样走原子写：中途失败不会把目标文件截成半截，
+            // 也不会留下一份写了一半、看起来却像备份的 JSON。
+            crate::fs::write_atomic(path, &format!("{}\n", export.text))
+                .with_context(|| format!("写入 {} 失败", path.display()))?;
+            writeln!(sink, "已导出: {}", path.display())?;
         }
-        None => println!("{text}"),
+        None => writeln!(sink, "{}", export.text)?,
     }
     Ok(())
 }
