@@ -765,6 +765,15 @@ pub struct App {
     /// 已损坏时为 `false`——否则主页会一直挂着「上次任务」，按 Enter 却
     /// 静默新建。
     saved_practice_resumable: bool,
+    /// 本次运行内读不出来的存档（原因，含路径）。
+    ///
+    /// 读不到 ≠ 内容坏了：不隔离、不删除、不恢复，本次运行内对这份文件只读
+    /// ——保存 / 删除入口跳过，退出时也不把默认值写进去。`None` 表示可正常读写。
+    practice_unreadable: Option<String>,
+    article_unreadable: Option<String>,
+    flows_unreadable: Option<String>,
+    /// 「读不出来的存档本次不会写入」是否已经提示过（每次运行只提示一次）。
+    unreadable_save_notice_shown: bool,
     pending_practice_save: Option<i64>,
     /// 文章跟打进度的延迟保存截止时间。
     pending_article_save: Option<i64>,
@@ -948,6 +957,10 @@ impl App {
             last_activity: now,
             last_timer_tick: now,
             saved_practice_resumable: false,
+            practice_unreadable: None,
+            article_unreadable: None,
+            flows_unreadable: None,
+            unreadable_save_notice_shown: false,
             pending_practice_save: None,
             pending_article_save: None,
         };
@@ -955,12 +968,26 @@ impl App {
         app.refresh_shortcuts();
         {
             let loaded = app.store.load_flows();
+            // notice() 要借用整个 Loaded，先取出来再移动 value。
+            let unreadable_notice = if matches!(&loaded.status, LoadStatus::Unreadable(_)) {
+                loaded.notice()
+            } else {
+                None
+            };
             app.flow_store = loaded.value;
-            if let LoadStatus::Corrupt(reason) = loaded.status {
-                app.toast(
+            match &loaded.status {
+                LoadStatus::Corrupt(reason) => app.toast(
                     NoticeLevel::Warning,
                     format!("流程存档已损坏，已隔离并恢复默认值: {reason}"),
-                );
+                ),
+                // 读不到不是损坏：不隔离、不删除，本次运行不保存流程。
+                LoadStatus::Unreadable(reason) => {
+                    app.flows_unreadable = Some(reason.clone());
+                    if let Some(notice) = unreadable_notice {
+                        app.toast(NoticeLevel::Warning, notice);
+                    }
+                }
+                _ => {}
             }
         }
         for notice in notices {
@@ -1014,16 +1041,28 @@ impl App {
     /// 补一次（文件在同一次运行内被外部改坏的边角情况）。
     fn load_practice_cache(&mut self) -> Option<PracticeCacheCompact> {
         let loaded = self.store.load_practice();
-        if let Some(notice) = loaded.notice() {
+        if let LoadStatus::Unreadable(reason) = &loaded.status {
+            // 只弹一次：这个函数在启动与恢复流程里都会调用，而读不出来的
+            // 状态在本次运行内是持续的。
+            if self.practice_unreadable.is_none() {
+                self.practice_unreadable = Some(reason.clone());
+                if let Some(notice) = loaded.notice() {
+                    self.toast(NoticeLevel::Warning, notice);
+                }
+            }
+        } else if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
         // 能反序列化不等于能恢复：`{"val":{}}` 会得到 Some(默认值)，但
         // `cache_from_compact` 必然拒绝它。主页据此显示「上次任务」，按
         // Enter 却静默新建，正是本次修复要消掉的幽灵断点。
-        self.saved_practice_resumable = loaded
-            .value
-            .as_ref()
-            .is_some_and(PracticeCacheCompact::has_restorable_content);
+        //
+        // 读不出来的缓存同样不算「上次任务」：文件还在，但内容不可知。
+        self.saved_practice_resumable = self.practice_unreadable.is_none()
+            && loaded
+                .value
+                .as_ref()
+                .is_some_and(PracticeCacheCompact::has_restorable_content);
         loaded.value
     }
 
@@ -1120,7 +1159,40 @@ impl App {
         }
     }
 
+    /// 本次运行内读不出来的存档：保存 / 删除入口跳过，并只提示一次。
+    ///
+    /// 读不到 ≠ 内容坏了——写回默认值会把好档覆盖成默认档，隔离还会把它
+    /// 改名移走。跳过写入、保留原文件，等用户关掉占用它的程序后重启。
+    fn skip_unreadable_save(&mut self, name: &str) -> bool {
+        let reason = if name == "practice-word.json" {
+            self.practice_unreadable.clone()
+        } else if name == "practice-article.json" {
+            self.article_unreadable.clone()
+        } else if name == crate::domain::flow::store::FILE_NAME {
+            self.flows_unreadable.clone()
+        } else {
+            None
+        };
+        let Some(reason) = reason else {
+            return false;
+        };
+        if !self.unreadable_save_notice_shown {
+            self.unreadable_save_notice_shown = true;
+            self.toast(
+                NoticeLevel::Warning,
+                format!(
+                    "{name} 本次读不出来（{reason}），本次运行不会写入或删除它；请关闭占用它的程序后重启"
+                ),
+            );
+        }
+        true
+    }
+
     pub fn save_practice_now(&mut self) {
+        if self.skip_unreadable_save("practice-word.json") {
+            self.pending_practice_save = None;
+            return;
+        }
         let Some(session) = self.session.as_ref() else {
             return;
         };
@@ -1139,13 +1211,21 @@ impl App {
     /// 「清空当前练习进度」与 `--reset-practice` 共用此函数——两者的用途
     /// 都是「从干净状态开始」，留着半个文章的跟打进度没意义。
     pub fn clear_practice_cache(&mut self) {
-        match self.store.remove_practice() {
-            Ok(()) => self.saved_practice_resumable = false,
-            // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
-            // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
-            Err(err) => logging::error(format!("清空单词练习缓存失败: {err}")),
+        // 读不出来的缓存不能删：文件还在，内容只是本次读不到，删了等于
+        // 替用户丢弃好档。保留原文件，只清内存里的结论。
+        if self.skip_unreadable_save("practice-word.json") {
+            self.saved_practice_resumable = false;
+        } else {
+            match self.store.remove_practice() {
+                Ok(()) => self.saved_practice_resumable = false,
+                // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
+                // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
+                Err(err) => logging::error(format!("清空单词练习缓存失败: {err}")),
+            }
         }
-        if let Err(err) = self.store.remove_practice_article() {
+        if !self.skip_unreadable_save("practice-article.json")
+            && let Err(err) = self.store.remove_practice_article()
+        {
             logging::error(format!("清空文章练习缓存失败: {err}"));
         }
         self.pending_practice_save = None;
@@ -1217,12 +1297,16 @@ impl App {
     /// 断点：主页一直显示「上次任务」，按 Enter 却静默新建。结论由
     /// `load_practice_cache` 在启动与恢复流程里更新，渲染路径上不碰磁盘。
     pub fn has_saved_practice(&self) -> bool {
-        self.saved_practice_resumable
+        // 读不出来的缓存文件还在，但内容不可知，不能谎称可恢复。
+        self.practice_unreadable.is_none() && self.saved_practice_resumable
     }
 
     /// 是否有未完成的文章跟打进度。
+    ///
+    /// 不能只看文件是否存在：读不出来的缓存（被同步盘 / 杀毒软件占用）
+    /// 既不能恢复也不能在本次运行内改写，必须返回 false。
     pub fn has_saved_article_practice(&self) -> bool {
-        self.store.practice_article_exists()
+        self.article_unreadable.is_none() && self.store.practice_article_exists()
     }
 
     pub fn refresh_stats(&mut self) {
@@ -1525,11 +1609,16 @@ impl App {
         // 只丢弃本轮单词练习的断点；文章跟打的缓存属于另一轮进度，
         // 结算单词练习时不能顺手删掉（显式清空走 `clear_practice_cache`）。
         self.pending_practice_save = None;
-        match self.store.remove_practice() {
-            Ok(()) => self.saved_practice_resumable = false,
-            // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
-            // 而不是谎称「没有上次任务」。
-            Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),
+        if self.skip_unreadable_save("practice-word.json") {
+            // 读不出来的缓存不能删，内存里也不能声称「没有上次任务」。
+            self.saved_practice_resumable = false;
+        } else {
+            match self.store.remove_practice() {
+                Ok(()) => self.saved_practice_resumable = false,
+                // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
+                // 而不是谎称「没有上次任务」。
+                Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),
+            }
         }
         self.refresh_stats();
         self.refresh_task_preview();
@@ -2658,6 +2747,11 @@ impl App {
 
     /// 写回流程存档。
     fn save_flow_store(&mut self) {
+        // 启动时读不出来的 flows.json 本次运行只读：写回会用内存里的空集合
+        // 覆盖原档，把用户的流程全删掉。
+        if self.skip_unreadable_save(crate::domain::flow::store::FILE_NAME) {
+            return;
+        }
         if let Err(err) = self.store.save_flows(&self.flow_store) {
             self.toast(NoticeLevel::Error, format!("保存流程失败: {err}"));
         }
@@ -2853,6 +2947,10 @@ impl App {
     /// 跟单词练习一样是「防抖 + 定期」：每完成一句立刻排一次延迟保存，
     /// 另有 30 秒整点兜底，避免用户直接杀进程时丢掉最后几句。
     pub fn save_article_practice_now(&mut self) {
+        if self.skip_unreadable_save("practice-article.json") {
+            self.pending_article_save = None;
+            return;
+        }
         let Some(practice) = self.article_practice.as_ref() else {
             let _ = self.store.remove_practice_article();
             self.pending_article_save = None;
@@ -2889,7 +2987,15 @@ impl App {
     /// 书目里找不到时只影响「能否续打」，标记自然也不会出现——不硬套。
     fn refresh_article_resume(&mut self) {
         let loaded = self.store.load_practice_article();
-        if let Some(notice) = loaded.notice() {
+        if let LoadStatus::Unreadable(reason) = &loaded.status {
+            // 读不出来的缓存只提示一次；本次运行内对这份文件只读。
+            if self.article_unreadable.is_none() {
+                self.article_unreadable = Some(reason.clone());
+                if let Some(notice) = loaded.notice() {
+                    self.toast(NoticeLevel::Warning, notice);
+                }
+            }
+        } else if let Some(notice) = loaded.notice() {
             self.toast(NoticeLevel::Warning, notice);
         }
         self.article_resume = loaded
@@ -3056,8 +3162,10 @@ impl App {
         // 会渲染成一个没有会话的空白页，且没有任何退路。
         self.set_screen(Screen::Home);
         // 整篇练完了，断点缓存没有意义——删掉，否则下次进文章页会「恢复」
-        // 一篇已经练完的文章。
-        let _ = self.store.remove_practice_article();
+        // 一篇已经练完的文章。读不出来的缓存不能删（内容只是本次读不到）。
+        if !self.skip_unreadable_save("practice-article.json") {
+            let _ = self.store.remove_practice_article();
+        }
         self.pending_article_save = None;
         self.article_resume = None;
     }

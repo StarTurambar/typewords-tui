@@ -131,7 +131,18 @@ impl Bootstrapped {
 pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     let store = FileStore::new(&paths.home)?;
     let dict_loaded = store.load_dict();
+    if let LoadStatus::Unreadable(reason) = &dict_loaded.status {
+        // 读不到 ≠ 内容坏了：不能隔离，更不能拿默认值继续跑、退出时覆盖原档。
+        anyhow::bail!(
+            "读取词典存档失败：{reason}；请关闭占用该文件的程序（同步盘 / 杀毒软件）后重试"
+        );
+    }
     let setting_loaded = store.load_settings();
+    if let LoadStatus::Unreadable(reason) = &setting_loaded.status {
+        anyhow::bail!(
+            "读取设置存档失败：{reason}；请关闭占用该文件的程序（同步盘 / 杀毒软件）后重试"
+        );
+    }
 
     let mut notices = Vec::new();
     if let Some(notice) = dict_loaded.notice() {

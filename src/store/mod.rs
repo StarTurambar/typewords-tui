@@ -8,6 +8,7 @@
 //! - flows.json            ↔ localStorage['PracticeFlowV2']（无版本号）
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -36,8 +37,14 @@ pub struct SaveEnvelope<T> {
 pub enum LoadStatus {
     Loaded,
     Missing,
-    /// 文件损坏，已隔离。
+    /// 文件损坏（版本头 / 载荷解析失败），已隔离。
     Corrupt(String),
+    /// 存档读不出来（IO 错误：权限不足、被同步盘 / 杀毒软件独占、路径是目录等）。
+    ///
+    /// 读不到 ≠ 内容坏了：**不隔离、不改写、不算损坏**。隔离会把好档改名
+    /// 移走，再用默认值写回同名路径更会丢数据。调用方按「本次运行只读」处理；
+    /// `dict.json` / `setting.json` 在启动时直接中止（见 `bootstrap::load`）。
+    Unreadable(String),
     /// 存档版本高于本程序支持的版本，不会覆盖原文件。
     VersionTooNew {
         found: u32,
@@ -67,6 +74,9 @@ impl<T> Loaded<T> {
             LoadStatus::Corrupt(reason) => {
                 Some(format!("存档已损坏，已隔离并恢复默认值：{reason}"))
             }
+            LoadStatus::Unreadable(reason) => Some(format!(
+                "存档读不出来：{reason}；可能被同步盘 / 杀毒软件占用，本次运行不会改写它"
+            )),
             LoadStatus::VersionTooNew { found, expected } => Some(format!(
                 "存档版本过高（{found} > {expected}），本次不会覆盖，请升级后使用"
             )),
@@ -74,6 +84,26 @@ impl<T> Loaded<T> {
                 "存档版本不受支持（{found} != {expected}），已忽略；下次保存会覆盖"
             )),
             _ => None,
+        }
+    }
+}
+
+impl<T: Default> Loaded<T> {
+    /// 文件不存在或只有空白：不隔离、不报错。
+    fn missing() -> Self {
+        Self {
+            value: T::default(),
+            status: LoadStatus::Missing,
+            updated_at: None,
+        }
+    }
+
+    /// 文件读不出来：默认值只用于本次运行，**不会**写回磁盘。
+    fn unreadable(reason: String) -> Self {
+        Self {
+            value: T::default(),
+            status: LoadStatus::Unreadable(reason),
+            updated_at: None,
         }
     }
 }
@@ -96,6 +126,17 @@ struct RawEnvelope {
     text: String,
     version: u32,
     updated_at: Option<String>,
+}
+
+/// `read_raw` 的结果：不存在、读不到、读到了但版本头解析失败，或解析成功。
+///
+/// 这三种「失败」的处理完全不同：不存在是正常状态，读不到是只读，只有
+/// 版本头解析失败才隔离。用 `Result` 把前两者混在 `Err` 里正是问题 2 的根源。
+enum RawRead {
+    Missing,
+    Unreadable(String),
+    Invalid(anyhow::Error),
+    Text(RawEnvelope),
 }
 
 fn now_rfc3339() -> String {
@@ -135,31 +176,49 @@ impl FileStore {
         Ok(target)
     }
 
+    /// 读取存档原文：不存在 / 只有空白 → `Ok(None)`，IO 失败 → `Err(原因)`。
+    ///
+    /// 直接 `fs::read_to_string` 而不是先 `is_file()`：后者是 TOCTOU（检查与
+    /// 读取之间文件可能被删 / 换成目录），而且会把「路径是目录」这类 IO 错误
+    /// 误判成「不存在」，于是拿默认值继续跑、退出时再覆盖原路径。
+    fn read_text(&self, name: &str) -> std::result::Result<Option<String>, String> {
+        let path = self.file_path(name);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(format!("{}（{err}）", path.display())),
+        };
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(text.to_string()))
+    }
+
     /// 读入存档文件，但**只解析版本头**（`version` / `updated_at`），不碰 `val`。
     ///
     /// 版本判定必须先于载荷反序列化：高版本存档的 `val` 结构可能已经变了，
     /// 先整体反序列化会把「版本过高」误判成「损坏」——隔离原文件后，退出时
     /// 再用默认值写回同名路径，正好毁掉版本号要保护的新版本数据。
-    fn read_raw(&self, name: &str) -> Result<Option<RawEnvelope>> {
-        let path = self.file_path(name);
-        if !path.is_file() {
-            return Ok(None);
+    fn read_raw(&self, name: &str) -> RawRead {
+        let text = match self.read_text(name) {
+            Ok(None) => return RawRead::Missing,
+            Err(reason) => return RawRead::Unreadable(reason),
+            Ok(Some(text)) => text,
+        };
+        match serde_json::from_str::<EnvelopeHeader>(&text) {
+            Ok(header) => RawRead::Text(RawEnvelope {
+                text,
+                version: header.version,
+                // 只保留能用于展示的字符串形式；其它类型视为没有时间戳。
+                updated_at: header
+                    .updated_at
+                    .and_then(|value| value.as_str().map(str::to_string)),
+            }),
+            Err(err) => RawRead::Invalid(
+                anyhow::Error::new(err)
+                    .context(format!("解析存档失败: {}", self.file_path(name).display())),
+            ),
         }
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("读取存档失败: {}", path.display()))?;
-        if text.trim().is_empty() {
-            return Ok(None);
-        }
-        let header: EnvelopeHeader = serde_json::from_str(&text)
-            .with_context(|| format!("解析存档失败: {}", path.display()))?;
-        Ok(Some(RawEnvelope {
-            text,
-            version: header.version,
-            // 只保留能用于展示的字符串形式；其它类型视为没有时间戳。
-            updated_at: header
-                .updated_at
-                .and_then(|value| value.as_str().map(str::to_string)),
-        }))
     }
 
     /// 版本合格后才反序列化整份信封，取出 `val`。
@@ -170,18 +229,30 @@ impl FileStore {
     }
 
     /// 隔离坏档，并生成给用户看的原因（成功时带上隔离后的路径）。
-    fn quarantine_reason(&self, name: &str, err: &anyhow::Error) -> String {
+    fn quarantine_reason(&self, name: &str, reason: &str) -> String {
         let path = self.file_path(name);
         match self.quarantine(&path) {
-            Ok(target) => format!("{err}（已移动到 {}）", target.display()),
-            Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
+            Ok(target) => format!("{reason}（已移动到 {}）", target.display()),
+            Err(quarantine_err) => format!("{reason}（隔离失败: {quarantine_err}）"),
         }
     }
 
     fn corrupt<T: Default>(&self, name: &str, err: &anyhow::Error) -> Loaded<T> {
+        let reason = format!("{err}");
         Loaded {
             value: T::default(),
-            status: LoadStatus::Corrupt(self.quarantine_reason(name, err)),
+            status: LoadStatus::Corrupt(self.quarantine_reason(name, &reason)),
+            updated_at: None,
+        }
+    }
+
+    /// 断点缓存解析失败：隔离坏档并回退默认值。
+    fn corrupt_cache<T: Default>(&self, name: &str, label: &str) -> Loaded<T> {
+        let path = self.file_path(name);
+        let _ = self.quarantine(&path);
+        Loaded {
+            value: T::default(),
+            status: LoadStatus::Corrupt(label.to_string()),
             updated_at: None,
         }
     }
@@ -192,15 +263,11 @@ impl FileStore {
         expected_version: u32,
     ) -> Loaded<T> {
         let raw = match self.read_raw(name) {
-            Ok(Some(raw)) => raw,
-            Ok(None) => {
-                return Loaded {
-                    value: T::default(),
-                    status: LoadStatus::Missing,
-                    updated_at: None,
-                };
-            }
-            Err(err) => return self.corrupt(name, &err),
+            RawRead::Missing => return Loaded::missing(),
+            // 读不到 ≠ 内容坏了：原文件保留，本次按只读处理。
+            RawRead::Unreadable(reason) => return Loaded::unreadable(reason),
+            RawRead::Invalid(err) => return self.corrupt(name, &err),
+            RawRead::Text(raw) => raw,
         };
         // 版本过高时直接返回，绝不解析 `val`，也不隔离文件。
         if raw.version > expected_version {
@@ -224,31 +291,18 @@ impl FileStore {
     }
 
     /// 断点缓存的装载：版本不符时忽略（不解析 `val`、不移动文件），
-    /// 版本相符但解析失败才隔离丢弃。
+    /// 版本相符但解析失败才隔离丢弃；读不到则原样保留、本次只读。
     fn load_cache<T: DeserializeOwned + Default>(
         &self,
         name: &str,
         expected_version: u32,
-        corrupt_reason: &str,
+        corrupt_label: &str,
     ) -> Loaded<T> {
         let raw = match self.read_raw(name) {
-            Ok(Some(raw)) => raw,
-            Ok(None) => {
-                return Loaded {
-                    value: T::default(),
-                    status: LoadStatus::Missing,
-                    updated_at: None,
-                };
-            }
-            Err(_) => {
-                let path = self.file_path(name);
-                let _ = self.quarantine(&path);
-                return Loaded {
-                    value: T::default(),
-                    status: LoadStatus::Corrupt(corrupt_reason.to_string()),
-                    updated_at: None,
-                };
-            }
+            RawRead::Missing => return Loaded::missing(),
+            RawRead::Unreadable(reason) => return Loaded::unreadable(reason),
+            RawRead::Invalid(_) => return self.corrupt_cache(name, corrupt_label),
+            RawRead::Text(raw) => raw,
         };
         if raw.version != expected_version {
             return Loaded {
@@ -266,15 +320,7 @@ impl FileStore {
                 status: LoadStatus::Loaded,
                 updated_at: raw.updated_at,
             },
-            Err(_) => {
-                let path = self.file_path(name);
-                let _ = self.quarantine(&path);
-                Loaded {
-                    value: T::default(),
-                    status: LoadStatus::Corrupt(corrupt_reason.to_string()),
-                    updated_at: None,
-                }
-            }
+            Err(_) => self.corrupt_cache(name, corrupt_label),
         }
     }
 
@@ -386,37 +432,14 @@ impl FileStore {
     /// 读取自建流程存档（`flows.json`）。
     ///
     /// 这份存档没有版本号（结构与上游 localStorage 的 `PracticeFlowV2`
-    /// 一致），损坏时隔离成 `*.corrupt-<时间戳>.json` 并回退到空集合。
+    /// 一致），解析失败时隔离成 `*.corrupt-<时间戳>.json` 并回退到空集合；
+    /// 读不到（IO 错误）时不隔离、不删除，本次运行按只读处理。
     pub fn load_flows(&self) -> Loaded<FlowStore> {
-        let path = self.file_path(FLOW_FILE_NAME);
-        if !path.is_file() {
-            return Loaded {
-                value: FlowStore::default(),
-                status: LoadStatus::Missing,
-                updated_at: None,
-            };
-        }
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(err) => {
-                let reason = match self.quarantine(&path) {
-                    Ok(target) => format!("{err}（已移动到 {}）", target.display()),
-                    Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
-                };
-                return Loaded {
-                    value: FlowStore::default(),
-                    status: LoadStatus::Corrupt(reason),
-                    updated_at: None,
-                };
-            }
+        let text = match self.read_text(FLOW_FILE_NAME) {
+            Ok(None) => return Loaded::missing(),
+            Err(reason) => return Loaded::unreadable(reason),
+            Ok(Some(text)) => text,
         };
-        if text.trim().is_empty() {
-            return Loaded {
-                value: FlowStore::default(),
-                status: LoadStatus::Missing,
-                updated_at: None,
-            };
-        }
         match serde_json::from_str::<FlowStore>(&text) {
             Ok(value) => Loaded {
                 value,
@@ -424,13 +447,14 @@ impl FileStore {
                 updated_at: None,
             },
             Err(err) => {
-                let reason = match self.quarantine(&path) {
-                    Ok(target) => format!("{err}（已移动到 {}）", target.display()),
-                    Err(quarantine_err) => format!("{err}（隔离失败: {quarantine_err}）"),
-                };
+                let err = anyhow::Error::new(err).context(format!(
+                    "解析存档失败: {}",
+                    self.file_path(FLOW_FILE_NAME).display()
+                ));
+                let reason = format!("{err}");
                 Loaded {
                     value: FlowStore::default(),
-                    status: LoadStatus::Corrupt(reason),
+                    status: LoadStatus::Corrupt(self.quarantine_reason(FLOW_FILE_NAME, &reason)),
                     updated_at: None,
                 }
             }
@@ -462,5 +486,29 @@ impl FileStore {
             ((*name).to_string(), size)
         })
         .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_cache_is_reported_as_unreadable_instead_of_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path()).unwrap();
+        // 路径做成目录：Unix 得到 EISDIR，Windows 得到拒绝访问，都走 IO 分支。
+        fs::create_dir(store.file_path("practice-word.json")).unwrap();
+
+        let loaded = store.load_practice();
+        assert!(matches!(loaded.status, LoadStatus::Unreadable(_)));
+        assert!(store.file_path("practice-word.json").is_dir());
+        assert!(
+            fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry.file_name().to_string_lossy().contains("corrupt")),
+            "读不到不能隔离"
+        );
     }
 }

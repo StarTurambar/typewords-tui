@@ -92,20 +92,26 @@
 
 ### 2.3 读取状态 `LoadStatus`
 
-`FileStore::read_raw` 先只解析信封的版本头（`version` / `updated_at`），版本判定通过后 `decode_val` 才反序列化 `val`。约定：文件不存在或只有空白 → 视为缺失（`Ok(None)`，不隔离、不报错）；读取或版本头解析失败 → 隔离；版本过高 / 缓存版本不符 → 直接归类，不解析 `val`、不移动文件。`load_typed` / `load_cache` 把结果归类为：
+`FileStore::read_raw` 先只解析信封的版本头（`version` / `updated_at`），版本判定通过后 `decode_val` 才反序列化 `val`。约定：文件不存在或只有空白 → 视为缺失（不隔离、不报错）；**读不到**（权限不足、被同步盘 / 杀毒软件独占、路径是目录等 IO 错误）→ 不隔离、不改写、不算损坏；**读到了但版本头或载荷解析失败** → 隔离（这是隔离的唯一触发条件）；版本过高 / 缓存版本不符 → 直接归类，不解析 `val`、不移动文件。`load_typed` / `load_cache` 把结果归类为：
 
 | 状态 | 触发条件 | 内存值 | 提示（`Loaded::notice`） |
 | --- | --- | --- | --- |
 | `Loaded` / `Missing` | 解析成功且 `version <=` 期望值；或文件不存在、为空 | 文件内容 / 类型的 `Default` | 无 |
-| `Corrupt(reason)` | 读取 / 解析失败，文件已隔离 | 默认值（缓存为 `None`） | `存档已损坏，已隔离并恢复默认值：<reason>` |
+| `Corrupt(reason)` | 版本头或载荷解析失败，文件已隔离 | 默认值（缓存为 `None`） | `存档已损坏，已隔离并恢复默认值：<reason>` |
+| `Unreadable(reason)` | IO 读失败（`PermissionDenied`、Windows 共享冲突、`EISDIR` 等） | 默认值（缓存为 `None`），**不写回** | `存档读不出来：<reason>；可能被同步盘 / 杀毒软件占用，本次运行不会改写它` |
 | `VersionTooNew{found,expected}` | `version >` 期望值 | 默认值，原文件保留 | `存档版本过高（…），本次不会覆盖，请升级后使用` |
 | `UnsupportedVersion{found,expected}` | 缓存版本不符（单词缓存 `!= 2`、文章缓存 `!= 1`） | `None`，原文件保留 | `存档版本不受支持（…），已忽略；下次保存会覆盖` |
 
-`bootstrap::load` 收集 dict / setting 的提示，`App::bootstrap` 转成 Warning Toast；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
+读不到与内容损坏的处理完全不同：
+
+- `dict.json` / `setting.json` 为 `Unreadable` 时**启动直接失败**（进入终端前 `bail!`），文案含路径、原因与「关闭占用后重试」，不会以默认值继续运行、退出时再覆盖原档。
+- `practice-word.json` / `practice-article.json` / `flows.json` 为 `Unreadable` 时**不隔离、不删除、当次不恢复**，本次运行内对这几份文件只读：保存 / 删除入口跳过并提示一次，退出时也不写默认值；`has_saved_practice` 与 `has_saved_article_practice` 都返回 false，不会谎称有可恢复的断点。
+
+`bootstrap::load` 把 dict / setting 的损坏、版本过高等提示交给 `App::bootstrap` 转成 Warning Toast（`Unreadable` 是启动错误，不走 Toast）；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。读不出来的缓存 / 流程只弹一次「本次运行不会写入」提示。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
 ### 2.4 损坏隔离
 
-解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。
+解析失败时 `FileStore::quarantine` 把坏文件**重命名**为同目录 `<文件名>.corrupt-<YYYYMMDD-HHMMSS>.json`（本地时间），并在 `reason` 里记 `<错误>（已移动到 <隔离路径>）`，隔离失败则记 `（隔离失败: <原因>）`。原文件名随即变为缺失，程序用默认值继续运行，下次保存生成新档。隔离文件不自动清理；两份断点缓存损坏时丢弃缓存、不阻断启动。IO 读错误（`Unreadable`）**不进入**这条流程。
 
 ### 2.5 版本策略
 
@@ -121,6 +127,8 @@
 | `practice-article.json` | 1 | 不支持 | 接受 | 不支持 |
 
 只读的后果：`readonly_dict` 为真时 `App::save_dict_now` 直接返回，本次运行的词库进度、FSRS 卡片与统计都不落盘（原 `dict.json` 完好）；`readonly_settings` 同理拦住 `save_settings_now`，设置修改与 `--mode` / `--theme` 覆盖都不写回。两种只读都**不影响**断点缓存的保存与删除。降级运行同样受保护，升级前仍建议备份数据目录。
+
+读不出来（IO 错误）与版本过高不是一回事：前者在 `bootstrap::load` 直接报错退出，不进入只读模式、也不隔离或写回默认值（见 2.3）。
 
 ### 2.6 落盘前的 `shake_common_dict`
 
@@ -233,7 +241,7 @@
 - 与上游结构不同：上游 `practiceData` 是「段落 / 句 / 词」三级游标，TUI 在 `gen_sections` 后按扁平句子推进，只存一个 `sentenceIndex`；备份里的映射见第 10 节。
 - 保存：每完成一句排 500 ms 防抖，另有 30 秒整点兜底；离开文章页（`Esc` / `Ctrl+C`）与退出程序立即保存。整篇练完时**删除**文件，否则下次会「恢复」一篇已练完的文章。
 - 恢复：启动时只读取（`App::refresh_article_resume`）用于列表标记「上次第 N 句」，不直接进跟打页；选中该文章按 `Enter` 才从记录的句子续打。文章 id 在当前书目里找不到就忽略；资源变短时下标按当前句数夹取，0 句的文章不显示标记。
-- 损坏 / 版本不符：同 2.3，损坏提示「文章练习缓存损坏，已丢弃」，不阻断启动。
+- 损坏 / 版本不符：同 2.3，损坏提示「文章练习缓存损坏，已丢弃」，不阻断启动；读不出来时不隔离、不删除，本次运行只读。
 
 ## 7. `flows.json`（`FlowStore`，无版本号）
 
@@ -242,7 +250,7 @@
 - **没有信封、没有版本号**：上游用 localStorage，本来就没有版本概念；`config.version` 是流程配置自身的版本，与 `CURRENT_FLOW_VERSION`（当前 6）一致。
 - `config` 是 `src/domain/flow/mod.rs` 的 `PracticeFlowConfig`：`id` / `version` / `mode` / `label` / `nodes`；节点为 `id` / `label` / `source` / `steps`；步骤为 `templateId` / `wordAdvance` / `onEnd` / `shuffleOnEnter`。`wordAdvance` 为 `wordLoop` 时带 `groupSize` 与 `subSteps`（`{ templateId }` 对象数组，不是裸 id 数组）。字段名逐字对齐上游，因此可与上游 localStorage 内容互换。
 - `activeId` 为空表示走内置流程（`FlowStore::active` 返回 `None`）。写入用 pretty JSON + 原子写，启停 / 新建 / 删除 / 编辑流程后立即 `App::save_flow_store`，失败弹 `保存流程失败: …`。
-- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`，启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。
+- 解析失败时隔离为 `flows.json.corrupt-<时间戳>.json`，启动 Toast「流程存档已损坏，已隔离并恢复默认值」，随后按空集合运行。读不出来（IO 错误）时不隔离、不删除，本次运行不保存流程并提示一次。
 
 ## 8. 资源词库与文章格式
 
