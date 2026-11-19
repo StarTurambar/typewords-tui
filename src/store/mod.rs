@@ -188,6 +188,9 @@ impl FileStore {
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(format!("{}（{err}）", path.display())),
         };
+        // 读取容忍开头的 UTF-8 BOM（Windows 记事本等工具的默认行为）；
+        // 只剥一个字符，写回时序列化器本来就不会带 BOM。
+        let text = crate::fs::strip_utf8_bom(&text);
         if text.trim().is_empty() {
             return Ok(None);
         }

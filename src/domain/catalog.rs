@@ -130,7 +130,7 @@ impl Catalog {
             }
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("读取词库目录失败: {}", file.display()))?;
-            let parsed: Vec<DictResource> = serde_json::from_str(&text)
+            let parsed: Vec<DictResource> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
                 .with_context(|| format!("解析词库目录失败: {}", file.display()))?;
             for resource in parsed {
                 if !resource.is_word_dict() {
@@ -199,7 +199,8 @@ impl Catalog {
         })?;
         let text = std::fs::read_to_string(&file)
             .with_context(|| format!("读取词库文件失败: {}", file.display()))?;
-        let mut words: Vec<Word> = serde_json::from_str(&text)
+        // 读取容忍开头的 UTF-8 BOM（外部编辑 / Windows 记事本常见）。
+        let mut words: Vec<Word> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
             .with_context(|| format!("解析词库文件失败: {}", file.display()))?;
         words.retain(Word::is_usable);
         Ok(words)
@@ -238,7 +239,7 @@ impl Catalog {
         }
         let text = std::fs::read_to_string(&file)
             .with_context(|| format!("读取用户词库目录失败: {}", file.display()))?;
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&text)
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
             .with_context(|| format!("解析用户词库目录失败: {}", file.display()))?;
         Ok(parsed)
     }
@@ -374,7 +375,9 @@ fn unique_custom_id(catalog: &Catalog, name: &str) -> String {
 pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     let text = std::fs::read_to_string(source)
         .with_context(|| format!("读取词库失败: {}", source.display()))?;
-    let mut words: Vec<Word> = serde_json::from_str(&text)
+    // 读取容忍开头的 UTF-8 BOM；写出的词条文件同样不带 BOM。
+    let text = crate::fs::strip_utf8_bom(&text);
+    let mut words: Vec<Word> = serde_json::from_str(text)
         .with_context(|| format!("解析词库失败（需要词条数组 JSON）: {}", source.display()))?;
     words.retain(Word::is_usable);
     if words.is_empty() {
@@ -398,7 +401,7 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     // 复用上面读到的原文并走原子写：直接 `fs::copy` 会在目标文件上就地截断，
     // 进程中途被杀就留下半个词库文件；源与目标同路径（把数据目录里的词库再
     // 导入一次）时更是先截断再读，内容会丢。
-    crate::fs::write_atomic(&target, &text)
+    crate::fs::write_atomic(&target, text)
         .with_context(|| format!("复制词库失败: {} → {}", source.display(), target.display()))?;
 
     let stem = file_name.trim_end_matches(".json").to_string();

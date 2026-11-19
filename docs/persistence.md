@@ -106,6 +106,7 @@
 
 - `dict.json` / `setting.json` 为 `Unreadable` 时**启动直接失败**（进入终端前 `bail!`），文案含路径、原因与「关闭占用后重试」，不会以默认值继续运行、退出时再覆盖原档。
 - `practice-word.json` / `practice-article.json` / `flows.json` 为 `Unreadable` 时**不隔离、不删除、当次不恢复**，本次运行内对这几份文件只读：保存 / 删除入口跳过并提示一次，退出时也不写默认值；`has_saved_practice` 与 `has_saved_article_practice` 都返回 false，不会谎称有可恢复的断点。
+- 读取容忍开头的 UTF-8 BOM：5 份存档（含 `flows.json` 的独立读路径）与两个导入入口（`tw import-dict` 的词条文件、`tw import-web` 的备份）都会在 JSON 解析前剥离开头的一个 U+FEFF；**写回一律不带 BOM**。上游网页版的 `JSON.parse` 不接受 BOM，这里接受是有意的宽容（Windows 记事本等工具默认带 BOM），不是与上游不一致的缺陷。
 
 `bootstrap::load` 把 dict / setting 的损坏、版本过高等提示交给 `App::bootstrap` 转成 Warning Toast（`Unreadable` 是启动错误，不走 Toast）；两份断点缓存的提示都在启动时弹（单词缓存 `refresh_practice_resume`、文章缓存 `refresh_article_resume`，后者进文章页时还会再读一次），单词缓存若在恢复流程里才读出问题（同一次运行内文件被外部改坏）也会补弹一次；流程存档损坏有独立文案「流程存档已损坏，已隔离并恢复默认值」。读不出来的缓存 / 流程只弹一次「本次运行不会写入」提示。Toast 只显示约 3.2 秒，长期排障看 `tw doctor`。
 
@@ -340,7 +341,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 
 - **默认离线**：程序不主动联网；只有开启有道发音（`ttsSource = youdao`）时才下载音频，播放走外部播放器（`src/audio/player.rs`）。无账号、无云同步、无遥测。
 - **明文存储**：存档是可读 JSON，没有加密；笔记、进度、收藏对同机有文件读权限的用户可见，取决于操作系统权限。
-- **手工编辑与并发**：先退出程序并备份，保持信封结构、UTF-8 编码、合法 JSON（不能有注释 / 尾逗号），改坏会在下次启动被隔离为 `*.corrupt-*.json`；运行时编辑会被退出时的内存状态覆盖。写入口互斥靠数据目录锁（1.3），但把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜。
+- **手工编辑与并发**：先退出程序并备份，保持信封结构、UTF-8 编码（读取容忍开头的 BOM，写回不带）、合法 JSON（不能有注释 / 尾逗号），改坏会在下次启动被隔离为 `*.corrupt-*.json`；运行时编辑会被退出时的内存状态覆盖。写入口互斥靠数据目录锁（1.3），但把 `<home>` 放进 OneDrive 等同步目录、或两台机器各自运行同一份数据时没有冲突检测，最后写入者获胜。
 
 ## 相关文档
 

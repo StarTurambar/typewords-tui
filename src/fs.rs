@@ -28,6 +28,15 @@ const TEMP_ATTEMPTS: u32 = 16;
 /// 数据目录锁文件名（位于 `<home>` 下）。
 pub const LOCK_FILE_NAME: &str = ".tw.lock";
 
+/// 去掉文本开头的一个 UTF-8 BOM（U+FEFF）。
+///
+/// Windows 记事本等工具会以「带 BOM 的 UTF-8」保存 JSON，而 `serde_json`
+/// 不把 U+FEFF 当空白：不剥离就会把好档判成解析失败、进而隔离。只剥离开头
+/// 的**一个字符**，不 `trim` 整段——正文里的空白与 U+FEFF 都有意义。
+pub fn strip_utf8_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// 原子写：先写同目录的临时文件，`fsync` 后 `rename` 覆盖目标。
 ///
 /// 同目录保证 `rename` 在同一文件系统内（跨文件系统的 `rename` 可能失败）；

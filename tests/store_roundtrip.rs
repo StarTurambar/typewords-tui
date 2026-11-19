@@ -232,3 +232,51 @@ fn doctor_lists_every_save_file_including_article_cache() {
         "tw doctor 的存档清单与数据目录里实际写出的存档不一致"
     );
 }
+
+fn corrupt_files(home: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(home)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.contains(".corrupt-"))
+        .collect()
+}
+
+/// Windows 记事本等工具会以「带 BOM 的 UTF-8」保存 JSON：读取要容忍开头的
+/// 一个 U+FEFF，不能把好档判成损坏隔离。
+#[test]
+fn a_dict_saved_with_a_utf8_bom_is_loaded_without_quarantine() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    let raw = format!(
+        "\u{feff}{}",
+        r#"{"version":4,"val":{"simpleWords":["bom"]}}"#
+    );
+    std::fs::write(store.file_path("dict.json"), raw).unwrap();
+
+    let loaded = store.load_dict();
+    assert_eq!(loaded.status, LoadStatus::Loaded);
+    assert!(loaded.value.simple_words.contains(&"bom".to_string()));
+    assert!(
+        corrupt_files(&fixture.home()).is_empty(),
+        "带 BOM 的好档不能被隔离: {:?}",
+        corrupt_files(&fixture.home())
+    );
+}
+
+/// `flows.json` 有自己的读路径（裸结构、无版本头），BOM 同样要容忍。
+#[test]
+fn a_flow_store_saved_with_a_utf8_bom_is_loaded() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    let raw = format!(
+        "\u{feff}{}",
+        r#"{"activeId":"","flows":{"demo":{"name":"演示"}}}"#
+    );
+    std::fs::write(store.file_path("flows.json"), raw).unwrap();
+
+    let loaded = store.load_flows();
+    assert_eq!(loaded.status, LoadStatus::Loaded);
+    assert!(loaded.value.flows.contains_key("demo"));
+    assert!(corrupt_files(&fixture.home()).is_empty());
+}

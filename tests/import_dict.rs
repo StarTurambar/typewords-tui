@@ -241,6 +241,31 @@ fn export_dict_reports_unknown_dictionary_ids() {
     );
 }
 
+/// 带 BOM 的词库文件要能导入：Windows 记事本等工具默认就带 BOM，
+/// 上游 JSON.parse 拒收它，这里有意宽容；写出的词条文件不带 BOM。
+#[test]
+fn import_dict_accepts_a_word_file_with_a_utf8_bom() {
+    let fixture = common::Fixture::new();
+    let source = fixture.root.path().join("bom-words.json");
+    let words = vec![Word::new("alpha"), Word::new("beta")];
+    let text = format!("\u{feff}{}", serde_json::to_string(&words).unwrap());
+    fs::write(&source, text).unwrap();
+
+    let resource = import_dict(&fixture.paths(), &source).expect("带 BOM 的词库应能导入");
+    assert_eq!(resource.length, 2);
+
+    let written = fs::read_to_string(
+        fixture
+            .home()
+            .join("dicts")
+            .join("en")
+            .join("word")
+            .join("bom-words.json"),
+    )
+    .expect("导入应写出词条文件");
+    assert!(!written.starts_with('\u{feff}'), "写出的词条文件不应带 BOM");
+}
+
 /// 还没有当前学习词库（空数据目录）时，缺省导出要给出可执行的提示，
 /// 而不是一句「未找到词库: 」。
 #[test]

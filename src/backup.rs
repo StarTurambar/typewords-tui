@@ -82,7 +82,8 @@ pub struct ImportReport {
 pub fn import_web(store: &FileStore, file: &Path) -> Result<ImportReport> {
     let text =
         std::fs::read_to_string(file).with_context(|| format!("读取 {} 失败", file.display()))?;
-    let backup: Value = serde_json::from_str(&text)
+    // 读取容忍开头的 UTF-8 BOM（网页版导出的文件被记事本另存过很常见）。
+    let backup: Value = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
         .with_context(|| format!("{} 不是合法的 JSON", file.display()))?;
     import_web_value(store, &backup)
 }

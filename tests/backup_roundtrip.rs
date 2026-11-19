@@ -650,3 +650,24 @@ fn import_accepts_a_null_practice_cache() {
     assert!(loaded.is_ok(), "应视为已加载: {:?}", loaded.status);
     assert!(loaded.value.is_none());
 }
+
+/// 带 BOM 的网页版备份要能导入：Windows 记事本等工具另存为就会带 BOM。
+/// 上游 `JSON.parse` 拒收 BOM，这里有意宽容，写回时不带 BOM。
+#[test]
+fn import_web_accepts_a_backup_with_a_utf8_bom() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    store.save_dict(&BaseState::default()).expect("写 dict");
+    store
+        .save_settings(&SettingState::default())
+        .expect("写 setting");
+    let text = backup::export_web(&store).expect("导出");
+    let path = fixture.home().join("bom-backup.json");
+    std::fs::write(&path, format!("\u{feff}{text}")).expect("写备份");
+
+    let target = fixture.root.path().join("bom-restored");
+    let target_store = open_store(&target);
+    let report = backup::import_web(&target_store, &path).expect("带 BOM 的备份应能导入");
+    assert_eq!(report.written.len(), 3, "应写入 dict、setting 与练习缓存");
+    assert!(target_store.practice_exists());
+}
