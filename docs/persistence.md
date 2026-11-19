@@ -316,7 +316,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 **`tw import-web FILE`**（写入口，取锁）：
 
 - 备份文件读入前按 `metadata` 预检大小，超过 512 MiB（`src/fs.rs` 的 `IMPORT_SIZE_LIMIT`）直接报「文件过大」，不整读进内存；`tw import-dict` 的词条文件同一上限。自家存档的备份 / 回滚（`copy_atomic`）不设上限。
-- 顶层 `version > 5` 整体拒绝；缺 `version` / 缺 `val` 对象报错退出。
+- 顶层 `version > 5` 整体拒绝；缺 `version` 报「备份缺少 version 字段」，`version` 不是非负整数（如 `-1`、字符串）报「备份的 version 字段不是非负整数（实际：<值>）」；缺 `val` 对象报错退出。
 - 覆盖前先读本地存档的信封版本头：本地 `dict.json` / `setting.json` / `practice-word.json` / `practice-article.json` 的版本高于本程序支持值时**不覆盖**，记「已跳过」并点明本地版本与支持版本，提示先备份数据目录、升级程序后再导入——运行时这些存档本来就受只读保护，导入不能绕开它。
 - `dict` / `setting`：信封版本高于支持值 → 记「已跳过」，保留本地文件；缺 `val` / 缺 `version` / 字段类型不匹配 → 「已拒绝」，原文件不动。`PracticeSaveWord` 必须**等于** 2（低版本 TUI 也读不懂），否则跳过并保留本地断点；`val: null` 被接受为「没有缓存」。
 - 校验策略是「校验即将落盘的原文」（`validate_envelope`），通过后**原样写入**（`FileStore::write_envelope_raw`），因此未建模字段不会丢，也不会出现「导入成功、下次启动被判损坏」。

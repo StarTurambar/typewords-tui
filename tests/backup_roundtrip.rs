@@ -421,6 +421,44 @@ fn import_web_rejects_a_newer_backup_version() {
     );
 }
 
+/// 「缺 version 字段」与「version 类型不对」是两种失败，文案不能混。
+#[test]
+fn import_web_reports_a_missing_backup_version() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let path = fixture.home().join("no-version.json");
+    std::fs::write(&path, r#"{"val":{}}"#).expect("写文件");
+
+    let error = backup::import_web(&store, &path).expect_err("缺 version 应报错");
+    assert!(
+        error.to_string().contains("备份缺少 version 字段"),
+        "{error}"
+    );
+}
+
+/// 字段在、只是不是非负整数：要说清实际值，不能报「缺少 version 字段」。
+#[test]
+fn import_web_reports_a_non_integer_backup_version() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    for (index, raw) in ["-1", "\"5\""].into_iter().enumerate() {
+        let path = fixture.home().join(format!("bad-version-{index}.json"));
+        std::fs::write(&path, format!(r#"{{"version":{raw},"val":{{}}}}"#)).expect("写文件");
+
+        let error = backup::import_web(&store, &path).expect_err("类型不对应报错");
+        let message = error.to_string();
+        assert!(message.contains("不是非负整数"), "{message}");
+        assert!(
+            message.contains(&format!("实际：{raw}")),
+            "应给出实际值: {message}"
+        );
+        assert!(
+            !message.contains("缺少 version 字段"),
+            "字段在，不该说缺少: {message}"
+        );
+    }
+}
+
 #[test]
 fn import_web_skips_entries_with_a_newer_version() {
     let fixture = common::Fixture::new();

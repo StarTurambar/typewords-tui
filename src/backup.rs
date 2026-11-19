@@ -91,11 +91,16 @@ pub fn import_web(store: &FileStore, file: &Path) -> Result<ImportReport> {
 
 /// 从已解析的 JSON 导入。
 pub fn import_web_value(store: &FileStore, backup: &Value) -> Result<ImportReport> {
-    let version = backup
+    // 「缺字段」与「字段在、类型不对」是两种失败：混成一句「缺少 version
+    // 字段」会让人去找一个根本不缺的字段。u64 超出 u32 仍按「版本高于支持」
+    // 处理（下面的比较用 u32::MAX 兜底）。
+    let version_field = backup
         .get("version")
-        .and_then(Value::as_u64)
-        .map(|raw| u32::try_from(raw).unwrap_or(u32::MAX))
         .ok_or_else(|| anyhow!("备份缺少 version 字段"))?;
+    let raw = version_field
+        .as_u64()
+        .ok_or_else(|| anyhow!("备份的 version 字段不是非负整数（实际：{version_field}）"))?;
+    let version = u32::try_from(raw).unwrap_or(u32::MAX);
     if version > WEB_BACKUP_VERSION {
         bail!("备份版本 {version} 高于本程序支持的 {WEB_BACKUP_VERSION}，请先升级");
     }
