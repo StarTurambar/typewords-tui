@@ -567,7 +567,18 @@ impl App {
             self.apply_weight_text(index, &edit.buffer);
             return;
         }
-        let value = edit.buffer.parse::<i64>().unwrap_or_default();
+        // 数字行与权重行同一口径：解析失败（清空后回车就是这种情况）不保存、
+        // 不改内存、不刷新任务预览，并明确告诉用户。此前用
+        // `unwrap_or_default()` 把空输入静默当成 0，再被夹到区间下限写盘
+        // （留存率变成 50%、最大间隔变成 1 天，后者会让下次结算的所有卡片
+        // 都排到次日）。
+        let Ok(value) = edit.buffer.trim().parse::<i64>() else {
+            self.toast(
+                crate::domain::flow::navigator::NoticeLevel::Warning,
+                "请输入数字",
+            );
+            return;
+        };
         self.apply_number_value(edit.target, value);
     }
 

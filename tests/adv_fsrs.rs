@@ -431,6 +431,54 @@ fn out_of_range_fsrs_numbers_display_the_effective_values() {
     );
 }
 
+/// 数字行清空后直接回车：拒绝保存并提示，保持原值。
+///
+/// 此前整数路径用 `parse::<i64>().unwrap_or_default()`，空输入静默变成 0
+/// 再被夹到区间下限——留存率被改成 50%、最大间隔被改成 1 天（下次结算所有
+/// 卡片都排到次日），而且没有任何提示。权重行的同一种输入一直会提示
+/// 「请输入数字」，现在两条路径同一口径。
+#[test]
+fn empty_number_input_is_rejected_instead_of_saved_as_zero() {
+    let (fixture, mut app) = test_app(WIDE);
+    open_adv_fsrs(&mut app);
+
+    // 目标留存率：清空 → 回车。
+    goto_row(&mut app, "目标留存率");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.edit.is_none(), "拒绝保存也要关闭输入框");
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.request_retention, 0.9,
+        "空输入不应把留存率改成区间下限 50%"
+    );
+    assert!(
+        toasts_text(&app).contains("请输入数字"),
+        "应提示请输入数字：{}",
+        toasts_text(&app)
+    );
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.request_retention,
+        0.9,
+        "空输入不应写盘"
+    );
+
+    // 最大间隔同理：此前会静默写成 1 天。
+    goto_row(&mut app, "最大间隔");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.maximum_interval, 36500.0,
+        "空输入不应把最大间隔改成 1 天"
+    );
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.maximum_interval,
+        36500.0,
+        "空输入不应写盘"
+    );
+}
+
 // ── 权重行：与调度器同源的区间夹取 ───────────────────────────────────────
 
 /// 权重编辑：区间内原样保存，越界按调度器实际夹取的范围钳住并落盘。
