@@ -321,7 +321,7 @@ TUI 不读写浏览器 IndexedDB，互通靠 `tw import-web` / `tw export-web`�
 - 覆盖前先把旧文件复制成 `<文件名>.bak-<时间戳>.json`（同一秒重名加 `-2`、`-3`；备份也走原子写，不会留下半截 `.bak`）。多个文件写入途中失败时按备份逆序回滚，恢复同样是原子写。错误信息按实际情况给：一份都没写成就报「没有存档被改动」，写过则分别列出「已回滚: …」与「未能回滚: …」，每一项都带对应的 `.bak`（导入前不存在的存档回滚时删除，没有 `.bak`）——回滚全部失败时磁盘上已是导入后的内容，不会谎称没改动。`.bak` 不自动清理。
 - 文章断点按来源分流：带 `tuiPracticeData` 扩展（TUI 导出）或本身就是 TUI 原生 `practiceData` 的，规范化写入 `practice-article.json`；空占位（`{}` / `null`）不动本地；网页版自身的三级游标没有文章 id，无法映射，报「已丢弃」。
 
-**`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，**缺失或不可解析的**都用空信封 `{"val": {}, "version": N}` 占位——导出是抢救数据的通道，一份存档坏掉不该让整次导出失败；读不到 / 解析失败的那几份各在 **stderr** 打一条警告（带文件名与原因，例如 `警告：dict.json 不可解析，已用空信封占位：…`），**标准输出始终只有备份 JSON**，可直接重定向或接管道。拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。
+**`tw export-web [--out FILE]`**（只读入口，不取锁）：读出四份存档原文，**缺失或不可解析的**都用空信封 `{"val": {}, "version": N}` 占位——导出是抢救数据的通道，一份存档坏掉不该让整次导出失败；读不到 / 解析失败的那几份各在 **stderr** 打一条警告（带文件名与原因，例如 `警告：dict.json 不可解析，已用空信封占位：…`），**标准输出始终只有备份 JSON**，可直接重定向或接管道；`--out` 写文件走原子写（同 `export-dict`），中途失败不会留下半截备份。拼成 v5 备份（pretty JSON）。文章断点被包成网页版能安全解析的信封：Web 三级游标置 0、`statStoreData` 用非空对象（带 `spend` 与来自 `updated_at` 的 `startDate`），真正的 TUI 断点放在 `tuiPracticeData` 里——网页版原样存取、不读它，只要不在文章页推进进度就能随备份往返。
 
 **手工迁移**：先在网页版导出备份取 `data.json`（或从开发者工具读 IndexedDB 的两个 key），退出所有 tw 实例并备份 `<home>`，然后 `dict.json = data.val.dict`、`setting.json = data.val.setting`，需要断点时 `practice-word.json = data.val.PracticeSaveWord`（`updated_at` 可缺省）；文章断点不要手工拼。启动后用 `tw doctor` 核对路径与存档大小，再进设置页确认主题等字段。当前学习词典在资源里不存在时，启动按「原 id → `cet4` → 第一本词库」回退（`ensure_study_dict`）；`studyIndex` 指向系统词典时原样保留。
 

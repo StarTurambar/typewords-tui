@@ -288,7 +288,9 @@ pub fn export_web_to(sink: &mut impl Write, paths: &Paths, out: Option<&Path>) -
     }
     match out {
         Some(path) => {
-            std::fs::write(path, format!("{}\n", export.text))
+            // 与 export-dict 一样走原子写：中途失败不会把目标文件截成半截，
+            // 也不会留下一份写了一半、看起来却像备份的 JSON。
+            crate::fs::write_atomic(path, &format!("{}\n", export.text))
                 .with_context(|| format!("写入 {} 失败", path.display()))?;
             writeln!(sink, "已导出: {}", path.display())?;
         }

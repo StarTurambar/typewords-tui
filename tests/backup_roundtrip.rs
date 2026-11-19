@@ -81,6 +81,43 @@ fn export_web_reads_a_save_that_starts_with_a_bom() {
     );
 }
 
+/// `--out` 与标准输出必须是同一份内容，且写文件走原子写（同 `export-dict`）。
+#[test]
+fn export_web_out_writes_the_same_bytes_as_stdout() {
+    let fixture = common::Fixture::new();
+    let paths = fixture.paths();
+    let store = open_store(&fixture.home());
+    store.save_dict(&BaseState::default()).expect("写 dict");
+    store
+        .save_settings(&SettingState::default())
+        .expect("写 setting");
+
+    let mut printed: Vec<u8> = Vec::new();
+    typewords_tui::cli::export_web_to(&mut printed, &paths, None).expect("导出到标准输出");
+
+    let out = fixture.root.path().join("web-backup.json");
+    let mut notice: Vec<u8> = Vec::new();
+    typewords_tui::cli::export_web_to(&mut notice, &paths, Some(&out)).expect("导出到文件");
+
+    assert_eq!(
+        std::fs::read(&out).expect("读导出文件"),
+        printed,
+        "--out 写出的内容应与标准输出完全一致"
+    );
+    assert!(
+        String::from_utf8_lossy(&notice).contains("已导出"),
+        "写文件时应打印导出结果: {}",
+        String::from_utf8_lossy(&notice)
+    );
+    assert!(
+        !std::fs::read_dir(fixture.root.path())
+            .expect("读目录")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".tmp")),
+        "原子写不应留下临时文件"
+    );
+}
+
 /// 存档坏了更需要导出：坏掉的 dict.json 退成空信封，并在 warnings 里点名。
 ///
 /// 导出是抢救数据的通道，一份存档解析失败不该让整次导出失败。
