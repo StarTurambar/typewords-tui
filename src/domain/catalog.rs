@@ -392,6 +392,20 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     if !file_name.ends_with(".json") {
         return Err(anyhow!("词库文件需要是 .json 结尾: {file_name}"));
     }
+    // 目录项 id 取文件名去掉 .json。文件名只有 `.json` 时 stem 为空，
+    // `Catalog::load` 会跳过空 id 的条目：词条文件与目录项都写进去，词库页 /
+    // `tw doctor` / `--dict` 却永远看不到它，CLI 还报「已导入」。
+    // 路径分隔符同理：目录项的 url 必须是单段文件名，不能拼出子路径。
+    let stem = file_name.trim_end_matches(".json");
+    if stem.is_empty() {
+        return Err(anyhow!(
+            "词库文件名不能是 .json（需要 <名称>.json）: {}",
+            source.display()
+        ));
+    }
+    if stem.contains(['/', '\\']) {
+        return Err(anyhow!("词库文件名不能包含路径分隔符: {file_name}"));
+    }
 
     let target = catalog.user_dict_file(&file_name);
     if let Some(parent) = target.parent() {
@@ -404,7 +418,7 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     crate::fs::write_atomic(&target, text)
         .with_context(|| format!("复制词库失败: {} → {}", source.display(), target.display()))?;
 
-    let stem = file_name.trim_end_matches(".json").to_string();
+    let stem = stem.to_string();
     let mut extra = serde_json::Map::new();
     // 导入的词库要标成自建：它的词条文件在数据目录里，不是随包分发的内置
     // 资源。缺了这个标记，落盘前的 `shake_common_dict` 会把词表清空——
