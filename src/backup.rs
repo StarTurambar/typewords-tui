@@ -558,6 +558,16 @@ fn import_article_envelope(
         return Ok(());
     }
     let Some(value) = envelope.get("val").filter(|value| value.is_object()) else {
+        // 信封在、`val` 却不是对象：不能静默返回——用户会以为这条断点已经
+        // 导入了。`{}` 是「没有文章断点」的合法占位（不报丢弃），缺失 /
+        // `null` / 其它类型则是读不懂的内容，记「已丢弃」并说明原因。
+        let reason = match envelope.get("val") {
+            None => "缺少 val 字段".to_string(),
+            Some(value) => format!("val 不是对象（实际是 {}）", json_kind(value)),
+        };
+        report.discarded.push(format!(
+            "{KEY_PRACTICE_ARTICLE}（{reason}，无法还原文章断点）"
+        ));
         return Ok(());
     };
     let cache = value
@@ -578,6 +588,18 @@ fn import_article_envelope(
         ));
     }
     Ok(())
+}
+
+/// JSON 值的类型名，用于「实际是 X」这类报告文案。
+fn json_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "布尔值",
+        Value::Number(_) => "数字",
+        Value::String(_) => "字符串",
+        Value::Array(_) => "数组",
+        Value::Object(_) => "对象",
+    }
 }
 
 /// 从 JSON 值解析出一个可用的 TUI 文章断点。

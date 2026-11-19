@@ -442,6 +442,36 @@ fn import_web_skips_entries_with_a_newer_version() {
     );
 }
 
+/// 文章信封在、`val` 却是 `null`：读不懂的内容要进「已丢弃」，不能静默忽略。
+#[test]
+fn import_web_discards_an_article_envelope_with_a_non_object_val() {
+    let fixture = common::Fixture::new();
+    let store = open_store(&fixture.home());
+    let path = fixture.home().join("null-article.json");
+    std::fs::write(
+        &path,
+        r#"{"version":5,"val":{"PracticeSaveArticle":{"version":1,"val":null}}}"#,
+    )
+    .expect("写文件");
+
+    let report = backup::import_web(&store, &path).expect("导入");
+    assert!(report.written.is_empty(), "null 的 val 不该被写成本地断点");
+    assert!(
+        report
+            .discarded
+            .iter()
+            .any(|item| item.contains("PracticeSaveArticle") && item.contains("文章断点")),
+        "应记「已丢弃」并说明是文章断点: {:?}",
+        report.discarded
+    );
+    assert!(
+        report.discarded.iter().any(|item| item.contains("null")),
+        "文案应说明实际类型: {:?}",
+        report.discarded
+    );
+    assert!(!store.practice_article_exists());
+}
+
 /// 本地存档版本比程序支持的新时（运行时受只读保护），导入不能悄悄降级覆盖。
 #[test]
 fn import_web_keeps_a_local_save_whose_version_is_newer() {
