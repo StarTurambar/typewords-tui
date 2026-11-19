@@ -466,6 +466,12 @@ pub fn weight_label(index: usize) -> &'static str {
     LABELS.get(index).copied().unwrap_or("未知权重")
 }
 
+/// 权重保留的小数位数：显示、编辑预填、输入限制与保存归一都取这一个值。
+///
+/// 四处必须一致——只让其中一处按别的精度走，用户打开输入框再保存就会把
+/// 参数悄悄改掉。
+pub const WEIGHT_DECIMALS: usize = 6;
+
 /// 权重的显示 / 编辑文本：最多 6 位小数，去掉末尾的 `0`（`0.2120` → `0.212`）。
 ///
 /// 显示与编辑预填共用它：两处格式不一致时，用户一打开输入框再保存就会
@@ -474,7 +480,7 @@ pub fn weight_text(value: f64) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
-    let mut text = format!("{value:.6}");
+    let mut text = format!("{:.*}", WEIGHT_DECIMALS, value);
     while text.contains('.') && text.ends_with('0') {
         text.pop();
     }
@@ -482,6 +488,19 @@ pub fn weight_text(value: f64) -> String {
         text.pop();
     }
     text
+}
+
+/// 把权重归一到 [`weight_text`] 的精度（最多 [`WEIGHT_DECIMALS`] 位小数）。
+///
+/// 输入框只让敲 6 位小数，保存时也按 6 位归一，于是「显示值 == 存储值 ==
+/// 再次编辑的预填值」：打开权重行再直接回车不会改动参数。手改
+/// `setting.json` 写进更多位小数时，下一次在界面上保存该行同样归一到 6 位
+/// （界面本来也只显示 6 位）。
+fn normalize_weight(value: f64) -> f64 {
+    // 与 `weight_text` 同一套取舍：先按同样的小数位格式化，再解析回来。
+    format!("{:.*}", WEIGHT_DECIMALS, value)
+        .parse()
+        .unwrap_or(value)
 }
 
 /// 结算对应的练习类型。
@@ -4502,7 +4521,9 @@ impl App {
         }
         let bounds = crate::domain::fsrs::weight_bounds(&self.boot.settings.fsrs_parameters, index);
         let clamped = parsed.clamp(bounds.0, bounds.1);
-        self.boot.settings.fsrs_parameters.w[index] = clamped;
+        // 落盘的是归一后的值：显示 / 预填本来就只有 6 位小数，不归一的话
+        // 「打开这一行再直接回车」会把多出来的位数悄悄舍掉。
+        self.boot.settings.fsrs_parameters.w[index] = normalize_weight(clamped);
         self.save_settings_now();
         if (clamped - parsed).abs() > f64::EPSILON {
             self.toast(

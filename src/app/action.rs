@@ -6,6 +6,29 @@ use super::{
     App, ConfirmAction, ConfirmFocus, ConfirmState, FocusDir, HelpTab, Screen, SummaryButton,
 };
 
+/// 权重输入框能否接受这个字符：数字 + 至多一个小数点，小数点后最多
+/// [`crate::app::WEIGHT_DECIMALS`] 位。
+///
+/// 这个位数就是 [`crate::app::weight_text`] 的显示精度，也是保存时的归一
+/// 精度。允许敲第 7 位的话，显示与预填会把它舍掉，重开编辑再保存就悄悄改了
+/// 参数——保存侧归一只是第二道防线，输入侧先拦住才能让用户看到自己输入的
+/// 就是最终值。
+fn weight_char_accepted(buffer: &str, character: char) -> bool {
+    if buffer.len() >= 12 {
+        return false;
+    }
+    if character == '.' {
+        return !buffer.contains('.');
+    }
+    if !character.is_ascii_digit() {
+        return false;
+    }
+    match buffer.split_once('.') {
+        Some((_, fraction)) => fraction.chars().count() < crate::app::WEIGHT_DECIMALS,
+        None => true,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     // 导航与全局
@@ -321,11 +344,9 @@ impl App {
                             !character.is_control() && edit.buffer.chars().count() < 200
                         }
                         // 权重是浮点：允许数字与一个小数点（合法区间全部非负，
-                        // 因此不需要负号）。
+                        // 因此不需要负号），小数点后最多 `WEIGHT_DECIMALS` 位。
                         crate::app::EditTarget::Weight(_) => {
-                            (character.is_ascii_digit()
-                                || (character == '.' && !edit.buffer.contains('.')))
-                                && edit.buffer.len() < 12
+                            weight_char_accepted(&edit.buffer, character)
                         }
                         _ => character.is_ascii_digit() && edit.buffer.len() < 6,
                     };

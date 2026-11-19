@@ -16,7 +16,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use typewords_tui::app::{self, Action, Screen};
 use typewords_tui::domain::constants::SETTING_VERSION;
-use typewords_tui::domain::fsrs::Fsrs;
+use typewords_tui::domain::fsrs::{Fsrs, default_w};
 use typewords_tui::domain::types::{
     CARD_STATE_LEARNING, CARD_STATE_REVIEW, FsrsParameters, RATING_GOOD, SettingState,
 };
@@ -583,6 +583,86 @@ fn invalid_weight_input_keeps_the_previous_value() {
         store_settings(&fixture).fsrs_parameters.w[12],
         original,
         "非法输入不应写盘"
+    );
+}
+
+/// 权重往返一致：手改存档写 7 位小数 → 界面显示 6 位 → 直接回车保存 →
+/// 落盘就是显示的那个值；再次进入编辑，预填与落盘一致；输入框也拦住第 7 位。
+///
+/// 此前输入框允许任意位数（≤12 字符），显示与预填按 6 位舍入：打开权重行
+/// 再直接回车，就把存储值悄悄改成了舍入后的值。
+#[test]
+fn weight_precision_survives_a_round_trip_through_the_edit_box() {
+    let mut w = default_w().to_vec();
+    w[0] = 0.1234567;
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": w }
+    }));
+    assert!(
+        (app.adv_fsrs_weight(0) - 0.1234567).abs() < 1e-12,
+        "前置：原始权重应原样读入"
+    );
+
+    open_adv_fsrs(&mut app);
+    goto_row(&mut app, "w[0]");
+    let text = render_text(&app, WIDE);
+    assert!(text.contains("0.123457"), "行内显示应舍入到 6 位：{text}");
+
+    // 打开输入框：预填就是显示值。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "预填应与显示一致"
+    );
+    // 已经有 6 位小数，第 7 位进不来。
+    press(&mut app, KeyCode::Char('7'));
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "小数点后超过 6 位的字符应被拒绝"
+    );
+    // 直接回车：落盘值 == 显示值。
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w[0];
+    assert!(
+        (saved - 0.123457).abs() < 1e-12,
+        "直接回车保存后应归一为 6 位，实际 {saved}"
+    );
+    let raw = raw_settings(&fixture);
+    assert_eq!(
+        raw["val"]["fsrsParameters"]["w"][0].as_f64(),
+        Some(0.123457),
+        "落盘的权重就是显示值"
+    );
+
+    // 再次进入编辑：预填与落盘一致，再保存一次也不会变。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "重开编辑的预填应与落盘一致"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.w[0],
+        saved,
+        "再保存一次不应改变值"
+    );
+
+    // 新输入也只保留 6 位：敲 `0.1234567` 只进到 `0.123456`。
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    type_str(&mut app, "0.1234567");
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123456"),
+        "第 7 位小数应被拒绝"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        (store_settings(&fixture).fsrs_parameters.w[0] - 0.123456).abs() < 1e-12,
+        "保存的应是输入框里那 6 位小数"
     );
 }
 
