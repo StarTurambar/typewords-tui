@@ -155,6 +155,7 @@ pub fn build_question(
         correct_index,
     })
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
