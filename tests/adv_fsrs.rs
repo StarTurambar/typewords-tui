@@ -16,7 +16,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use typewords_tui::app::{self, Action, Screen};
 use typewords_tui::domain::constants::SETTING_VERSION;
-use typewords_tui::domain::fsrs::Fsrs;
+use typewords_tui::domain::fsrs::{Fsrs, default_w, migrate_parameters};
 use typewords_tui::domain::types::{
     CARD_STATE_LEARNING, CARD_STATE_REVIEW, FsrsParameters, RATING_GOOD, SettingState,
 };
@@ -38,6 +38,26 @@ fn test_app(size: (u16, u16)) -> (common::Fixture, app::App) {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).expect("build app");
     app.set_viewport(area_of(size));
+    (fixture, app)
+}
+
+/// 先用原始 JSON 写一份 `setting.json` 再启动：模拟手改存档 / 导入网页版备份。
+///
+/// `raw` 是 `val` 里的内容（外层 camelCase），信封版本取程序支持的版本。
+fn test_app_with_settings(raw: serde_json::Value) -> (common::Fixture, app::App) {
+    let fixture = common::Fixture::new();
+    let envelope = serde_json::json!({
+        "val": raw,
+        "version": SETTING_VERSION,
+        "updated_at": "2026-01-01T00:00:00.000Z",
+    });
+    std::fs::write(
+        fixture.home().join("setting.json"),
+        serde_json::to_string(&envelope).expect("序列化 setting.json"),
+    )
+    .expect("写 setting.json");
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).expect("build app");
+    app.set_viewport(area_of(WIDE));
     (fixture, app)
 }
 
@@ -344,6 +364,121 @@ fn retention_and_maximum_interval_are_clamped_and_persisted() {
     );
 }
 
+/// 手改存档把留存率 / 最大间隔写成区间外的值时，设置页主列表与高级 FSRS 页
+/// 显示的是**调度器实际使用的生效值**，两处口径一致。
+///
+/// 此前主列表用原始值 `× 100`（`requestRetention: 95` 会显示「9500%」），
+/// 子页用回退后的生效值（90%）；编辑预填也读主列表那个函数，于是预填的
+/// 同样不是调度真正在用的值。
+#[test]
+fn out_of_range_fsrs_numbers_display_the_effective_values() {
+    // 外层 camelCase、`fsrsParameters` 内部 snake_case（与 ts-fsrs 一致）。
+    let (_fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "request_retention": 95.0, "maximum_interval": 0.0 }
+    }));
+    // 前置：存档里确实是区间外的原始值（否则这条测试测的是别的东西）。
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.request_retention, 95.0,
+        "原始留存率应原样读入"
+    );
+    assert_eq!(app.boot.settings.fsrs_parameters.maximum_interval, 0.0);
+
+    // 设置页主列表：显示 90%（不是 9500%），编辑预填也是 90。
+    press(&mut app, KeyCode::Char('s'));
+    assert_eq!(app.screen, Screen::Settings);
+    goto_setting(&mut app, "request_retention");
+    let rows = render_rows(&app, (100, 60));
+    let row = rows
+        .iter()
+        .find(|line| line.contains("目标留存率"))
+        .expect("设置页应有「目标留存率」行");
+    assert!(row.contains("90%"), "主列表应显示生效值 90%：{row:?}");
+    assert!(!row.contains("9500"), "主列表不该显示原始值 9500%：{row:?}");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("90"),
+        "编辑预填应等于调度实际使用的值"
+    );
+    press(&mut app, KeyCode::Esc);
+    assert!(app.edit.is_none());
+
+    // 高级 FSRS 页：留存率同样是 90%，最大间隔是 36500 天。
+    goto_setting(&mut app, "advanced_fsrs");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen, Screen::AdvFsrs);
+    let rows = render_rows(&app, WIDE);
+    let retention = rows
+        .iter()
+        .find(|line| line.contains("目标留存率"))
+        .expect("高级 FSRS 页应有「目标留存率」行");
+    assert!(retention.contains("90%"), "子页应显示 90%：{retention:?}");
+    let interval = rows
+        .iter()
+        .find(|line| line.contains("最大间隔"))
+        .expect("高级 FSRS 页应有「最大间隔」行");
+    assert!(
+        interval.contains("36500"),
+        "子页应显示生效的最大间隔 36500 天：{interval:?}"
+    );
+
+    goto_row(&mut app, "最大间隔");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("36500"),
+        "最大间隔的编辑预填也应是生效值"
+    );
+}
+
+/// 数字行清空后直接回车：拒绝保存并提示，保持原值。
+///
+/// 此前整数路径用 `parse::<i64>().unwrap_or_default()`，空输入静默变成 0
+/// 再被夹到区间下限——留存率被改成 50%、最大间隔被改成 1 天（下次结算所有
+/// 卡片都排到次日），而且没有任何提示。权重行的同一种输入一直会提示
+/// 「请输入数字」，现在两条路径同一口径。
+#[test]
+fn empty_number_input_is_rejected_instead_of_saved_as_zero() {
+    let (fixture, mut app) = test_app(WIDE);
+    open_adv_fsrs(&mut app);
+
+    // 目标留存率：清空 → 回车。
+    goto_row(&mut app, "目标留存率");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.edit.is_none(), "拒绝保存也要关闭输入框");
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.request_retention, 0.9,
+        "空输入不应把留存率改成区间下限 50%"
+    );
+    assert!(
+        toasts_text(&app).contains("请输入数字"),
+        "应提示请输入数字：{}",
+        toasts_text(&app)
+    );
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.request_retention,
+        0.9,
+        "空输入不应写盘"
+    );
+
+    // 最大间隔同理：此前会静默写成 1 天。
+    goto_row(&mut app, "最大间隔");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.maximum_interval, 36500.0,
+        "空输入不应把最大间隔改成 1 天"
+    );
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.maximum_interval,
+        36500.0,
+        "空输入不应写盘"
+    );
+}
+
 // ── 权重行：与调度器同源的区间夹取 ───────────────────────────────────────
 
 /// 权重编辑：区间内原样保存，越界按调度器实际夹取的范围钳住并落盘。
@@ -449,6 +584,227 @@ fn invalid_weight_input_keeps_the_previous_value() {
         original,
         "非法输入不应写盘"
     );
+}
+
+/// 权重往返一致：手改存档写 7 位小数 → 界面显示 6 位 → 直接回车保存 →
+/// 落盘就是显示的那个值；再次进入编辑，预填与落盘一致；输入框也拦住第 7 位。
+///
+/// 此前输入框允许任意位数（≤12 字符），显示与预填按 6 位舍入：打开权重行
+/// 再直接回车，就把存储值悄悄改成了舍入后的值。
+#[test]
+fn weight_precision_survives_a_round_trip_through_the_edit_box() {
+    let mut w = default_w().to_vec();
+    w[0] = 0.1234567;
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": w }
+    }));
+    assert!(
+        (app.adv_fsrs_weight(0) - 0.1234567).abs() < 1e-12,
+        "前置：原始权重应原样读入"
+    );
+
+    open_adv_fsrs(&mut app);
+    goto_row(&mut app, "w[0]");
+    let text = render_text(&app, WIDE);
+    assert!(text.contains("0.123457"), "行内显示应舍入到 6 位：{text}");
+
+    // 打开输入框：预填就是显示值。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "预填应与显示一致"
+    );
+    // 已经有 6 位小数，第 7 位进不来。
+    press(&mut app, KeyCode::Char('7'));
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "小数点后超过 6 位的字符应被拒绝"
+    );
+    // 直接回车：落盘值 == 显示值。
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w[0];
+    assert!(
+        (saved - 0.123457).abs() < 1e-12,
+        "直接回车保存后应归一为 6 位，实际 {saved}"
+    );
+    let raw = raw_settings(&fixture);
+    assert_eq!(
+        raw["val"]["fsrsParameters"]["w"][0].as_f64(),
+        Some(0.123457),
+        "落盘的权重就是显示值"
+    );
+
+    // 再次进入编辑：预填与落盘一致，再保存一次也不会变。
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123457"),
+        "重开编辑的预填应与落盘一致"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        store_settings(&fixture).fsrs_parameters.w[0],
+        saved,
+        "再保存一次不应改变值"
+    );
+
+    // 新输入也只保留 6 位：敲 `0.1234567` 只进到 `0.123456`。
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    type_str(&mut app, "0.1234567");
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.123456"),
+        "第 7 位小数应被拒绝"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        (store_settings(&fixture).fsrs_parameters.w[0] - 0.123456).abs() < 1e-12,
+        "保存的应是输入框里那 6 位小数"
+    );
+}
+
+/// 非 21 项权重的显示 / 预填必须是调度器迁移后的生效值。
+///
+/// `Fsrs::new` 会先按 `migrate_parameters` 迁移再调度；设置页此前读原始 `w`：
+/// 19 项存档的 `w[20]` 显示 0（落在它自己显示的 0.1 ~ 0.8 之外），17 项存档的
+/// `w[4]` 显示迁移前的 6.4133，而调度用的是 8.0801。打开这些行直接回车就会
+/// 把显示值写回存档，等于悄悄改掉调度参数。
+#[test]
+fn migrated_weights_display_the_effective_values() {
+    // 19 项：迁移后补 w[19] = 0、w[20] = 0.5。
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": default_w()[..19].to_vec() }
+    }));
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.w.len(),
+        19,
+        "前置：存档里是 19 项权重"
+    );
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[20]");
+    let rows = render_rows(&app, WIDE);
+    let row = rows
+        .iter()
+        .find(|line| line.contains("w[20]"))
+        .expect("高级 FSRS 页应有 w[20] 行");
+    assert!(
+        row.contains("0.5"),
+        "19 项存档的 w[20] 应显示迁移后的 0.5：{row:?}"
+    );
+    assert!(
+        row.contains("0.1 ~ 0.8"),
+        "显示值应落在同一行给出的合法区间内：{row:?}"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.5"),
+        "编辑预填也应是迁移后的生效值"
+    );
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "保存后应落盘迁移后的 21 项");
+    assert!(
+        (saved[20] - 0.5).abs() < 1e-12,
+        "打开 w[20] 直接回车不应改掉迁移值，实际 {}",
+        saved[20]
+    );
+
+    // 17 项：w[4] 从 6.4133 迁移成 8.0801，w[5] 同时按 FSRS-5 公式变换。
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": default_w()[..17].to_vec() }
+    }));
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.w.len(),
+        17,
+        "前置：存档里是 17 项权重"
+    );
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[4]");
+    let rows = render_rows(&app, WIDE);
+    let row = rows
+        .iter()
+        .find(|line| line.contains("w[4]"))
+        .expect("高级 FSRS 页应有 w[4] 行");
+    assert!(
+        row.contains("8.0801"),
+        "17 项存档的 w[4] 应显示迁移后的 8.0801：{row:?}"
+    );
+    assert!(
+        row.contains("1 ~ 10"),
+        "显示值应落在同一行给出的合法区间内：{row:?}"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("8.0801"),
+        "编辑预填也应是迁移后的生效值"
+    );
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "保存后应落盘迁移后的 21 项");
+    assert!(
+        (saved[4] - 8.0801).abs() < 1e-9,
+        "打开 w[4] 直接回车不应改掉迁移值，实际 {}",
+        saved[4]
+    );
+}
+
+/// 改一个权重会把非 21 项存档迁移成 21 项，其余权重保持调度器用的迁移值。
+#[test]
+fn editing_one_weight_keeps_the_other_migrated_weights() {
+    let raw = default_w()[..17].to_vec();
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": raw }
+    }));
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[0]");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    type_str(&mut app, "0.3");
+    press(&mut app, KeyCode::Enter);
+
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "改一项后应落盘迁移后的 21 项");
+    assert!((saved[0] - 0.3).abs() < 1e-12, "w[0] 应是刚输入的值");
+    let expected = migrate_parameters(&raw, 1, true);
+    for index in 1..21 {
+        assert!(
+            (saved[index] - expected[index]).abs() < 1e-12,
+            "w[{index}] 应保持迁移值 {}，实际 {}",
+            expected[index],
+            saved[index]
+        );
+    }
+}
+
+/// 手改出非法步进：启动时整组回退默认步进，并用 Toast 点名是哪个串。
+///
+/// 回退发生在 `Fsrs::new`（domain 纯函数），提示由 `bootstrap::load` 推进
+/// notices——没有这层提示，用户只会看到「步进没生效」，无从知道是拼错了。
+#[test]
+fn invalid_learning_steps_are_reported_at_startup() {
+    let (_fixture, app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "learning_steps": ["1m", "abc"] }
+    }));
+    let toasts = toasts_text(&app);
+    assert!(
+        toasts.contains("步进无法解析"),
+        "启动时应提示步进被回退：{toasts}"
+    );
+    assert!(toasts.contains("abc"), "提示里应点名哪个步进：{toasts}");
+
+    // 默认步进仍生效：新卡评 Good 停在 10 分钟那一步，而不是直接毕业。
+    let scheduler = Fsrs::new(&app.boot.settings.fsrs_parameters);
+    let card = scheduler.next_card(None, RATING_GOOD, Utc::now());
+    assert_eq!(card.state, CARD_STATE_LEARNING);
+    assert!(card.scheduled_days < 1.0, "非法步进不应把新卡排到 ≥1 天");
 }
 
 // ── 调度开关 ─────────────────────────────────────────────────────────────

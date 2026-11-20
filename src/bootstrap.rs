@@ -163,6 +163,16 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     if let Some(notice) = setting_loaded.notice() {
         notices.push(notice);
     }
+    // 步进串是「仍需手改 setting.json」的字段：无法解析时 `Fsrs::new` 会把
+    // 整组回退成内置默认值。回退本身是静默的，这里把「哪些没被采用」推进
+    // notices——启动时是 Warning Toast，同时由下面的循环写进运行日志。
+    let invalid_steps = crate::domain::fsrs::invalid_steps(&setting_loaded.value.fsrs_parameters);
+    if !invalid_steps.is_empty() {
+        notices.push(format!(
+            "FSRS 步进无法解析（{}），已整组回退默认步进：学习 1m / 10m、重学 10m",
+            invalid_steps.join(" / ")
+        ));
+    }
 
     let catalog = Catalog::load(paths)?;
     let readonly_dict = matches!(dict_loaded.status, LoadStatus::VersionTooNew { .. });

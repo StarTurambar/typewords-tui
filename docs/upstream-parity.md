@@ -66,16 +66,25 @@
 
 ### 3.1 FSRS
 
-评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：同一张卡在 TUI 与 Web 上算出的下次复习时间相同。
+评级映射、到期筛选、统计字段、FSRS-6 公式、学习步进、fuzz 区间与随机种子两端一致：**在下表登记的差异之外**，同一份存档在 TUI 与 Web 上算出的下次复习时间相同。
 
 | 维度 | 上游（ts-fsrs） | TUI（`src/domain/fsrs.rs`） |
 | --- | --- | --- |
 | 评级阈值 | `getGradeByWrongTimes`，默认 0 / 3 / 6 | 同左（`Scheduler::grade_by_wrong_times`） |
 | 学习与重学步进 | `learning_steps` / `relearning_steps`，`enable_short_term` 切换调度器 | 同左，读设置 |
+| 非 21 项权重 | `migrateParameters`：19 项补 `[0, 0.5]`、17 项先把 `w[4]` / `w[5]` / `w[6]` 按 FSRS-5 → FSRS-6 的公式变换再补 `[0, 0, 0, 0.5]`、其它长度整组默认 | 同左（`migrate_parameters`）；设置页改权重前也先迁移，避免改一项丢其余项 |
 | 复习间隔、fuzz 与到期判断 | FSRS-6（21 个权重 `w`）+ `maximum_interval`；`enable_fuzz` 分段 ±15% / ±10% / ±5%；`dayjs(due).isSameOrBefore(now, 'day')` | 同左，权重按上游 `CLAMP_PARAMETERS` 夹取、随机源移植上游 Alea；`due` 换算本地日期后 `<= today`。另加参数上界兜底：最大间隔夹到 1 ~ 36500 天、学习步进换算后 ≤ 36500 天（上游只校验下界，极端手改值在 TUI 会被夹住而不是算到天文数字） |
+| 目标留存率边界 | `calculate_interval_modifier` 只拒绝 `<= 0` 与 `> 1`：`1.0` 合法，此时 `interval_modifier` 恒为 0、复习卡全被排到次日 | 有意不同：`1.0` 与越界值一起回退 0.9（设置页显示、编辑预填与调度都用这个生效值）。宁可比上游保守，也不接受「所有复习卡都排到次日」的退化调度 |
 | 已掌握词 | 生成任务时从 `fsrsData` 中删除 | 只排除，不删除记录 |
 
-一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。仍存在的差异有两处：「已掌握词不删卡片」——两端卡片集合可能不同，但调度结果一致；以及参数上界的兜底——上游对 `maximum_interval` 只校验 ≥ 1、学习步进按 `parseInt` 解析，TUI 把两者夹到 36500 天以内，避免手改出极端值时 chrono 的 `Duration` 越界（见 `src/domain/fsrs.rs` 的 `MAX_INTERVAL_DAYS`）。
+一致性由 `tests/fsrs_parity.rs` 锁定：样本 `tests/fixtures/fsrs_golden.json` 由 `tools/fsrs_golden.mjs` 用上游 ts-fsrs 生成，覆盖新卡起步、学习步进、毕业复习、同日短期记忆、fuzz 与长期调度。上表里真正会改变单卡调度结果的差异只有两类，都是有意的：
+
+- **参数上界的兜底**：上游对 `maximum_interval` 只校验 ≥ 1，TUI 夹到 1 ~ 36500 天；学习步进的**解析**语义已与上游 `parseInt` 一致（`"10 m"` → 10 分钟、`"1e300d"` → 1 天、`"0x10m"` → 0 分钟），但换算结果仍封顶到 36500 天。两处都是为了手改出极端值时 chrono 的 `Duration` 不越界（见 `src/domain/fsrs.rs` 的 `MAX_INTERVAL_DAYS` 与 `MAX_STEP_MINUTES`）；非法步进另有「整组回退默认步进 + 启动提示」的兜底（上游是抛 `FSRSValidationError`）。
+- **目标留存率 1.0 回退 0.9**：上游接受 1.0（`interval_modifier` 恒为 0，复习卡全排到次日），TUI 选择回退到默认值。
+
+其余各行不改变单卡调度：非 21 项权重的迁移与上游逐条一致，「已掌握词不删卡片」只影响两端各自的卡片集合。
+
+**版本漂移风险**：上游 `package.json` 声明 `ts-fsrs ^5.2.3`，而 TUI 的移植与黄金样本以 **5.4.1** 为基线（`tools/fsrs_golden.mjs` 用 5.4.1 生成 `tests/fixtures/fsrs_golden.json`）。两个版本在 `next_state`（5.2.3 没有 `r` 参数、`t == 0` 没有短期门控）与 scheduler 的内联公式上确有差异，因此上面「同一份存档两端结果相同」只在 Web 端实际安装 5.4.1 时成立。上游快照不含 lockfile，**Web 端实际安装版本无法从本仓库确认**；核对办法是在上游仓库查 `pnpm-lock.yaml` 里 `ts-fsrs` 的解析版本，若确实是 5.2.3，需要按该版本重新生成黄金样本并重新对照。
 
 ### 3.2 键位
 
@@ -99,7 +108,7 @@ TUI 另有上游没有的全局键：`1`~`6` 切页、`d` / `s` / `t` 直达页�
 | 类别 | 项 |
 | --- | --- |
 | 有 UI 且生效 | 练习模式、主题、音标、大字、复习比例、无到期随机填充、忽略简单词、自动下一词、重复次数、切词等待、空格冷却、错误即清空、忽略大小写、自测选择题、词源、上下词、显示使用提示、FSRS 三阈值、目标留存率、清空进度、清除所有数据；高级 FSRS 页另有最大间隔、间隔抖动、短期调度与 21 个权重 |
-| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`learning_steps` / `relearning_steps` 仍只能手改 `setting.json`（练习流程自己的学习步进固定 1 / 6 / 10 分钟，两套互不影响） |
+| 建模但无 UI | `wordPracticeType`、`dictation`、`translate`、`ignoreSymbol`、`alwaysShowNote`、`_ignoreWatch`；`learning_steps` / `relearning_steps` 仍只能手改 `setting.json`（FSRS 学习步进与练习流程的节点 / 步骤是两套，互不影响） |
 | 上游有、TUI 完全没有 | 声音音量与语速、键音包、TTS 声色、字号、练习内设置弹层、文章音效、`practiceSentence`、`autoPlayFirstSentence`、侧栏折叠、移动端导航 |
 
 逐项取值与默认值见 [设置项参考](settings.md)，透传规则见 [存档与数据格式](persistence.md)。
@@ -159,7 +168,7 @@ Web 备份 data.json                        TUI 数据目录
 | 差异 | 影响 |
 | --- | --- |
 | `tuiBigWord` 与未知字段 | Web 没有 `tuiBigWord`；上游 `checkAndUpgradeSaveSetting` 与 Web 端都只保留自己认识的字段，经 Web 加载再保存会丢失 TUI 补充字段，TUI 再读时回到默认值 |
-| FSRS 卡片与参数 | `due` 用 ISO 时间字符串、其余字段同名；学习卡在 TUI 的 `stability` / `difficulty` 可能为 0，参数结构可互拷但两端调度实现不同，「同一张卡」的后续间隔不可复现 |
+| FSRS 卡片与参数 | `due` 用 ISO 时间字符串、其余字段同名；学习卡在 TUI 的 `stability` / `difficulty` 可能为 0（两端都按新卡处理）。参数结构可互拷，调度算法也与上游对齐（见 3.1）：**同一份存档在两端算出的下次复习时间相同**，前提是不落入 3.1 登记的差异（区间与步进夹取、非 21 项权重迁移、留存率 1.0 回退），且 Web 端实际安装的是 5.4.1（见 3.1 的版本漂移风险） |
 | 文章数据 | 系统「文章收藏」的词条会原样保留；TUI 的 `shake_common_dict` 会清空所有非 system 文章书籍的文章列表（比上游更激进）。TUI 不读存档里的文章正文：跟打用的正文来自 `assets/dicts/en/article/*.json` |
 
 ## 5. TUI 独有

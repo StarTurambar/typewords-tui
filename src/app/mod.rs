@@ -466,6 +466,12 @@ pub fn weight_label(index: usize) -> &'static str {
     LABELS.get(index).copied().unwrap_or("未知权重")
 }
 
+/// 权重保留的小数位数：显示、编辑预填、输入限制与保存归一都取这一个值。
+///
+/// 四处必须一致——只让其中一处按别的精度走，用户打开输入框再保存就会把
+/// 参数悄悄改掉。
+pub const WEIGHT_DECIMALS: usize = 6;
+
 /// 权重的显示 / 编辑文本：最多 6 位小数，去掉末尾的 `0`（`0.2120` → `0.212`）。
 ///
 /// 显示与编辑预填共用它：两处格式不一致时，用户一打开输入框再保存就会
@@ -474,7 +480,7 @@ pub fn weight_text(value: f64) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
-    let mut text = format!("{value:.6}");
+    let mut text = format!("{:.*}", WEIGHT_DECIMALS, value);
     while text.contains('.') && text.ends_with('0') {
         text.pop();
     }
@@ -482,6 +488,19 @@ pub fn weight_text(value: f64) -> String {
         text.pop();
     }
     text
+}
+
+/// 把权重归一到 [`weight_text`] 的精度（最多 [`WEIGHT_DECIMALS`] 位小数）。
+///
+/// 输入框只让敲 6 位小数，保存时也按 6 位归一，于是「显示值 == 存储值 ==
+/// 再次编辑的预填值」：打开权重行再直接回车不会改动参数。手改
+/// `setting.json` 写进更多位小数时，下一次在界面上保存该行同样归一到 6 位
+/// （界面本来也只显示 6 位）。
+fn normalize_weight(value: f64) -> f64 {
+    // 与 `weight_text` 同一套取舍：先按同样的小数位格式化，再解析回来。
+    format!("{:.*}", WEIGHT_DECIMALS, value)
+        .parse()
+        .unwrap_or(value)
 }
 
 /// 结算对应的练习类型。
@@ -4460,12 +4479,13 @@ impl App {
         }
     }
 
-    /// 权重行的当前值（显示与编辑预填共用）。
+    /// 权重行的当前值（显示与编辑预填共用）：调度器实际使用的迁移后权重。
+    ///
+    /// 直接读 `w` 会拿到未迁移的原始值（19 项存档的 `w[20]` 缺失、补 0；
+    /// 17 项存档的 `w[4]` 还是迁移前的 6.4133），与 `Fsrs::new` 实际调度的
+    /// 参数不一致；打开某行直接回车就会把显示值写回存档，悄悄改掉调度。
     pub fn adv_fsrs_weight(&self, index: usize) -> f64 {
-        self.boot
-            .settings
-            .fsrs_parameters
-            .w
+        crate::domain::fsrs::effective_w(&self.boot.settings.fsrs_parameters)
             .get(index)
             .copied()
             .unwrap_or(0.0)
@@ -4473,8 +4493,9 @@ impl App {
 
     /// 把输入框里的文本写进 `w[index]`，按与调度器同源的区间夹取。
     ///
-    /// 权重必须恰好 21 项才参与调度（长度不对时 `Fsrs::new` 整组回退默认），
-    /// 因此长度不对时先补成默认的 21 项再写，避免「改一个权重把整组打回默认」。
+    /// 权重先按上游 `migrateParameters` 迁移成 21 项（17 / 19 项补齐尾部，
+    /// 其它长度整组回退默认）。写之前迁移一次：否则 17 / 19 项的存档一改某个
+    /// 权重就会把其余项丢掉，与调度器实际使用的迁移结果对不上。
     fn apply_weight_text(&mut self, index: usize, text: &str) {
         if index >= AdvFsrsRow::WEIGHT_COUNT {
             return;
@@ -4489,11 +4510,15 @@ impl App {
             return;
         };
         if self.boot.settings.fsrs_parameters.w.len() != AdvFsrsRow::WEIGHT_COUNT {
-            self.boot.settings.fsrs_parameters.w = crate::domain::fsrs::default_w().to_vec();
+            // 与显示 / 调度同一个迁移入口，改一项时其余项保留生效值。
+            let migrated = crate::domain::fsrs::effective_w(&self.boot.settings.fsrs_parameters);
+            self.boot.settings.fsrs_parameters.w = migrated;
         }
         let bounds = crate::domain::fsrs::weight_bounds(&self.boot.settings.fsrs_parameters, index);
         let clamped = parsed.clamp(bounds.0, bounds.1);
-        self.boot.settings.fsrs_parameters.w[index] = clamped;
+        // 落盘的是归一后的值：显示 / 预填本来就只有 6 位小数，不归一的话
+        // 「打开这一行再直接回车」会把多出来的位数悄悄舍掉。
+        self.boot.settings.fsrs_parameters.w[index] = normalize_weight(clamped);
         self.save_settings_now();
         if (clamped - parsed).abs() > f64::EPSILON {
             self.toast(
@@ -4535,9 +4560,11 @@ impl App {
             EditTarget::EasyLimit => settings.fsrs_easy_limit,
             EditTarget::GoodLimit => settings.fsrs_good_limit,
             EditTarget::HardLimit => settings.fsrs_hard_limit,
-            EditTarget::Retention => {
-                (settings.fsrs_parameters.request_retention * 100.0).round() as i64
-            }
+            // 与高级 FSRS 页一样显示**生效值**：手改 `setting.json` 写成 `95`
+            // 这类区间外的数时，调度器按回退后的 0.9 走，主列表若显示原始值
+            // 会出现「9500%」而子页显示 90% 的两套口径。编辑预填也走这里，
+            // 于是预填的就是调度实际使用的值。
+            EditTarget::Retention => (self.fsrs_request_retention() * 100.0).round() as i64,
             EditTarget::Note => 0,
             EditTarget::WordSoundSpeed => (settings.word_sound_speed * 100.0).round() as i64,
             EditTarget::DictName => 0,

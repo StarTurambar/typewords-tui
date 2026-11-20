@@ -26,6 +26,11 @@ const S_MAX: f64 = 36500.0;
 const INIT_S_MAX: f64 = 100.0;
 /// FSRS-6 的默认衰减系数（`w[20]`）。
 pub const FSRS6_DEFAULT_DECAY: f64 = 0.1542;
+/// FSRS-5 的默认衰减系数：17 / 19 项权重的旧存档迁移时补的就是它。
+///
+/// 与 [`FSRS6_DEFAULT_DECAY`] 不是一个值——旧存档的权重来自 FSRS-5 时代，
+/// 迁移时按上游补 FSRS-5 的衰减，而不是拿 FSRS-6 的新默认值顶替。
+const FSRS5_DEFAULT_DECAY: f64 = 0.5;
 /// `w[17]` / `w[18]` 的乘积上限。
 const W17_W18_CEILING: f64 = 2.0;
 
@@ -228,47 +233,99 @@ fn clamp_ranges(
     clip
 }
 
-/// 把参数夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
+/// 把参数逐项夹到合法区间（对应上游 `default.ts` 的 `clipParameters`）。
 ///
-/// 区间与 [`clamp_ranges`] 同源。
+/// 区间与 [`clamp_ranges`] 同源；输出长度与输入一致（上游是
+/// `parameters.map(...)`），不做补齐——17 / 19 项权重的补齐由
+/// [`migrate_parameters`] 在夹取之后做，长度分流只有那一处。
 pub fn clip_parameters(
     parameters: &[f64],
     num_relearning_steps: usize,
     enable_short_term: bool,
 ) -> Vec<f64> {
     let clip = clamp_ranges(parameters, num_relearning_steps, enable_short_term);
-    let count = parameters.len().min(clip.len());
-    let mut result: Vec<f64> = parameters
+    parameters
         .iter()
-        .take(count)
+        .take(clip.len())
         .enumerate()
         .map(|(index, value)| {
             // 上游写的是 `parameters[index] || 0`：0 与 NaN 都当 0
             let value = if value.is_finite() { *value } else { 0.0 };
             clamp(value, clip[index].0, clip[index].1)
         })
-        .collect();
-    // 不足 21 项时用默认值补齐
-    let defaults = default_w();
-    result.extend(defaults.iter().skip(count).copied());
-    result
+        .collect()
+}
+
+/// 把任意长度的权重迁移成 21 项（对应上游 `migrateParameters`）。
+///
+/// 上游按长度分流，这里逐条照搬：
+/// - 21 项：只夹取，行为与逐项夹取完全一致；
+/// - 19 项：夹取后补 `[0, FSRS5_DEFAULT_DECAY]`（FSRS-5 → FSRS-6 新增的两项）；
+/// - 17 项：夹取后先把 `w[4]` / `w[5]` / `w[6]` 按 FSRS-5 → FSRS-6 的公式
+///   变换（各取 8 位小数），再补 `[0, 0, 0, FSRS5_DEFAULT_DECAY]`；
+/// - 其它任何长度（空、22 项及以上）：**整组回退默认权重**，一项都不保留。
+///
+/// 长度分流只在这里做一次：[`Fsrs::new`] 与设置页写权重都走它，界面上的
+/// 合法区间仍由 [`weight_bounds`] 提供。
+pub fn migrate_parameters(
+    parameters: &[f64],
+    num_relearning_steps: usize,
+    enable_short_term: bool,
+) -> Vec<f64> {
+    match parameters.len() {
+        21 => clip_parameters(parameters, num_relearning_steps, enable_short_term),
+        19 => {
+            let mut w = clip_parameters(parameters, num_relearning_steps, enable_short_term);
+            w.extend([0.0, FSRS5_DEFAULT_DECAY]);
+            w
+        }
+        17 => {
+            let mut w = clip_parameters(parameters, num_relearning_steps, enable_short_term);
+            // 顺序与上游一致：`w[4]` 用的是**变换前**的 `w[5]`。
+            w[4] = round_to(w[5] * 2.0 + w[4], 8);
+            w[5] = round_to((w[5] * 3.0 + 1.0).ln() / 3.0, 8);
+            w[6] = round_to(w[6] + 0.5, 8);
+            w.extend([0.0, 0.0, 0.0, FSRS5_DEFAULT_DECAY]);
+            w
+        }
+        _ => default_w().to_vec(),
+    }
+}
+
+/// 调度器实际使用的 21 项权重。
+///
+/// [`Fsrs::new`] 与设置页的权重显示 / 编辑预填共用这一个入口：`w` 不是 21 项
+/// 时先按 [`migrate_parameters`] 迁移，重学步数取**净化后**的列表长度（非法
+/// 步进整组回退默认，与调度器的夹取区间同源）。界面因此显示的是真正参与
+/// 调度的值，而不是存档里未迁移的原始值。
+pub fn effective_w(parameters: &FsrsParameters) -> Vec<f64> {
+    let relearning_steps = sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
+    effective_w_for(parameters, relearning_steps.len())
+}
+
+/// `Fsrs::new` 已经净化过步进，直接复用其长度，避免再分配一份步进列表。
+fn effective_w_for(parameters: &FsrsParameters, num_relearning_steps: usize) -> Vec<f64> {
+    migrate_parameters(
+        &parameters.w,
+        num_relearning_steps,
+        parameters.enable_short_term,
+    )
 }
 
 /// 第 `index` 项权重在当前设置下的合法区间。
 ///
 /// 供「高级 FSRS」页编辑权重时夹取：重学步数取 [`Fsrs::new`] 的有效值
-/// （空列表按 1 步算），`enable_short_term` 决定 `w[19]` 的下限，因此
-/// 界面显示的区间与调度器实际夹取的结果一致。
+/// （空列表 / 非法步进回退默认，按 1 步算），`enable_short_term` 决定
+/// `w[19]` 的下限；参数先按 [`effective_w`] 迁移，因此界面显示的区间与
+/// 调度器实际夹取的结果一致。
 pub fn weight_bounds(parameters: &FsrsParameters, index: usize) -> (f64, f64) {
-    let num_relearning_steps = parameters.relearning_steps.len().max(1);
-    clamp_ranges(
-        &parameters.w,
-        num_relearning_steps,
-        parameters.enable_short_term,
-    )
-    .get(index)
-    .copied()
-    .unwrap_or((0.0, f64::INFINITY))
+    let relearning_steps = sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
+    let num_relearning_steps = relearning_steps.len();
+    let w = effective_w_for(parameters, num_relearning_steps);
+    clamp_ranges(&w, num_relearning_steps, parameters.enable_short_term)
+        .get(index)
+        .copied()
+        .unwrap_or((0.0, f64::INFINITY))
 }
 
 /// FSRS-6 的 21 项默认权重（与上游 `constant.ts` 一致）。
@@ -300,21 +357,55 @@ pub fn default_w() -> [f64; 21] {
 
 // ── 学习步进 ───────────────────────────────────────────────────────────────
 
+/// JS `parseInt(text, 10)` 的数值部分：可选正负号 + 连续十进制数字。
+///
+/// 与 `f64::parse` 的区别就是上游与 TUI 过去的区别：前导空白与数字后面的
+/// 垃圾都被忽略（`"10 m"` 的前缀是 `"10 "` → 10、`"1.5"` → 1、
+/// `"1e300"` → 1、`"0x10"` → 0）。一个数字都没有、或累加到非有限数
+/// （JS 的 `parseInt` 对超长数字串返回 Infinity）时返回 `None`。
+fn js_parse_int(text: &str) -> Option<f64> {
+    let mut chars = text.trim_start().chars().peekable();
+    let mut negative = false;
+    match chars.peek() {
+        Some('+') => {
+            chars.next();
+        }
+        Some('-') => {
+            negative = true;
+            chars.next();
+        }
+        _ => {}
+    }
+    let mut value = 0.0f64;
+    let mut digits = 0usize;
+    while let Some(character) = chars.next_if(|c| c.is_ascii_digit()) {
+        value = value * 10.0 + f64::from(character.to_digit(10).unwrap_or(0));
+        digits += 1;
+    }
+    if digits == 0 || !value.is_finite() {
+        return None;
+    }
+    Some(if negative { -value } else { value })
+}
+
 /// 步长单位转分钟（对应上游 `ConvertStepUnitToMinutes`）。
 ///
-/// 支持 `m` / `h` / `d`；无法解析时返回 `None`。
+/// 语义与上游逐条一致：**单位是最后一个字符**（`m` / `h` / `d`），前缀按
+/// `parseInt(_, 10)` 解析（见 [`js_parse_int`]）。因此 `"10 m"` 是 10 分钟、
+/// `"1.5m"` 是 1 分钟、`"1e300d"` 是 1 天、`"0x10m"` 是 0 分钟；无数字、
+/// 负数、单位不在 `m` / `h` / `d` 都返回 `None`（上游抛 `FSRSValidationError`）。
 ///
 /// 单位按**字符**切分而不是字节——步进串来自用户可编辑的 `setting.json`，
 /// `"1分"` 之类的非 ASCII 写法按字节切会落在 UTF-8 边界中间而 panic。
 ///
-/// 结果封顶到 [`MAX_STEP_MINUTES`]，非有限数（`"infm"` / `"NaNm"`）按无法解析
-/// 处理：步进串同样能绕过界面直接手改，`"1e300d"` 原样变成到期时间会让
-/// `now + Duration::minutes(_)` 超出 chrono 的 `TimeDelta` 上界而在结算路径上
-/// panic。
+/// 结果封顶到 [`MAX_STEP_MINUTES`]（第二道防线）：`"999999999999999d"` 换算后
+/// 是天文数字，原样变成到期时间会让 `now + Duration::minutes(_)` 超出 chrono
+/// 的 `TimeDelta` 上界而在结算路径上 panic。
 pub fn step_to_minutes(step: &str) -> Option<f64> {
-    let unit = step.chars().last()?;
-    let value: f64 = step[..step.len() - unit.len_utf8()].parse().ok()?;
-    if !value.is_finite() || value < 0.0 {
+    let mut chars = step.chars();
+    let unit = chars.next_back()?;
+    let value = js_parse_int(chars.as_str())?;
+    if value < 0.0 {
         return None;
     }
     let minutes = match unit {
@@ -324,6 +415,41 @@ pub fn step_to_minutes(step: &str) -> Option<f64> {
         _ => return None,
     };
     Some(minutes.min(MAX_STEP_MINUTES))
+}
+
+/// 列出无法解析的步进串（`learning_steps` 与 `relearning_steps` 一起）。
+///
+/// [`Fsrs::new`] 遇到非法步进会把**整组**回退成内置默认值；这个函数把「哪些
+/// 没被采用」交给启动路径（`bootstrap::load` 推进 notices，界面上是 Warning
+/// Toast，同时写进日志）。domain 保持纯函数：不弹 UI、不依赖上层。
+///
+/// 空列表不算非法——那是「用默认值」的正常写法，不会出现在结果里。
+pub fn invalid_steps(parameters: &FsrsParameters) -> Vec<String> {
+    parameters
+        .learning_steps
+        .iter()
+        .chain(parameters.relearning_steps.iter())
+        .filter(|step| step_to_minutes(step).is_none())
+        .cloned()
+        .collect()
+}
+
+/// 内置默认学习步进（与 `FsrsParameters::default` 一致）。
+const DEFAULT_LEARNING_STEPS: [&str; 2] = ["1m", "10m"];
+/// 内置默认重学步进（与 `FsrsParameters::default` 一致）。
+const DEFAULT_RELEARNING_STEPS: [&str; 1] = ["10m"];
+
+/// 步进列表的兜底：空列表或含非法步进时整组回退内置默认值。
+///
+/// 非法步进绝不能按「没有下一步」处理——那会让卡片直接毕业、排到 ≥1 天的
+/// FSRS 间隔，比上游「解析失败抛 `FSRSValidationError`」危险得多。整套回退
+/// 至少保住「学习卡仍留在学习阶段」的语义；「哪些步进没被采用」由
+/// [`invalid_steps`] 交给启动路径提示用户。
+fn sanitized_steps(steps: &[String], defaults: &[&str]) -> Vec<String> {
+    if steps.is_empty() || steps.iter().any(|step| step_to_minutes(step).is_none()) {
+        return defaults.iter().map(|step| (*step).to_string()).collect();
+    }
+    steps.to_vec()
 }
 
 /// 学习步进策略的结果。
@@ -426,24 +552,21 @@ pub struct Fsrs {
 impl Fsrs {
     /// 由设置构造调度器。
     pub fn new(parameters: &FsrsParameters) -> Self {
-        let learning_steps = if parameters.learning_steps.is_empty() {
-            vec!["1m".to_string(), "10m".to_string()]
-        } else {
-            parameters.learning_steps.clone()
-        };
-        let relearning_steps = if parameters.relearning_steps.is_empty() {
-            vec!["10m".to_string()]
-        } else {
-            parameters.relearning_steps.clone()
-        };
-        let w = clip_parameters(
-            &parameters.w,
-            relearning_steps.len(),
-            parameters.enable_short_term,
-        );
+        // 空列表与非法步进都整组回退内置默认值（见 `sanitized_steps`）。
+        let learning_steps = sanitized_steps(&parameters.learning_steps, &DEFAULT_LEARNING_STEPS);
+        let relearning_steps =
+            sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
+        // 长度分流（21 / 19 / 17 / 其它）只在 `migrate_parameters` 里做一次。
+        let w = effective_w_for(parameters, relearning_steps.len());
         let (decay, factor) = compute_decay_factor(&w);
         // 留存率必须落在 (0, 1)：取 1 时 interval_modifier 恒为 0，所有复习卡
         // 都会被排到次日；最大间隔至少一天，否则卡片当天反复到期。
+        //
+        // **与上游的有意差异**：ts-fsrs 的 `calculate_interval_modifier` 只拒绝
+        // `<= 0 || > 1`，`1.0` 是合法值（interval_modifier = 0，间隔恒为 1 天）。
+        // TUI 把 `1.0` 与越界值一起回退 0.9：宁可比上游保守，也不接受「所有
+        // 复习卡都排到次日」这种退化调度。这条差异登记在 docs/upstream-parity.md
+        // 的 FSRS 对照表里，改这里之前先改文档。
         //
         // 上界也要兜住：留存率取极小值（手改 `1e-9`）时 interval_modifier 会被
         // 推向 ~1e58，再叠加不加限制的最大间隔（`1e300`），
@@ -1058,34 +1181,139 @@ mod tests {
         assert_eq!(first.due, second.due);
     }
 
+    /// 步进串的解析语义必须与上游 `ConvertStepUnitToMinutes` 一致。
+    ///
+    /// 单位是最后一个字符，前缀按 `parseInt(_, 10)` 解析（可选正负号 + 连续
+    /// 十进制数字，前导空白与数字后面的垃圾都被忽略）。此前 TUI 用
+    /// `f64::parse`：`"10 m"` 解析失败、`"1.5m"` 得到 1.5 分钟、
+    /// `"1e300d"` 得到天文数字——与上游三处都不一样。
     #[test]
-    fn step_units_are_converted() {
-        assert_eq!(step_to_minutes("1m"), Some(1.0));
-        assert_eq!(step_to_minutes("10m"), Some(10.0));
-        assert_eq!(step_to_minutes("2h"), Some(120.0));
-        assert_eq!(step_to_minutes("1d"), Some(1440.0));
-        assert_eq!(step_to_minutes("x"), None);
+    fn step_units_are_parsed_like_the_upstream_parse_int() {
+        let cases = [
+            ("1m", Some(1.0)),
+            ("10m", Some(10.0)),
+            ("2h", Some(120.0)),
+            ("1d", Some(1440.0)),
+            // parseInt 忽略前导空白与数字后面的垃圾
+            ("10 m", Some(10.0)),
+            ("1.5m", Some(1.0)),
+            // parseInt("1e300", 10) 是 1，不是 1e300
+            ("1e300d", Some(1440.0)),
+            // radix 10：`0x10` 只取到开头的 0
+            ("0x10m", Some(0.0)),
+            // 换算后超过上限的仍按上限封顶（第二道防线）
+            ("999999999999999d", Some(MAX_STEP_MINUTES)),
+            // 无数字 / 负数 / 非法单位
+            ("", None),
+            ("1分", None),
+            ("-1m", None),
+            ("abc", None),
+            ("x", None),
+            ("infm", None),
+            ("NaNm", None),
+        ];
+        for (step, expected) in cases {
+            assert_eq!(step_to_minutes(step), expected, "步进 {step:?} 解析错误");
+        }
+    }
+
+    /// 超长数字串累加到非有限数：JS 的 `parseInt` 返回 Infinity 后上游按
+    /// 非法处理，这里同样返回 `None`（不能把 Infinity 当成分钟数）。
+    #[test]
+    fn absurdly_long_step_numbers_are_rejected() {
+        let step = format!("{}d", "9".repeat(400));
+        assert_eq!(step_to_minutes(&step), None);
+        // 这类步进同样触发整组回退：卡片留在学习阶段，不会毕业。
+        let scheduler = Fsrs::new(&FsrsParameters {
+            learning_steps: vec![step],
+            ..FsrsParameters::default()
+        });
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, RATING_GOOD, now);
+        assert_eq!(card.state, CARD_STATE_LEARNING);
+        assert!(card.scheduled_days < 1.0);
     }
 
     /// 极端步进串不能把到期时间推到 chrono 的上界之外。
     ///
-    /// 步进串可以手改 `setting.json`：`"1e300d"` 语法合法，原样转成
-    /// `Duration::minutes` 会让结算路径 panic；非有限数按无法解析处理。
+    /// 步进串可以手改 `setting.json`：`"999999999999999d"` 按上游语义是
+    /// 1e15 天量级，原样转成 `Duration::minutes` 会让结算路径 panic，
+    /// 因此换算结果封顶到 `MAX_STEP_MINUTES`。`"1e300d"` 则因为
+    /// `parseInt("1e300", 10) == 1` 只得到 1 天（与上游一致）。
     #[test]
     fn extreme_learning_steps_are_capped() {
-        assert_eq!(step_to_minutes("1e300d"), Some(MAX_STEP_MINUTES));
         assert_eq!(step_to_minutes("999999999999999d"), Some(MAX_STEP_MINUTES));
+        assert_eq!(step_to_minutes("1e300d"), Some(1440.0));
         assert_eq!(step_to_minutes("infm"), None);
         assert_eq!(step_to_minutes("NaNm"), None);
 
-        // 走完整调度也不崩：Again 把卡片排到封顶后的首步。
+        let now = at("2026-01-01T00:00:00Z");
+        // 封顶生效：Again 把卡片排到上限（36500 天），而不是 1e15 天。
+        let scheduler = Fsrs::new(&FsrsParameters {
+            learning_steps: vec!["999999999999999d".to_string()],
+            ..FsrsParameters::default()
+        });
+        let card = scheduler.next_card(None, RATING_AGAIN, now);
+        assert_eq!(card.due, now + Duration::days(MAX_INTERVAL_DAYS as i64));
+        // parseInt 语义：`"1e300d"` 是 1 天。
         let scheduler = Fsrs::new(&FsrsParameters {
             learning_steps: vec!["1e300d".to_string()],
             ..FsrsParameters::default()
         });
-        let now = at("2026-01-01T00:00:00Z");
         let card = scheduler.next_card(None, RATING_AGAIN, now);
-        assert_eq!(card.due, now + Duration::days(MAX_INTERVAL_DAYS as i64));
+        assert_eq!(card.due, now + Duration::days(1));
+    }
+
+    /// 非法步进整组回退内置默认值：卡片留在学习阶段，而不是直接毕业。
+    ///
+    /// 此前 `step_to_minutes` 返回 `None` 会被 `learning_step_info` 的 `?`
+    /// 一路传上去，`apply_learning_steps` 落到毕业分支——手改一个错别字就把
+    /// 卡片排到 ≥1 天的 FSRS 间隔，与上游「抛 `FSRSValidationError`」的可见
+    /// 错误相比完全是静默的语义改变。
+    #[test]
+    fn invalid_steps_fall_back_to_the_built_in_defaults() {
+        let parameters = FsrsParameters {
+            learning_steps: vec!["abc".to_string(), "10m".to_string()],
+            relearning_steps: vec!["-1m".to_string()],
+            ..FsrsParameters::default()
+        };
+        assert_eq!(
+            invalid_steps(&parameters),
+            vec!["abc".to_string(), "-1m".to_string()]
+        );
+
+        let scheduler = Fsrs::new(&parameters);
+        assert_eq!(
+            scheduler.learning_steps,
+            vec!["1m".to_string(), "10m".to_string()],
+            "非法学习步进应整组回退默认"
+        );
+        assert_eq!(
+            scheduler.relearning_steps,
+            vec!["10m".to_string()],
+            "非法重学步进应整组回退默认"
+        );
+
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, RATING_GOOD, now);
+        assert_eq!(card.state, CARD_STATE_LEARNING, "非法步进不应让新卡毕业");
+        assert_eq!(card.due, now + Duration::minutes(10));
+        assert!(card.scheduled_days < 1.0, "新卡不该被排到 ≥1 天");
+
+        // 全部合法时原样保留，也不产生「非法步进」报告。
+        let defaults = FsrsParameters::default();
+        assert!(invalid_steps(&defaults).is_empty());
+        assert_eq!(
+            Fsrs::new(&defaults).learning_steps,
+            vec!["1m".to_string(), "10m".to_string()]
+        );
+        // 空列表是「用默认值」的正常写法，不算非法。
+        let empty = FsrsParameters {
+            learning_steps: Vec::new(),
+            relearning_steps: Vec::new(),
+            ..FsrsParameters::default()
+        };
+        assert!(invalid_steps(&empty).is_empty());
     }
 
     /// 最大间隔超出界面可调区间时按 36500 生效。
@@ -1113,13 +1341,15 @@ mod tests {
     /// 非 ASCII 的步进串不能按字节切分。
     ///
     /// 步进串来自用户可编辑的 `setting.json`，`"1分"` 按字节切会落在
-    /// UTF-8 边界中间直接 panic。
+    /// UTF-8 边界中间直接 panic。单位取最后一个**字符**（不是字节），因此
+    /// 多字节单位只是「不认识的单位」而返回 `None`。
     #[test]
     fn non_ascii_step_units_do_not_panic() {
         assert_eq!(step_to_minutes("1分"), None);
-        assert_eq!(step_to_minutes("10 m"), None);
         assert_eq!(step_to_minutes(""), None);
-        // 单位是 ASCII、值含非 ASCII 时应正常解析
+        // 单位是 ASCII、前缀里有空格时按 parseInt 取数字
+        assert_eq!(step_to_minutes("10 m"), Some(10.0));
+        assert_eq!(step_to_minutes(" 10m"), Some(10.0));
         assert_eq!(step_to_minutes("10m"), Some(10.0));
     }
 
@@ -1206,5 +1436,106 @@ mod tests {
         let clipped = clip_parameters(&w, 2, true);
         assert!((clipped[17] - ceiling).abs() < 1e-12);
         assert!((clipped[18] - ceiling).abs() < 1e-12);
+    }
+
+    /// 上游 `migrateParameters` 的长度分流：21 只夹取、19 补 `[0, 0.5]`、
+    /// 17 先变换 `w[4]` / `w[5]` / `w[6]` 再补 `[0, 0, 0, 0.5]`，其它长度整组
+    /// 回退默认。
+    ///
+    /// 改前是「取前 min(len, 21) 项夹取 + 不足 21 用默认值补齐」：19 项会得到
+    /// FSRS-6 的 `w[19] = 0.0658`（上游是 0），22 项会保留前 21 项（上游整组
+    /// 默认）。这三处差异都锁在这里。
+    #[test]
+    fn migrate_parameters_follows_the_upstream_length_branches() {
+        let defaults = default_w();
+
+        // 21 项：只夹取，逐项与改前完全一致。
+        let mut w = defaults.to_vec();
+        w[0] = 1e9; // 越界 → 夹到 w[0] 的上限
+        let migrated = migrate_parameters(&w, 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert_eq!(migrated[0], INIT_S_MAX);
+        let clipped = clip_parameters(&w, 1, true);
+        for (index, value) in migrated.iter().enumerate() {
+            assert_eq!(
+                *value, clipped[index],
+                "21 项应与逐项夹取一致（w[{index}]）"
+            );
+        }
+
+        // 19 项：夹取前 19 项 + [0, FSRS5_DEFAULT_DECAY]。
+        let migrated = migrate_parameters(&defaults[..19], 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert_eq!(migrated[..19].to_vec(), defaults[..19].to_vec());
+        assert_eq!(migrated[19], 0.0, "w[19] 应是 0，而不是 FSRS-6 的默认值");
+        assert_eq!(migrated[20], FSRS5_DEFAULT_DECAY);
+
+        // 17 项：w[4] / w[5] / w[6] 按 FSRS-5 → FSRS-6 的公式变换（8 位小数）。
+        // 手算（默认权重前 17 项，全部落在夹取区间内）：
+        //   w[4] = 0.8334 * 2 + 6.4133 = 8.0801
+        //   w[5] = ln(0.8334 * 3 + 1) / 3 = 0.41760670…
+        //   w[6] = 3.0194 + 0.5 = 3.5194
+        let migrated = migrate_parameters(&defaults[..17], 1, true);
+        assert_eq!(migrated.len(), 21);
+        assert!(
+            (migrated[4] - 8.0801).abs() < 1e-9,
+            "w[4] 实际 {}",
+            migrated[4]
+        );
+        assert!(
+            (migrated[5] - 0.4176067).abs() < 1e-9,
+            "w[5] 实际 {}",
+            migrated[5]
+        );
+        assert!(
+            (migrated[6] - 3.5194).abs() < 1e-9,
+            "w[6] 实际 {}",
+            migrated[6]
+        );
+        assert_eq!(
+            migrated[17..].to_vec(),
+            vec![0.0, 0.0, 0.0, FSRS5_DEFAULT_DECAY]
+        );
+        // 变换只动这三项，其余 14 项原样保留。
+        for index in [0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] {
+            assert_eq!(migrated[index], defaults[index], "w[{index}] 不应被改动");
+        }
+
+        // 其它长度：空与 22 项都整组回退默认（一项都不保留）。
+        assert_eq!(migrate_parameters(&[], 1, true), defaults.to_vec());
+        let mut longer = defaults.to_vec();
+        longer.push(9.0);
+        longer.push(9.0);
+        assert_eq!(migrate_parameters(&longer, 1, true), defaults.to_vec());
+    }
+
+    /// `request_retention == 1.0` 回退 0.9，这是登记过的有意差异。
+    ///
+    /// 上游 `calculate_interval_modifier` 只拒绝 `<= 0 || > 1`，`1.0` 合法，
+    /// 但会让 `interval_modifier` 恒为 0、所有复习卡都排到次日。TUI 选择回退
+    /// 到文档里的默认值 0.9（与越界值同一口径），行为与「填 0.9」完全一致。
+    #[test]
+    fn request_retention_of_one_falls_back_to_the_documented_default() {
+        let with = |retention: f64| {
+            Fsrs::new(&FsrsParameters {
+                request_retention: retention,
+                ..FsrsParameters::default()
+            })
+        };
+        let baseline = with(0.9);
+        for retention in [1.0, 1.000_000_1, 95.0, 0.0, -0.5] {
+            assert_eq!(
+                with(retention).interval_modifier,
+                baseline.interval_modifier,
+                "留存率 {retention} 应回退到 0.9"
+            );
+        }
+
+        // 行为上等价：同一张新卡评 Easy 的到期与 0.9 一致。
+        let now = at("2026-01-01T00:00:00Z");
+        let one = with(1.0).next_card(None, RATING_EASY, now);
+        let default = baseline.next_card(None, RATING_EASY, now);
+        assert_eq!(one.due, default.due);
+        assert_eq!(one.scheduled_days, default.scheduled_days);
     }
 }
