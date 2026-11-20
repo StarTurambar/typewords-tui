@@ -16,6 +16,13 @@ pub struct Bootstrapped {
     pub catalog: Catalog,
     pub themes: ThemeRegistry,
     pub notices: Vec<String>,
+    /// 本次装载是否删除了失效的断点缓存（进度按词表校正过）。
+    ///
+    /// 删除发生在 [`Bootstrapped::normalize_study_progress`] 里：词表比存档登记的
+    /// 短、`lastLearnIndex` 越界时，旧断点属于校正前的进度，续练会把夹回的进度
+    /// 再算回去。这是**写副作用**，`tw task` 预览与 TUI 启动都走这条路，所以
+    /// 命令行的输出要把它说出来（预览命令不该悄悄删用户的文件）。
+    pub practice_cache_cleared: bool,
     /// 词典存档版本过高时为 true：本次运行不覆盖 dict.json。
     pub readonly_dict: bool,
     /// 设置存档版本过高时为 true：本次运行不覆盖 setting.json。
@@ -65,25 +72,35 @@ impl Bootstrapped {
     ///
     /// 内置词典（收藏 / 错词 / 已掌握）不参与校正：它们的词条就存在存档里，
     /// `length` 由词条增删同步维护，上游也不做这一步。
+    ///
+    /// 真的删掉了一个缓存文件时把 [`Bootstrapped::practice_cache_cleared`] 置位：
+    /// `tw task` 是写入口，删了用户的文件就必须在输出里说明。
     fn normalize_study_progress(&mut self) {
         let repaired = match self.base.study_dict_mut() {
             Some(dict) if !dict.system => dict.normalize_progress(),
             _ => false,
         };
-        if repaired {
-            // 读不出来的缓存不能删：与 `App::clear_practice_cache` 同一条不变量
-            // ——文件还在，内容只是本次读不到，删掉等于替用户丢弃好档。
-            if self
-                .store
-                .cache_discardable(crate::store::PRACTICE_FILE_NAME)
-            {
-                let _ = self.store.remove_practice();
-            } else {
-                logging::warn(format!(
-                    "练习缓存 {} 读不出来，校正进度时未删除；请关闭占用它的程序后重启",
-                    crate::store::PRACTICE_FILE_NAME
-                ));
-            }
+        if !repaired {
+            return;
+        }
+        // 读不出来的缓存不能删：与 `App::clear_practice_cache` 同一条不变量
+        // ——文件还在，内容只是本次读不到，删掉等于替用户丢弃好档。
+        if !self
+            .store
+            .cache_discardable(crate::store::PRACTICE_FILE_NAME)
+        {
+            logging::warn(format!(
+                "练习缓存 {} 读不出来，校正进度时未删除；请关闭占用它的程序后重启",
+                crate::store::PRACTICE_FILE_NAME
+            ));
+            return;
+        }
+        // 只有真的删掉了一个文件才算「本次清除了缓存」：文件本来就不存在时
+        // 预览命令不该报一句「已清除」。删除失败同样不算，并留一条日志。
+        let existed = self.store.practice_exists();
+        match self.store.remove_practice() {
+            Ok(()) => self.practice_cache_cleared = existed,
+            Err(err) => logging::warn(format!("校正进度时删除练习缓存失败: {err:#}")),
         }
     }
 
@@ -201,6 +218,7 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
         catalog,
         themes,
         notices,
+        practice_cache_cleared: false,
         readonly_dict,
         readonly_settings,
     };
