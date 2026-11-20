@@ -292,21 +292,40 @@ pub fn migrate_parameters(
     }
 }
 
-/// 第 `index` 项权重在当前设置下的合法区间。
+/// 调度器实际使用的 21 项权重。
 ///
-/// 供「高级 FSRS」页编辑权重时夹取：重学步数取 [`Fsrs::new`] 的有效值
-/// （空列表按 1 步算），`enable_short_term` 决定 `w[19]` 的下限，因此
-/// 界面显示的区间与调度器实际夹取的结果一致。
-pub fn weight_bounds(parameters: &FsrsParameters, index: usize) -> (f64, f64) {
-    let num_relearning_steps = parameters.relearning_steps.len().max(1);
-    clamp_ranges(
+/// [`Fsrs::new`] 与设置页的权重显示 / 编辑预填共用这一个入口：`w` 不是 21 项
+/// 时先按 [`migrate_parameters`] 迁移，重学步数取**净化后**的列表长度（非法
+/// 步进整组回退默认，与调度器的夹取区间同源）。界面因此显示的是真正参与
+/// 调度的值，而不是存档里未迁移的原始值。
+pub fn effective_w(parameters: &FsrsParameters) -> Vec<f64> {
+    let relearning_steps = sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
+    effective_w_for(parameters, relearning_steps.len())
+}
+
+/// `Fsrs::new` 已经净化过步进，直接复用其长度，避免再分配一份步进列表。
+fn effective_w_for(parameters: &FsrsParameters, num_relearning_steps: usize) -> Vec<f64> {
+    migrate_parameters(
         &parameters.w,
         num_relearning_steps,
         parameters.enable_short_term,
     )
-    .get(index)
-    .copied()
-    .unwrap_or((0.0, f64::INFINITY))
+}
+
+/// 第 `index` 项权重在当前设置下的合法区间。
+///
+/// 供「高级 FSRS」页编辑权重时夹取：重学步数取 [`Fsrs::new`] 的有效值
+/// （空列表 / 非法步进回退默认，按 1 步算），`enable_short_term` 决定
+/// `w[19]` 的下限；参数先按 [`effective_w`] 迁移，因此界面显示的区间与
+/// 调度器实际夹取的结果一致。
+pub fn weight_bounds(parameters: &FsrsParameters, index: usize) -> (f64, f64) {
+    let relearning_steps = sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
+    let num_relearning_steps = relearning_steps.len();
+    let w = effective_w_for(parameters, num_relearning_steps);
+    clamp_ranges(&w, num_relearning_steps, parameters.enable_short_term)
+        .get(index)
+        .copied()
+        .unwrap_or((0.0, f64::INFINITY))
 }
 
 /// FSRS-6 的 21 项默认权重（与上游 `constant.ts` 一致）。
@@ -538,11 +557,7 @@ impl Fsrs {
         let relearning_steps =
             sanitized_steps(&parameters.relearning_steps, &DEFAULT_RELEARNING_STEPS);
         // 长度分流（21 / 19 / 17 / 其它）只在 `migrate_parameters` 里做一次。
-        let w = migrate_parameters(
-            &parameters.w,
-            relearning_steps.len(),
-            parameters.enable_short_term,
-        );
+        let w = effective_w_for(parameters, relearning_steps.len());
         let (decay, factor) = compute_decay_factor(&w);
         // 留存率必须落在 (0, 1)：取 1 时 interval_modifier 恒为 0，所有复习卡
         // 都会被排到次日；最大间隔至少一天，否则卡片当天反复到期。

@@ -4479,12 +4479,13 @@ impl App {
         }
     }
 
-    /// 权重行的当前值（显示与编辑预填共用）。
+    /// 权重行的当前值（显示与编辑预填共用）：调度器实际使用的迁移后权重。
+    ///
+    /// 直接读 `w` 会拿到未迁移的原始值（19 项存档的 `w[20]` 缺失、补 0；
+    /// 17 项存档的 `w[4]` 还是迁移前的 6.4133），与 `Fsrs::new` 实际调度的
+    /// 参数不一致；打开某行直接回车就会把显示值写回存档，悄悄改掉调度。
     pub fn adv_fsrs_weight(&self, index: usize) -> f64 {
-        self.boot
-            .settings
-            .fsrs_parameters
-            .w
+        crate::domain::fsrs::effective_w(&self.boot.settings.fsrs_parameters)
             .get(index)
             .copied()
             .unwrap_or(0.0)
@@ -4509,14 +4510,8 @@ impl App {
             return;
         };
         if self.boot.settings.fsrs_parameters.w.len() != AdvFsrsRow::WEIGHT_COUNT {
-            let migrated = {
-                let parameters = &self.boot.settings.fsrs_parameters;
-                crate::domain::fsrs::migrate_parameters(
-                    &parameters.w,
-                    parameters.relearning_steps.len().max(1),
-                    parameters.enable_short_term,
-                )
-            };
+            // 与显示 / 调度同一个迁移入口，改一项时其余项保留生效值。
+            let migrated = crate::domain::fsrs::effective_w(&self.boot.settings.fsrs_parameters);
             self.boot.settings.fsrs_parameters.w = migrated;
         }
         let bounds = crate::domain::fsrs::weight_bounds(&self.boot.settings.fsrs_parameters, index);

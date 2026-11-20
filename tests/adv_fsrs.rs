@@ -16,7 +16,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use typewords_tui::app::{self, Action, Screen};
 use typewords_tui::domain::constants::SETTING_VERSION;
-use typewords_tui::domain::fsrs::{Fsrs, default_w};
+use typewords_tui::domain::fsrs::{Fsrs, default_w, migrate_parameters};
 use typewords_tui::domain::types::{
     CARD_STATE_LEARNING, CARD_STATE_REVIEW, FsrsParameters, RATING_GOOD, SettingState,
 };
@@ -664,6 +664,124 @@ fn weight_precision_survives_a_round_trip_through_the_edit_box() {
         (store_settings(&fixture).fsrs_parameters.w[0] - 0.123456).abs() < 1e-12,
         "保存的应是输入框里那 6 位小数"
     );
+}
+
+/// 非 21 项权重的显示 / 预填必须是调度器迁移后的生效值。
+///
+/// `Fsrs::new` 会先按 `migrate_parameters` 迁移再调度；设置页此前读原始 `w`：
+/// 19 项存档的 `w[20]` 显示 0（落在它自己显示的 0.1 ~ 0.8 之外），17 项存档的
+/// `w[4]` 显示迁移前的 6.4133，而调度用的是 8.0801。打开这些行直接回车就会
+/// 把显示值写回存档，等于悄悄改掉调度参数。
+#[test]
+fn migrated_weights_display_the_effective_values() {
+    // 19 项：迁移后补 w[19] = 0、w[20] = 0.5。
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": default_w()[..19].to_vec() }
+    }));
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.w.len(),
+        19,
+        "前置：存档里是 19 项权重"
+    );
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[20]");
+    let rows = render_rows(&app, WIDE);
+    let row = rows
+        .iter()
+        .find(|line| line.contains("w[20]"))
+        .expect("高级 FSRS 页应有 w[20] 行");
+    assert!(
+        row.contains("0.5"),
+        "19 项存档的 w[20] 应显示迁移后的 0.5：{row:?}"
+    );
+    assert!(
+        row.contains("0.1 ~ 0.8"),
+        "显示值应落在同一行给出的合法区间内：{row:?}"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("0.5"),
+        "编辑预填也应是迁移后的生效值"
+    );
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "保存后应落盘迁移后的 21 项");
+    assert!(
+        (saved[20] - 0.5).abs() < 1e-12,
+        "打开 w[20] 直接回车不应改掉迁移值，实际 {}",
+        saved[20]
+    );
+
+    // 17 项：w[4] 从 6.4133 迁移成 8.0801，w[5] 同时按 FSRS-5 公式变换。
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": default_w()[..17].to_vec() }
+    }));
+    assert_eq!(
+        app.boot.settings.fsrs_parameters.w.len(),
+        17,
+        "前置：存档里是 17 项权重"
+    );
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[4]");
+    let rows = render_rows(&app, WIDE);
+    let row = rows
+        .iter()
+        .find(|line| line.contains("w[4]"))
+        .expect("高级 FSRS 页应有 w[4] 行");
+    assert!(
+        row.contains("8.0801"),
+        "17 项存档的 w[4] 应显示迁移后的 8.0801：{row:?}"
+    );
+    assert!(
+        row.contains("1 ~ 10"),
+        "显示值应落在同一行给出的合法区间内：{row:?}"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("8.0801"),
+        "编辑预填也应是迁移后的生效值"
+    );
+    press(&mut app, KeyCode::Enter);
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "保存后应落盘迁移后的 21 项");
+    assert!(
+        (saved[4] - 8.0801).abs() < 1e-9,
+        "打开 w[4] 直接回车不应改掉迁移值，实际 {}",
+        saved[4]
+    );
+}
+
+/// 改一个权重会把非 21 项存档迁移成 21 项，其余权重保持调度器用的迁移值。
+#[test]
+fn editing_one_weight_keeps_the_other_migrated_weights() {
+    let raw = default_w()[..17].to_vec();
+    let (fixture, mut app) = test_app_with_settings(serde_json::json!({
+        "fsrsParameters": { "w": raw }
+    }));
+    open_adv_fsrs(&mut app);
+
+    goto_row(&mut app, "w[0]");
+    press(&mut app, KeyCode::Enter);
+    clear_edit(&mut app);
+    type_str(&mut app, "0.3");
+    press(&mut app, KeyCode::Enter);
+
+    let saved = store_settings(&fixture).fsrs_parameters.w;
+    assert_eq!(saved.len(), 21, "改一项后应落盘迁移后的 21 项");
+    assert!((saved[0] - 0.3).abs() < 1e-12, "w[0] 应是刚输入的值");
+    let expected = migrate_parameters(&raw, 1, true);
+    for index in 1..21 {
+        assert!(
+            (saved[index] - expected[index]).abs() < 1e-12,
+            "w[{index}] 应保持迁移值 {}，实际 {}",
+            expected[index],
+            saved[index]
+        );
+    }
 }
 
 /// 手改出非法步进：启动时整组回退默认步进，并用 Toast 点名是哪个串。
