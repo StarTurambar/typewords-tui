@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-21
+
+加固「数据不会被静默毁掉」的一版：修掉几类会让存档被误判损坏、被降级覆盖或干脆丢掉的缺陷——瞬时 IO 读错误不再当成存档损坏（读不出来的存档进入只读，不隔离、不写回默认值），BOM 容忍补齐到主题文件与文章资源，同一秒的两次隔离不再互相覆盖，`tw export-web` 在存档损坏时也能导出备份，`tw import-web` 不再把更高版本的本地存档降级覆盖。FSRS 侧手改极端参数不再让结算崩溃，权重与学习步进的解析 / 迁移与上游 ts-fsrs 5.4.1 对齐，界面显示与调度实际使用的始终是同一个生效值。存档格式不变（`dict.json` v4、`setting.json` v23、`practice-word.json` v2、`practice-article.json` v1），与 0.4.0 互通。
+
 ### 移除
 
 - **移除死代码 `FsrsParameters::effective_w` 与 `rng::pick_index`**：两者全仓无调用者与测试引用。前者把权重转成 `f32`（静默降精度），一旦被将来误用就会引入与 f64 调度器不一致的第二套权重口径——调度与高级 FSRS 页用的始终是 `fsrs::effective_w` 的 f64 版本；后者是无人使用的随机下标工具。删除不改变任何行为。
@@ -214,7 +218,8 @@
 - **断点续练**：练习游标写入 `practice-word.json`，重启后恢复到同一词、同一阶段。
 - **命令行**：`tw doctor` / `tw task` / `tw import-dict`，以及 `--assets` / `--home` / `--dict` / `--mode` / `--theme` / `--seed` / `--reset-practice`。
 
-[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.1...v0.3.2
