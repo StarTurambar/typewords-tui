@@ -195,6 +195,9 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     let readonly_dict = matches!(dict_loaded.status, LoadStatus::VersionTooNew { .. });
     let readonly_settings = matches!(setting_loaded.status, LoadStatus::VersionTooNew { .. });
     let themes = ThemeRegistry::load(&paths.themes_dir());
+    // 词库目录项因 url / language 不是单段路径被跳过：领域层只返回 warnings，
+    // 展示交给这里（启动 Toast + 日志）与 `tw doctor` / `tw task` 的输出。
+    notices.extend(catalog.warnings().iter().cloned());
     notices.extend(themes.warnings().iter().cloned());
 
     logging::info(format!(

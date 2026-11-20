@@ -163,6 +163,11 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
                 .unwrap_or_else(|| "<缺失>".to_string())
         )?;
     }
+    // 被跳过的目录项不会出现在上面的列表里：不打印的话，用户只会看到「词库少了
+    // 一本」，而不知道是自己手改的目录项不合格。
+    for warning in catalog.warnings() {
+        writeln!(out, "  ! {warning}")?;
+    }
 
     let store = crate::store::FileStore::new(&paths.home)?;
     writeln!(out, "\n存档：")?;

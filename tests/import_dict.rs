@@ -326,3 +326,86 @@ fn export_dict_explains_a_missing_current_dictionary() {
     assert!(message.contains("还没有当前学习词库"), "{message}");
     assert!(message.contains("DICT_ID"), "{message}");
 }
+/// 目录项的 `url` / `language` 是 `<home>/list/word.json` 里原样读取的字符串，
+/// 直接 `join` 进 `<home>/dicts/<language>/word/<url>`：手写 `../..` 能让词条的
+/// 读写逃出数据目录。装载时跳过这类条目并告警，正常条目与内置词库不受影响。
+#[test]
+fn catalog_skips_entries_whose_path_escapes_the_data_directory() {
+    let fixture = common::Fixture::new();
+    fs::create_dir_all(fixture.home().join("list")).unwrap();
+    let entries = serde_json::json!([
+        {
+            "id": "good", "enName": "good", "name": "正常词库",
+            "url": "good.json", "length": 1, "language": "en", "type": "word"
+        },
+        {
+            "id": "escape", "enName": "escape", "name": "逃逸词库",
+            "url": "../../escape.json", "length": 1, "language": "en", "type": "word"
+        },
+        {
+            "id": "badlang", "enName": "badlang", "name": "坏语言",
+            "url": "badlang.json", "length": 1, "language": "..", "type": "word"
+        }
+    ]);
+    fs::write(
+        fixture.home().join("list").join("word.json"),
+        serde_json::to_string(&entries).unwrap(),
+    )
+    .unwrap();
+    let words = vec![Word::new("alpha")];
+    fs::create_dir_all(fixture.home().join("dicts").join("en").join("word"))
+        .expect("建用户词条目录");
+    fs::write(
+        fixture
+            .home()
+            .join("dicts")
+            .join("en")
+            .join("word")
+            .join("good.json"),
+        serde_json::to_string(&words).unwrap(),
+    )
+    .unwrap();
+
+    let catalog = Catalog::load(&fixture.paths()).expect("装载应成功");
+    assert!(catalog.find("good").is_some(), "正常目录项应保留");
+    assert!(catalog.find("toy").is_some(), "内置词库不受影响");
+    assert!(
+        catalog.find("escape").is_none(),
+        "url 逃出数据目录的条目应被跳过"
+    );
+    assert!(
+        catalog.find("badlang").is_none(),
+        "language 不是单段的条目应被跳过"
+    );
+    let warnings = catalog.warnings();
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("escape") && warning.contains("../../escape.json")),
+        "告警要点名被跳过的条目与坏 url: {warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("badlang") && warning.contains("language")),
+        "告警要说清是 language 不合格: {warnings:?}"
+    );
+    assert_eq!(warnings.len(), 2, "只对被跳过的项告警: {warnings:?}");
+
+    // 剩下的每个条目都只能落在数据目录 / 资源目录之内。
+    for resource in catalog.resources() {
+        let write_path = catalog.dict_write_file(resource);
+        assert!(
+            write_path.starts_with(fixture.home()),
+            "词条写入路径逃出了数据目录: {}",
+            write_path.display()
+        );
+        if let Some(read_path) = catalog.dict_file(resource) {
+            assert!(
+                read_path.starts_with(fixture.home()) || read_path.starts_with(fixture.assets()),
+                "词条读取路径逃出了数据目录: {}",
+                read_path.display()
+            );
+        }
+    }
+}

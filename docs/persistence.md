@@ -264,9 +264,9 @@
 | `id` | 词库身份，字符串或数字，读取时归一化成字符串；空 id 的项被跳过 |
 | `enName` | 上游路由名，可作 `--dict` 取值；也接受 `en_name` 别名 |
 | `name` / `description` | 展示名与简介 |
-| `url` | 词条文件名，拼成 `dicts/<language>/word/<url>` |
+| `url` | 词条文件名，拼成 `dicts/<language>/word/<url>`；必须是单段文件名（不含路径分隔符、不是 `.` / `..`、不带盘符），不合格的目录项装载时被跳过并告警 |
 | `length` | 登记（名义）词数；词表加载后以实际词条数为准（`Dict::effective_length`） |
-| `category` / `tags` / `language` / `translateLanguage` | 展示与语言元数据；`language` 为空按 `en` |
+| `category` / `tags` / `language` / `translateLanguage` | 展示与语言元数据；`language` 为空按 `en`，非空时同样必须是单段目录名（不合格的目录项被跳过并告警） |
 | `type` | 只处理 `"word"` 或缺省项，其它类型被过滤 |
 | `custom` | 用户自建 / 导入标记（从 `extra` 读取，`DictResource::is_custom`） |
 | `version` / `cover` / 其它 | 不参与 TUI 逻辑，未知字段忽略 |
@@ -282,6 +282,7 @@
 ### 8.3 目录合并与文件优先级
 
 - `Catalog::load` 按 `[assets, home]` 读两个 `list/word.json`：先内置后用户，**同一个 `id` 的用户项替换内置项**（位置保留在首次出现处）；合并后为空报 `词库目录为空`，用户目录解析失败报 `解析词库目录失败: <path>`。
+- 装载时校验每个目录项的 `url` 与 `language` 是否是**单段路径组件**（`src/domain/catalog.rs` 的 `is_single_path_segment`）：这两个字段是目录文件里原样读取的字符串，手写 `../../x.json`、`/etc/x.json` 或 `language = ".."` 会让词条的读写逃出 `<home>/dicts`。不合格的项被跳过（不进 `resources`，因此也不会被 `--dict` / 词库页 / `tw doctor` 看到），原因进 `Catalog::warnings`：启动时是 Warning Toast 与运行日志，`tw doctor` 与 `tw task` 输出里以 `!` / `提示:` 行打印。内置目录与用户目录走同一条装载路径，正常条目（单段 `url`、空或单段 `language`）不受影响；合并后为空且存在被跳过的项时，报错文案会点名它们。
 - 词条文件按相对路径先查 `<home>`、再查 `<assets>`：导入一个与内置文件**同名**的词库（如 `CET4_T.json`）会遮蔽内置文件；写入路径（`Catalog::dict_write_file`）永远落在 `<home>`，内置资源一个字节都不改。
 - 界面上的词数一律以词条为准；目录登记的 `length` 只对「词条文件还没读过」的词库生效。词条编辑 / 删除 / 排序后 `App::persist_words` 会调 `Catalog::sync_user_catalog_length` 把用户目录的 `length` 改成真实词条数。
 
