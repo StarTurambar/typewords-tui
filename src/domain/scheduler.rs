@@ -47,6 +47,9 @@ impl Scheduler {
     }
 
     /// 卡片是否在今天到期（按自然日比较，与 Web 一致）。
+    ///
+    /// 全仓只保留这一份实现：任务生成（[`crate::domain::study_task`]）也调用这里，
+    /// 避免到期口径在本地时区午夜边界上分成两份、改一处而不自知。
     pub fn is_due_today(card: &Card, today: NaiveDate) -> bool {
         card.due.with_timezone(&chrono::Local).date_naive() <= today
     }
@@ -84,5 +87,30 @@ mod tests {
         assert_eq!(first.stability, second.stability);
         assert_eq!(first.difficulty, second.difficulty);
         assert_eq!(first.due, second.due);
+    }
+
+    /// 到期口径：按本地自然日比较——今天与更早到期算到期，明天不算。
+    #[test]
+    fn due_today_compares_by_local_calendar_day() {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let today = now.with_timezone(&chrono::Local).date_naive();
+        let card_due = |due: DateTime<Utc>| Card {
+            due,
+            ..Card::default()
+        };
+        assert!(
+            Scheduler::is_due_today(&card_due(now), today),
+            "今天到期的卡片应算到期"
+        );
+        assert!(
+            Scheduler::is_due_today(&card_due(now - chrono::Duration::days(1)), today),
+            "更早到期的卡片应算到期"
+        );
+        assert!(
+            !Scheduler::is_due_today(&card_due(now + chrono::Duration::days(1)), today),
+            "明天到期的卡片不应算到期"
+        );
     }
 }

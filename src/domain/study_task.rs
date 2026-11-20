@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::Local;
 
 use crate::domain::rng::{Rng, shuffle};
+use crate::domain::scheduler::Scheduler;
 use crate::domain::types::{BaseState, Card, SettingState, TaskWords, Word};
 
 #[derive(Clone, Debug, Default)]
@@ -88,10 +89,6 @@ pub fn add_random_review_when_no_due(
     }
 }
 
-fn is_due_today(card: &Card, today: chrono::NaiveDate) -> bool {
-    card.due.with_timezone(&Local).date_naive() <= today
-}
-
 /// 对应 Web 的 getCurrentStudyWord：新词 + 到期复习。
 pub fn get_current_study_word(
     base: &BaseState,
@@ -162,7 +159,7 @@ pub fn get_current_study_word(
             .iter()
             .filter(|(word, card)| {
                 !ignore_set.contains(&word.to_lowercase())
-                    && is_due_today(card, today)
+                    && Scheduler::is_due_today(card, today)
                     && word_map.contains_key(word.as_str())
                     && !new_keys.contains(word.as_str())
             })
