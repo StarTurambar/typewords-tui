@@ -1202,6 +1202,23 @@ mod tests {
         }
     }
 
+    /// 超长数字串累加到非有限数：JS 的 `parseInt` 返回 Infinity 后上游按
+    /// 非法处理，这里同样返回 `None`（不能把 Infinity 当成分钟数）。
+    #[test]
+    fn absurdly_long_step_numbers_are_rejected() {
+        let step = format!("{}d", "9".repeat(400));
+        assert_eq!(step_to_minutes(&step), None);
+        // 这类步进同样触发整组回退：卡片留在学习阶段，不会毕业。
+        let scheduler = Fsrs::new(&FsrsParameters {
+            learning_steps: vec![step],
+            ..FsrsParameters::default()
+        });
+        let now = at("2026-01-01T00:00:00Z");
+        let card = scheduler.next_card(None, RATING_GOOD, now);
+        assert_eq!(card.state, CARD_STATE_LEARNING);
+        assert!(card.scheduled_days < 1.0);
+    }
+
     /// 极端步进串不能把到期时间推到 chrono 的上界之外。
     ///
     /// 步进串可以手改 `setting.json`：`"999999999999999d"` 按上游语义是
