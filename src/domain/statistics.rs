@@ -2,8 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::{Local, NaiveDate, TimeZone};
+use chrono::NaiveDate;
 
+use crate::domain::timer::ms_to_local;
 use crate::domain::types::{BaseState, Dict, PracticeState, Statistics};
 
 /// 某一个自然日的累计数据（跨词典聚合）。
@@ -17,17 +18,16 @@ pub struct DayTotals {
 }
 
 /// 按本地自然日聚合所有词典的 statistics。
+///
+/// 超范围的时间戳（只有手改存档才造得出来）由 [`ms_to_local`] clamp 到安全端点
+/// （约 ±10000 年）后照常归日：既不丢总计，也不会把荒谬值记到今天。
+/// 此前这里「跳过该条」而 [`day_key`]「回退 Local::now()」，同一个坏值在两处
+/// 统计里落到不同的日子。
 pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
     let mut map: BTreeMap<NaiveDate, DayTotals> = BTreeMap::new();
     for dict in &base.word.book_list {
         for item in &dict.statistics {
-            let Some(day) = Local
-                .timestamp_millis_opt(item.start_date)
-                .single()
-                .map(|value| value.date_naive())
-            else {
-                continue;
-            };
+            let day = ms_to_local(item.start_date).date_naive();
             let entry = map.entry(day).or_default();
             entry.spend += item.spend;
             // 跨天会话的每条记录都重复携带整场会话的计数（与 Web 存档一致）。
@@ -51,13 +51,7 @@ pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
 pub fn daily_totals_for_dict(dict: &Dict) -> BTreeMap<NaiveDate, DayTotals> {
     let mut map: BTreeMap<NaiveDate, DayTotals> = BTreeMap::new();
     for item in &dict.statistics {
-        let Some(day) = Local
-            .timestamp_millis_opt(item.start_date)
-            .single()
-            .map(|value| value.date_naive())
-        else {
-            continue;
-        };
+        let day = ms_to_local(item.start_date).date_naive();
         let entry = map.entry(day).or_default();
         entry.spend += item.spend;
         if !matches!(item.session_role.as_deref(), Some("middle") | Some("end")) {
@@ -70,13 +64,9 @@ pub fn daily_totals_for_dict(dict: &Dict) -> BTreeMap<NaiveDate, DayTotals> {
     map
 }
 
+/// 归日键：与 [`daily_totals`] 同一口径（超范围 clamp，不记到今天）。
 fn day_key(ms: i64) -> String {
-    Local
-        .timestamp_millis_opt(ms)
-        .single()
-        .unwrap_or_else(Local::now)
-        .format("%Y-%m-%d")
-        .to_string()
+    ms_to_local(ms).format("%Y-%m-%d").to_string()
 }
 
 /// 把进行中的练习统计落库到 dict.statistics。
@@ -170,7 +160,7 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
 mod tests {
     use super::*;
     use crate::domain::types::Dict;
-    use chrono::TimeZone;
+    use chrono::{Local, TimeZone};
 
     fn local_noon(year: i32, month: u32, day: u32) -> i64 {
         Local
@@ -252,5 +242,52 @@ mod tests {
         let totals = daily_totals(&base);
         assert_eq!(totals.values().map(|day| day.total).sum::<usize>(), 20);
         assert_eq!(totals.values().map(|day| day.new_words).sum::<usize>(), 12);
+    }
+
+    /// 超范围时间戳的归日口径必须与 `day_key` 一致：clamp 到可表示端点后照常归日，
+    /// 既不丢掉总计（旧实现直接跳过这条记录），也不把 9e18 记成「今天」（旧实现
+    /// 在 `day_key` 里回退 `Local::now()`）。
+    #[test]
+    fn out_of_range_timestamps_are_clamped_instead_of_skipped_or_counted_as_today() {
+        let base = base_with(vec![
+            record(i64::MAX, 60_000, Some("single")),
+            record(i64::MIN, 30_000, Some("single")),
+        ]);
+
+        let totals = daily_totals(&base);
+        let today = Local::now().date_naive();
+        assert!(
+            !totals.contains_key(&today),
+            "荒谬时间戳不能记到今天: {totals:?}"
+        );
+        assert_eq!(
+            totals.values().map(|day| day.spend).sum::<i64>(),
+            90_000,
+            "总计不该丢: {totals:?}"
+        );
+        assert_eq!(totals.values().map(|day| day.total).sum::<usize>(), 20);
+        assert_eq!(totals.len(), 2, "两个端点各成一天: {totals:?}");
+    }
+
+    /// 结算落库（`day_key`）与按天聚合（`daily_totals_for_dict`）对同一个荒谬
+    /// 时间戳要落到同一天，不能一个记今天、一个记端点。
+    #[test]
+    fn settling_an_out_of_range_segment_lands_on_the_same_day_as_the_aggregate() {
+        let mut dict = Dict::default();
+        let stat = PracticeState {
+            spend: 60_000,
+            segments: vec![[i64::MAX - 60_000, i64::MAX]],
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut dict, &stat);
+        assert_eq!(dict.statistics.len(), 1, "单日会话只写一条");
+
+        let totals = daily_totals_for_dict(&dict);
+        let today = Local::now().date_naive();
+        assert!(
+            !totals.contains_key(&today),
+            "结算不能把荒谬片段记到今天: {totals:?}"
+        );
+        assert_eq!(totals.values().map(|day| day.spend).sum::<i64>(), 60_000);
     }
 }
