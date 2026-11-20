@@ -8,6 +8,9 @@ pub const GROUP_SIZE: usize = 7;
 /// 内置流程版本（对应 Web 的 CURRENT_FLOW_VERSION）。
 pub const CURRENT_FLOW_VERSION: u32 = 6;
 
+/// 复习比例上限（设置页编辑 / 显示与任务生成共用同一口径）。
+pub const REVIEW_RATIO_MAX: i64 = 10;
+
 /// 内置词典 id（系统虚拟词典）。
 pub const DICT_WORD_COLLECT: &str = "wordCollect";
 pub const DICT_WORD_WRONG: &str = "wordWrong";

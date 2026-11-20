@@ -4,7 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
 
+use crate::domain::constants::REVIEW_RATIO_MAX;
 use crate::domain::rng::{Rng, shuffle};
+use crate::domain::scheduler::Scheduler;
 use crate::domain::types::{BaseState, Card, SettingState, TaskWords, Word};
 
 #[derive(Clone, Debug, Default)]
@@ -23,6 +25,22 @@ pub struct RandomReviewOptions<'a> {
     pub enabled: bool,
 }
 
+/// 复习比例的有效值：界面把 `wordReviewRatio` 夹在 0~10（[`REVIEW_RATIO_MAX`]），
+/// 这里按同一口径兜底手改存档 / 导入网页备份带进来的极端值——`per_day × ratio`
+/// 直接在 i64 里相乘时，`wordReviewRatio = i64::MAX` 会让 release 静默回绕
+/// （任务数量算错）、debug panic。
+///
+/// 设置页的显示与编辑预填也调用这里（`App::setting_number_value`），保证
+/// 「显示的比例」就是任务实际使用的比例。
+pub fn effective_review_ratio(settings: &SettingState) -> i64 {
+    clamp_review_ratio(settings.word_review_ratio)
+}
+
+/// 只拿到裸比例的调用点（`RandomReviewOptions`）复用同一口径。
+fn clamp_review_ratio(ratio: i64) -> i64 {
+    ratio.clamp(0, REVIEW_RATIO_MAX)
+}
+
 /// 无到期复习时，用已学词随机填充复习列表。
 pub fn add_random_review_when_no_due(
     mut task_words: TaskWords,
@@ -38,8 +56,9 @@ pub fn add_random_review_when_no_due(
         };
     }
 
-    let total_need =
-        (options.per_day_study_number as i64 * options.word_review_ratio).max(0) as usize;
+    let total_need = (options.per_day_study_number as i64)
+        .saturating_mul(clamp_review_ratio(options.word_review_ratio))
+        .max(0) as usize;
     if total_need == 0 {
         return StudyTaskResult {
             task_words,
@@ -70,10 +89,6 @@ pub fn add_random_review_when_no_due(
         due_review_count,
         random_review_count,
     }
-}
-
-fn is_due_today(card: &Card, today: chrono::NaiveDate) -> bool {
-    card.due.with_timezone(&Local).date_naive() <= today
 }
 
 /// 对应 Web 的 getCurrentStudyWord：新词 + 到期复习。
@@ -110,7 +125,7 @@ pub fn get_current_study_word(
         .iter()
         .any(|word| !ignore_set.contains(&word.lower()));
     let is_end = !has_learnable_new;
-    let review_ratio = settings.word_review_ratio;
+    let review_ratio = effective_review_ratio(settings);
 
     let mut new_words: Vec<Word> = Vec::new();
     let mut end = start;
@@ -137,7 +152,7 @@ pub fn get_current_study_word(
         } else {
             review_ratio
         };
-        let total_need = (per_day as i64 * ratio).max(0) as usize;
+        let total_need = (per_day as i64).saturating_mul(ratio).max(0) as usize;
         let today = Local::now().date_naive();
         let new_keys: HashSet<&str> = new_words.iter().map(|word| word.word.as_str()).collect();
 
@@ -146,7 +161,7 @@ pub fn get_current_study_word(
             .iter()
             .filter(|(word, card)| {
                 !ignore_set.contains(&word.to_lowercase())
-                    && is_due_today(card, today)
+                    && Scheduler::is_due_today(card, today)
                     && word_map.contains_key(word.as_str())
                     && !new_keys.contains(word.as_str())
             })
@@ -210,7 +225,9 @@ pub fn create_shuffle_task(
         dict.last_learn_index.min(dict.words.len())
     };
     let total = total.unwrap_or_else(|| {
-        (dict.per_day() as i64 * settings.word_review_ratio.max(1)).max(1) as usize
+        (dict.per_day() as i64)
+            .saturating_mul(effective_review_ratio(settings).max(1))
+            .max(1) as usize
     });
     let mut candidates: Vec<Word> = dict.words[..end]
         .iter()
@@ -380,5 +397,112 @@ mod tests {
         let mut rng = seeded(7);
         let task = get_current_study_word(&base, &SettingState::default(), &mut rng);
         assert!(task.new.is_empty(), "学完之后不该再出新词");
+    }
+
+    /// 手改 `wordReviewRatio` 为 `i64::MAX` 时到期复习数量不能溢出：比例按界面
+    /// 口径夹到 10，数量再受词表上限约束（debug 构建下旧代码会在这里 panic）。
+    #[test]
+    fn extreme_review_ratio_does_not_overflow_due_review_count() {
+        let mut base = base_with_words(100, 50, 20);
+        for index in 0..50 {
+            base.fsrs_data.insert(format!("w{index}"), Card::default());
+        }
+        let settings = SettingState {
+            word_review_ratio: i64::MAX,
+            auto_add_random_review_when_no_due: true,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert_eq!(task.new.len(), 20, "新词仍按每日词数取满");
+        assert_eq!(
+            task.review.len(),
+            50,
+            "已学的 50 张到期卡应全部取出（夹取后的名额 200 大于已学词数）"
+        );
+    }
+
+    /// 无到期复习时的随机填充同样按夹取后的比例算：`i64::MAX` 只能拿到
+    /// `per_day × 10` 与已学词数里较小的那个。
+    #[test]
+    fn extreme_review_ratio_does_not_overflow_random_review_fill() {
+        let base = base_with_words(100, 50, 20);
+        let settings = SettingState {
+            word_review_ratio: i64::MAX,
+            auto_add_random_review_when_no_due: true,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let result = create_study_task(&base, &settings, &mut rng);
+        assert_eq!(result.due_review_count, 0, "没有到期卡片时才走随机填充");
+        assert_eq!(
+            result.random_review_count, 50,
+            "已学 50 词，夹取后的 200 个名额只取得到这 50 个"
+        );
+    }
+
+    /// 随机复习模式的数量同样按「每日词数 × 复习比例」取，与到期复习同源。
+    #[test]
+    fn shuffle_task_takes_per_day_times_review_ratio() {
+        let base = base_with_words(100, 50, 20);
+        let settings = SettingState {
+            word_review_ratio: 2,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_shuffle_task(&base, &settings, None, &mut rng);
+        assert_eq!(task.review.len(), 40, "每日 20 词 × 比例 2 应取 40 个");
+    }
+
+    /// 手改 `wordReviewRatio` 为 `i64::MAX` 时随机复习模式不能溢出：比例夹到
+    /// 10 后名额 200 只取得到已学的 50 个（debug 构建下旧代码会在这里 panic）。
+    #[test]
+    fn extreme_review_ratio_does_not_overflow_shuffle_task() {
+        let base = base_with_words(100, 50, 20);
+        let settings = SettingState {
+            word_review_ratio: i64::MAX,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_shuffle_task(&base, &settings, None, &mut rng);
+        assert_eq!(
+            task.review.len(),
+            50,
+            "夹取后的 200 个名额只取得到已学的 50 个"
+        );
+    }
+
+    /// 比例 10 是界面允许的上限：到期复习按 `per_day × 10` 取，不多取。
+    #[test]
+    fn review_ratio_ten_is_the_upper_bound() {
+        let mut base = base_with_words(100, 100, 2);
+        for index in 0..100 {
+            base.fsrs_data.insert(format!("w{index}"), Card::default());
+        }
+        let settings = SettingState {
+            word_review_ratio: 10,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_study_task(&base, &settings, &mut rng).task_words;
+        assert_eq!(
+            task.review.len(),
+            20,
+            "每日 2 词 × 比例 10 应取 20 个到期复习词"
+        );
+    }
+
+    /// 比例 0 仍是「不补随机复习」：夹取不能把 0 变成 1。
+    #[test]
+    fn review_ratio_zero_still_disables_random_fill() {
+        let base = base_with_words(10, 5, 5);
+        let settings = SettingState {
+            word_review_ratio: 0,
+            auto_add_random_review_when_no_due: true,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let result = create_study_task(&base, &settings, &mut rng);
+        assert_eq!(result.random_review_count, 0, "比例 0 不应随机补复习");
     }
 }

@@ -233,6 +233,29 @@ fn daily_words_can_be_set_exactly_in_settings() {
     );
 }
 
+/// 手改 `wordReviewRatio` 超出 0~10 时，设置页显示与编辑预填都用任务实际使用的
+/// 生效值，而不是存档里的原始值。
+#[test]
+fn out_of_range_review_ratio_displays_the_effective_value() {
+    let fixture = common::Fixture::new();
+    let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
+    app.boot.settings.word_review_ratio = 50;
+    assert_eq!(
+        app.setting_number_value(app::EditTarget::Ratio),
+        10,
+        "越界的复习比例应按上限显示，而不是原始值 50"
+    );
+
+    press(&mut app, KeyCode::Char('s'));
+    goto_setting(&mut app, "word_review_ratio");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.edit.as_ref().map(|edit| edit.buffer.as_str()),
+        Some("10"),
+        "编辑预填应与任务实际使用的比例一致"
+    );
+}
+
 /// 主页按「-」应以界面显示的夹取值为基准。
 ///
 /// 词库词数小于原始目标时，用原始字段作基准则 `-` 只是把原始值夹回显示值，
