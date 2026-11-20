@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
 
+use crate::domain::constants::REVIEW_RATIO_MAX;
 use crate::domain::rng::{Rng, shuffle};
 use crate::domain::scheduler::Scheduler;
 use crate::domain::types::{BaseState, Card, SettingState, TaskWords, Word};
@@ -24,13 +25,14 @@ pub struct RandomReviewOptions<'a> {
     pub enabled: bool,
 }
 
-/// 复习比例在界面上的上限（设置页编辑时 `clamp(0, 10)`）。
-const REVIEW_RATIO_MAX: i64 = 10;
-
-/// 复习比例的有效值：界面把 `wordReviewRatio` 夹在 0~10，这里按同一口径兜底
-/// 手改存档 / 导入网页备份带进来的极端值——`per_day × ratio` 直接在 i64 里相乘时，
-/// `wordReviewRatio = i64::MAX` 会让 release 静默回绕（任务数量算错）、debug panic。
-fn effective_review_ratio(settings: &SettingState) -> i64 {
+/// 复习比例的有效值：界面把 `wordReviewRatio` 夹在 0~10（[`REVIEW_RATIO_MAX`]），
+/// 这里按同一口径兜底手改存档 / 导入网页备份带进来的极端值——`per_day × ratio`
+/// 直接在 i64 里相乘时，`wordReviewRatio = i64::MAX` 会让 release 静默回绕
+/// （任务数量算错）、debug panic。
+///
+/// 设置页的显示与编辑预填也调用这里（`App::setting_number_value`），保证
+/// 「显示的比例」就是任务实际使用的比例。
+pub fn effective_review_ratio(settings: &SettingState) -> i64 {
     clamp_review_ratio(settings.word_review_ratio)
 }
 
@@ -413,15 +415,10 @@ mod tests {
         let mut rng = seeded(7);
         let task = create_study_task(&base, &settings, &mut rng).task_words;
         assert_eq!(task.new.len(), 20, "新词仍按每日词数取满");
-        assert!(
-            task.review.len() <= 50,
-            "复习词不能超过已学词数，实际 {} 个",
-            task.review.len()
-        );
-        assert!(
-            task.review.len() <= 20 * 10,
-            "复习词不能超过每日词数 × 界面比例上限，实际 {} 个",
-            task.review.len()
+        assert_eq!(
+            task.review.len(),
+            50,
+            "已学的 50 张到期卡应全部取出（夹取后的名额 200 大于已学词数）"
         );
     }
 
@@ -441,6 +438,37 @@ mod tests {
         assert_eq!(
             result.random_review_count, 50,
             "已学 50 词，夹取后的 200 个名额只取得到这 50 个"
+        );
+    }
+
+    /// 随机复习模式的数量同样按「每日词数 × 复习比例」取，与到期复习同源。
+    #[test]
+    fn shuffle_task_takes_per_day_times_review_ratio() {
+        let base = base_with_words(100, 50, 20);
+        let settings = SettingState {
+            word_review_ratio: 2,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_shuffle_task(&base, &settings, None, &mut rng);
+        assert_eq!(task.review.len(), 40, "每日 20 词 × 比例 2 应取 40 个");
+    }
+
+    /// 手改 `wordReviewRatio` 为 `i64::MAX` 时随机复习模式不能溢出：比例夹到
+    /// 10 后名额 200 只取得到已学的 50 个（debug 构建下旧代码会在这里 panic）。
+    #[test]
+    fn extreme_review_ratio_does_not_overflow_shuffle_task() {
+        let base = base_with_words(100, 50, 20);
+        let settings = SettingState {
+            word_review_ratio: i64::MAX,
+            ..SettingState::default()
+        };
+        let mut rng = seeded(7);
+        let task = create_shuffle_task(&base, &settings, None, &mut rng);
+        assert_eq!(
+            task.review.len(),
+            50,
+            "夹取后的 200 个名额只取得到已学的 50 个"
         );
     }
 

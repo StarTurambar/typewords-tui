@@ -14,6 +14,7 @@ use crate::bootstrap::{self, Bootstrapped};
 use crate::cli::{self, Cli};
 use chrono::Datelike;
 
+use crate::domain::constants::REVIEW_RATIO_MAX;
 use crate::domain::flow::PracticeStepTemplateId;
 use crate::domain::flow::get_flow_config;
 use crate::domain::flow::navigator::{Notice, NoticeLevel};
@@ -21,7 +22,7 @@ use crate::domain::rng::{self, Rng, shuffle};
 use crate::domain::session::{PracticeSession, cache_from_compact, cache_to_compact};
 use crate::domain::shortcut::{ShortcutAction, ShortcutMap};
 use crate::domain::statistics::DayTotals;
-use crate::domain::study_task::{create_shuffle_task, create_study_task};
+use crate::domain::study_task::{create_shuffle_task, create_study_task, effective_review_ratio};
 use crate::domain::timer;
 use crate::domain::types::{
     BaseState, Dict, PracticeCacheCompact, PracticeState, SettingState, Statistics, TaskWords,
@@ -4552,7 +4553,10 @@ impl App {
                 .study_dict()
                 .map(|dict| dict.per_day() as i64)
                 .unwrap_or(20),
-            EditTarget::Ratio => settings.word_review_ratio,
+            // 显示**生效值**：手改 `setting.json` 写成 10 以上时，任务按上限
+            // 10 生成；主列表若显示原始值（如 50），就会出现「显示 50、实际
+            // 按 10 复习」的两套口径。编辑预填也走这里，预填的就是生效值。
+            EditTarget::Ratio => effective_review_ratio(&self.boot.settings),
             EditTarget::Repeat => settings.repeat_count,
             EditTarget::RepeatCustom => settings.repeat_custom_count.unwrap_or(1),
             EditTarget::WaitMs => settings.wait_time_for_change_word,
@@ -4586,7 +4590,9 @@ impl App {
             _ => {
                 let settings = &mut self.boot.settings;
                 match target {
-                    EditTarget::Ratio => settings.word_review_ratio = value.clamp(0, 10),
+                    EditTarget::Ratio => {
+                        settings.word_review_ratio = value.clamp(0, REVIEW_RATIO_MAX)
+                    }
                     EditTarget::Repeat => settings.repeat_count = value.clamp(1, 100),
                     EditTarget::RepeatCustom => {
                         settings.repeat_custom_count = Some(value.clamp(1, 100))
