@@ -23,12 +23,3 @@ pub fn shuffle<T>(rng: &mut Rng, items: &mut [T]) {
         items.swap(index, swap_with);
     }
 }
-
-/// 取一个 [0, len) 的下标；len 为 0 时返回 0。
-pub fn pick_index(rng: &mut Rng, len: usize) -> usize {
-    if len == 0 {
-        0
-    } else {
-        rng.random_range(0..len)
-    }
-}

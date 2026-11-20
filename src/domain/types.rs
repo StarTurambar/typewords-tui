@@ -10,8 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::constants::{
-    DEFAULT_FSRS_W, DICT_ARTICLE_COLLECT, DICT_WORD_COLLECT, DICT_WORD_KNOWN, DICT_WORD_WRONG,
-    SIMPLE_WORDS,
+    DICT_ARTICLE_COLLECT, DICT_WORD_COLLECT, DICT_WORD_KNOWN, DICT_WORD_WRONG, SIMPLE_WORDS,
 };
 use crate::domain::flow::PracticeFlowCursor;
 
@@ -478,20 +477,6 @@ pub struct FsrsParameters {
 impl Default for FsrsParameters {
     fn default() -> Self {
         crate::domain::constants::default_fsrs_parameters()
-    }
-}
-
-impl FsrsParameters {
-    /// 有效权重（长度不为 21 时回退到默认权重）。
-    ///
-    /// 参数兜底由 [`crate::domain::fsrs::Fsrs::new`] 统一负责（留存率必须落在
-    /// `(0, 1)`、最大间隔至少一天），这里只保留权重长度的兜底。
-    pub fn effective_w(&self) -> Vec<f32> {
-        if self.w.len() == DEFAULT_FSRS_W.len() && self.w.iter().all(|value| value.is_finite()) {
-            self.w.iter().map(|value| *value as f32).collect()
-        } else {
-            DEFAULT_FSRS_W.iter().map(|value| *value as f32).collect()
-        }
     }
 }
 
