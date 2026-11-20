@@ -928,6 +928,17 @@ impl App {
             boot.settings.theme = theme.to_string();
         }
         let seed = cli.seed.unwrap_or_else(rng::random_seed);
+        // 实际使用的种子必须落日志：帮助页让报障时「附上随机种子」，但没传
+        // --seed 时种子是启动时随机生成的——不记下来，那次洗牌 / 抽题顺序就
+        // 永远无法复现，这条建议也就无法执行。
+        logging::info(format!(
+            "随机种子: {seed}（{}；复现请加 --seed {seed}）",
+            if cli.seed.is_some() {
+                "来自 --seed"
+            } else {
+                "本次随机生成"
+            }
+        ));
         let store = boot.store.clone();
         let notices = std::mem::take(&mut boot.notices);
         let now = timer::now_ms();

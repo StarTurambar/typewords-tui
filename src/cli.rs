@@ -237,6 +237,18 @@ pub fn task_preview_to(out: &mut impl Write, paths: &Paths, cli: &Cli) -> Result
     for word in result.task_words.review.iter().take(5) {
         writeln!(out, "  review: {}  {}", word.word, word.trans_joined())?;
     }
+    // 预览是确定性的，真实练习默认随机：两者的抽取顺序可以不同。不说清楚，
+    // 用户会以为「预览和实际练的不是同一批词」是 bug。
+    match cli.seed {
+        Some(seed) => writeln!(
+            out,
+            "预览使用随机种子 {seed}（--seed 指定；真实练习用同一个值才能复现）"
+        )?,
+        None => writeln!(
+            out,
+            "预览使用固定随机种子 {PREVIEW_SEED}（真实练习默认随机；可用 --seed N 固定）"
+        )?,
+    }
     Ok(())
 }
 

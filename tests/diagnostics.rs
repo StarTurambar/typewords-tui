@@ -155,3 +155,53 @@ fn doctor_reports_the_log_directory() {
         "doctor 应打印日志目录: {text}"
     );
 }
+/// 实际使用的随机种子必须进日志：帮助页让报障时「附上随机种子」，但没传
+/// `--seed` 时种子是启动时随机生成的——不记下来，那次洗牌 / 抽题顺序就永远
+/// 无法复现，这条建议也就无法执行。
+#[test]
+fn app_bootstrap_logs_the_random_seed_it_actually_used() {
+    let _guard = serial();
+    let fixture = common::Fixture::new();
+    let log_file = typewords_tui::logging::init(
+        &fixture.home(),
+        typewords_tui::logging::Options {
+            file: None,
+            level: Level::Info,
+            disabled: false,
+        },
+    )
+    .expect("临时数据目录应能写日志");
+    let mut cli = fixture.cli();
+    // 缺省随机：正是需要落日志的场景（固定种子的运行看参数就够了）。
+    cli.seed = None;
+    let app = typewords_tui::app::build_for_test(fixture.paths(), cli).expect("启动应成功");
+
+    let text = fs::read_to_string(&log_file).expect("应能读取日志");
+    assert!(text.contains(&format!("随机种子: {}", app.seed)), "{text}");
+    assert!(
+        text.contains(&format!("--seed {}", app.seed)),
+        "日志要给出可直接复制的参数: {text}"
+    );
+}
+
+/// 传了 `--seed` 时记同一个值，并标明来源（省得用户以为这是随机得到的）。
+#[test]
+fn app_bootstrap_logs_an_explicit_seed_as_such() {
+    let _guard = serial();
+    let fixture = common::Fixture::new();
+    let log_file = typewords_tui::logging::init(
+        &fixture.home(),
+        typewords_tui::logging::Options {
+            file: None,
+            level: Level::Info,
+            disabled: false,
+        },
+    )
+    .expect("临时数据目录应能写日志");
+    let mut cli = fixture.cli();
+    cli.seed = Some(1234);
+    typewords_tui::app::build_for_test(fixture.paths(), cli).expect("启动应成功");
+
+    let text = fs::read_to_string(&log_file).expect("应能读取日志");
+    assert!(text.contains("随机种子: 1234（来自 --seed"), "{text}");
+}

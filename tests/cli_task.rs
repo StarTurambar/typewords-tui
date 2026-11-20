@@ -6,10 +6,14 @@ use std::fs;
 
 use typewords_tui::{bootstrap, cli};
 
-fn preview(fixture: &common::Fixture) -> String {
+fn preview_with(fixture: &common::Fixture, cli: &typewords_tui::cli::Cli) -> String {
     let mut out: Vec<u8> = Vec::new();
-    cli::task_preview_to(&mut out, &fixture.paths(), &fixture.cli()).expect("预览应成功");
+    cli::task_preview_to(&mut out, &fixture.paths(), cli).expect("预览应成功");
     String::from_utf8(out).unwrap()
+}
+
+fn preview(fixture: &common::Fixture) -> String {
+    preview_with(fixture, &fixture.cli())
 }
 
 /// 把当前学习词典的进度推到词表之外（等价于「词表被外部改短」）。
@@ -79,4 +83,36 @@ fn task_preview_prints_bootstrap_notices() {
 
     assert!(text.contains("提示:"), "装载告警应打印出来: {text}");
     assert!(text.contains("broken.json"), "告警要点名具体文件: {text}");
+}
+/// 预览是确定性的（缺省固定 42），真实练习缺省随机：两者的抽取顺序可以不同。
+/// 输出必须说清用的是哪个种子，否则「预览和实际练的不是同一批词」看着像 bug。
+#[test]
+fn task_preview_states_the_fixed_preview_seed() {
+    let fixture = common::Fixture::new();
+    let mut cli = fixture.cli();
+    cli.seed = None;
+
+    let text = preview_with(&fixture, &cli);
+
+    assert!(text.contains("预览使用固定随机种子 42"), "{text}");
+    assert!(
+        text.contains("可用 --seed N 固定"),
+        "要告诉用户怎么改成固定种子: {text}"
+    );
+}
+
+/// 传了 --seed 时按参数走，并提示实际种子。
+#[test]
+fn task_preview_uses_and_reports_an_explicit_seed() {
+    let fixture = common::Fixture::new();
+    let mut cli = fixture.cli();
+    cli.seed = Some(7);
+
+    let text = preview_with(&fixture, &cli);
+
+    assert!(text.contains("预览使用随机种子 7"), "{text}");
+    assert!(
+        !text.contains("预览使用固定随机种子"),
+        "指定了种子就不该再说「固定 42」: {text}"
+    );
 }
