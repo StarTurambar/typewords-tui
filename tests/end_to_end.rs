@@ -107,7 +107,7 @@ fn complete_full_session_and_settle() {
 /// `request_retention`、`maximum_interval` 与 `learning_steps` 都能绕过界面直接
 /// 改（也可以经 `tw import-web` 导入）；极端值原样参与调度会让
 /// `now + Duration::days/minutes(_)` 越过 chrono 的 `TimeDelta` 上界，结算在
-/// 写盘前 panic，当轮统计、错词与 FSRS 评级全丢（`reviews/panic-audit.md` 问题 1）。
+/// 写盘前 panic，当轮统计、错词与 FSRS 评级全丢（v0.4.0 审查发现的 P0：极端手改 FSRS 参数）。
 #[test]
 fn extreme_fsrs_parameters_do_not_break_settlement() {
     let fixture = common::Fixture::new();

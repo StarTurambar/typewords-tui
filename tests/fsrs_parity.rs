@@ -157,7 +157,7 @@ fn fsrs_matches_upstream_golden_sample() {
 /// 上游 ts-fsrs 两条路径都不会崩：留存率 / 间隔在 `Math.min/max` 里被夹住，
 /// 步进用 `parseInt` 加 `Date` 毫秒加法，溢出只会得到无效日期。
 ///
-/// 与 `reviews/panic-audit.md` 问题 1 同源。
+/// 与 v0.4.0 审查发现的 P0（极端手改 FSRS 参数使结算 panic）同源。
 #[test]
 fn extreme_fsrs_parameters_do_not_panic_at_settle() {
     let now = parse_time("2026-01-05T00:00:00.000Z");
