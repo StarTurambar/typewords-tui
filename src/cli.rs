@@ -13,13 +13,6 @@ use crate::domain::study_task::create_study_task;
 use crate::domain::types::{Dict, Word, WordPracticeMode};
 use crate::paths::Paths;
 
-/// `tw task` 缺省使用的随机种子。
-///
-/// 预览刻意是确定性的：同一天、同一份存档预览两次给出同一份任务列表，便于
-/// 对照「真实练习为什么和预览不一样」。真实练习缺省用随机种子，两者的差别
-/// 会在预览输出里说明（见 [`task_preview_to`]）。
-const PREVIEW_SEED: u64 = 42;
-
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "tw",
@@ -163,11 +156,6 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
                 .unwrap_or_else(|| "<缺失>".to_string())
         )?;
     }
-    // 被跳过的目录项不会出现在上面的列表里：不打印的话，用户只会看到「词库少了
-    // 一本」，而不知道是自己手改的目录项不合格。
-    for warning in catalog.warnings() {
-        writeln!(out, "  ! {warning}")?;
-    }
 
     let store = crate::store::FileStore::new(&paths.home)?;
     writeln!(out, "\n存档：")?;
@@ -191,63 +179,29 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
 }
 
 pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    task_preview_to(&mut out, paths, cli)
-}
-
-/// [`task_preview`] 的实现。
-///
-/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
-/// 与 [`doctor_to`] 同一个理由。
-///
-/// 预览不是只读操作：装载路径与 TUI 启动完全相同，会按词表实际词数校正学习
-/// 进度，并在断点缓存失效时删掉 `practice-word.json`。这类副作用与装载期的
-/// 告警（存档被隔离、FSRS 步进回退、词库目录项被跳过）都必须在输出里说明——
-/// 预览命令悄悄改数据、又把提示吞掉，是排障时最难发现的组合。
-pub fn task_preview_to(out: &mut impl Write, paths: &Paths, cli: &Cli) -> Result<()> {
     let mut boot = bootstrap::load(paths, cli.dict.as_deref())?;
     boot.ensure_study_dict()?;
-    let mut rng = rng::seeded(cli.seed.unwrap_or(PREVIEW_SEED));
+    let mut rng = rng::seeded(cli.seed.unwrap_or(42));
     let result = create_study_task(&boot.base, &boot.settings, &mut rng);
 
-    for notice in &boot.notices {
-        writeln!(out, "提示: {notice}")?;
-    }
     let dict = boot
         .study_dict()
         .ok_or_else(|| anyhow!("没有当前学习词典"))?;
     let (dict_line, progress_line) = dict_progress_lines(dict);
-    writeln!(out, "{dict_line}")?;
-    writeln!(out, "{progress_line}")?;
-    if boot.practice_cache_cleared {
-        writeln!(out, "学习进度已按词表校准，失效的断点缓存已清除")?;
-    }
-    writeln!(
-        out,
+    println!("{dict_line}");
+    println!("{progress_line}");
+    println!(
         "今日任务: 新词 {} / 复习 {}（到期 {}，随机补 {}）",
         result.task_words.new.len(),
         result.task_words.review.len(),
         result.due_review_count,
         result.random_review_count
-    )?;
+    );
     for word in result.task_words.new.iter().take(5) {
-        writeln!(out, "  new: {}  {}", word.word, word.trans_joined())?;
+        println!("  new: {}  {}", word.word, word.trans_joined());
     }
     for word in result.task_words.review.iter().take(5) {
-        writeln!(out, "  review: {}  {}", word.word, word.trans_joined())?;
-    }
-    // 预览是确定性的，真实练习默认随机：两者的抽取顺序可以不同。不说清楚，
-    // 用户会以为「预览和实际练的不是同一批词」是 bug。
-    match cli.seed {
-        Some(seed) => writeln!(
-            out,
-            "预览使用随机种子 {seed}（--seed 指定；真实练习用同一个值才能复现）"
-        )?,
-        None => writeln!(
-            out,
-            "预览使用固定随机种子 {PREVIEW_SEED}（真实练习默认随机；可用 --seed N 固定）"
-        )?,
+        println!("  review: {}  {}", word.word, word.trans_joined());
     }
     Ok(())
 }

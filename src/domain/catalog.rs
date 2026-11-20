@@ -55,31 +55,6 @@ impl DictResource {
         }
     }
 
-    /// 目录项里的 `url` / `language` 不能安全拼进 `<home>/dicts` 时的原因。
-    ///
-    /// 这两个字段是 `<home>/list/word.json` 里原样读取的字符串，用户手工编辑
-    /// 就能写进 `../../x.json`、`/etc/x.json`、`C:\x.json` 之类的东西，而
-    /// [`Catalog::dict_file`] / [`Catalog::dict_write_file`] 直接把它们 `join`
-    /// 到数据目录上——词条的读写会逃出 `<home>/dicts`。`import-dict` 生成的
-    /// url 恒为单段文件名（且导入前已拒绝路径分隔符），所以这条只可能来自
-    /// 手工编辑：装载时跳过并告警，而不是到写盘时才发现路径不对。
-    fn unsafe_path_reason(&self) -> Option<String> {
-        if !is_single_path_segment(&self.url) {
-            return Some(format!(
-                "url「{}」不是单段文件名（不能含路径分隔符，不能是 . 或 ..）",
-                self.url
-            ));
-        }
-        // 空 language 合法：`language_or_default` 会补成 `en`。
-        if !self.language.is_empty() && !is_single_path_segment(&self.language) {
-            return Some(format!(
-                "language「{}」不是单段目录名（不能含路径分隔符，不能是 . 或 ..）",
-                self.language
-            ));
-        }
-        None
-    }
-
     pub fn matches_id(&self, id: &str) -> bool {
         !id.is_empty()
             && (self.id_string() == id || (!self.en_name.is_empty() && self.en_name == id))
@@ -141,16 +116,12 @@ pub struct Catalog {
     assets: PathBuf,
     home: PathBuf,
     resources: Vec<DictResource>,
-    /// 装载时被跳过的目录项（路径不安全）。与 `ThemeRegistry::warnings` 同一个
-    /// 模式：领域层不弹 UI、不写日志，把「哪里被跳过、为什么」交给上层展示。
-    warnings: Vec<String>,
 }
 
 impl Catalog {
     pub fn load(paths: &Paths) -> Result<Self> {
         let mut resources: Vec<DictResource> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
-        let mut warnings: Vec<String> = Vec::new();
 
         for root in [&paths.assets, &paths.home] {
             let file = root.join("list").join("word.json");
@@ -169,12 +140,6 @@ impl Catalog {
                 if key.is_empty() {
                     continue;
                 }
-                // 内置目录与用户目录走同一条装载路径：只跳过真正不安全的项，
-                // 正常条目（url 是单段文件名、language 为空或单段）一律不受影响。
-                if let Some(reason) = resource.unsafe_path_reason() {
-                    warnings.push(format!("词库目录项「{key}」已跳过：{reason}"));
-                    continue;
-                }
                 match index.get(&key) {
                     Some(existing) => resources[*existing] = resource,
                     None => {
@@ -186,37 +151,21 @@ impl Catalog {
         }
 
         if resources.is_empty() {
-            let mut message = format!(
+            return Err(anyhow!(
                 "词库目录为空，请检查 {} 或数据目录下的 list/word.json",
                 paths.assets.join("list").join("word.json").display()
-            );
-            // 全是「被跳过的目录项」时「目录为空」会把人引向错误的方向：
-            // 目录文件明明有内容，是每个条目都不合格。
-            if !warnings.is_empty() {
-                message.push_str(&format!(
-                    "；{} 个目录项因路径不安全被跳过：{}",
-                    warnings.len(),
-                    warnings.join("；")
-                ));
-            }
-            return Err(anyhow!(message));
+            ));
         }
 
         Ok(Self {
             assets: paths.assets.clone(),
             home: paths.home.clone(),
             resources,
-            warnings,
         })
     }
 
     pub fn resources(&self) -> &[DictResource] {
         &self.resources
-    }
-
-    /// 装载时被跳过的目录项说明（目前只有路径不安全这一种）。
-    pub fn warnings(&self) -> &[String] {
-        &self.warnings
     }
 
     pub fn find(&self, id: &str) -> Option<&DictResource> {
@@ -226,10 +175,6 @@ impl Catalog {
     }
 
     /// 词条文件路径：数据目录优先，其次资源目录。
-    ///
-    /// 这里的 `join` 不再做路径校验：`url` / `language` 在 [`Catalog::load`] 里
-    /// 已按单段路径组件筛过（见 `DictResource::unsafe_path_reason`），不安全的
-    /// 目录项根本进不了 `resources`。别处构造 `DictResource` 时同样要过那道筛。
     pub fn dict_file(&self, resource: &DictResource) -> Option<PathBuf> {
         let relative = Path::new("dicts")
             .join(resource.language_or_default())
@@ -275,9 +220,6 @@ impl Catalog {
     /// 内置词库——那些文件随发布包分发，用户改一个词就再也拿不回来，
     /// `tw import-dict` 也只能写数据目录。写入数据目录后，读取会优先命中
     /// 它，天然形成「用户覆盖内置」的语义。
-    ///
-    /// 与 [`Catalog::dict_file`] 一样，路径安全依赖装载时的单段校验：`url` 与
-    /// `language` 都是用户可手改的目录文件字段，不能在这里才补救。
     pub fn dict_write_file(&self, resource: &DictResource) -> PathBuf {
         let relative = Path::new("dicts")
             .join(resource.language_or_default())
@@ -346,19 +288,6 @@ impl Catalog {
         }
         Ok(changed)
     }
-}
-
-/// `value` 是否是「恰好一个普通路径段」：不含路径分隔符、不是 `.` / `..`、
-/// 不带盘符或根前缀。
-///
-/// 用 `Path::components` 而不是手写 `contains(['/', '\\'])`：Windows 上
-/// `C:escape.json`（盘符前缀）与 `\\server\share`（UNC）都不是单段，手写
-/// 分隔符检查会漏掉前者，`join` 之后路径的语义也随之变形。空串没有组件，
-/// 同样判为不合格。
-fn is_single_path_segment(value: &str) -> bool {
-    let mut components = Path::new(value).components();
-    matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none()
 }
 
 /// 在数据目录里新建一本自定义词典，返回登记好的目录项。

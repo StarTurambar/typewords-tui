@@ -209,7 +209,7 @@ const ABOUT: &[HelpEntry] = &[
         "/issues"
     )),
     HelpEntry::Note(
-        "请附上 tw --version 输出、tw doctor 输出、操作系统与终端、复现步骤、是否用了 --home / --assets / --seed，以及出现的 Toast 文案；涉及随机行为时附上日志里记录的「随机种子: <n>」那一行（复现时加 --seed <n>）。",
+        "请附上 tw --version 输出、tw doctor 输出、操作系统与终端、复现步骤、是否用了 --home / --assets / --seed，以及出现的 Toast 文案；随机行为请附 --seed 值。",
     ),
     HelpEntry::Note(
         "崩溃或异常：附 <home>/logs 里最近的 tw-<日期>.log 与 crash-<时间戳>.txt（用过 --log 就附该文件所在目录）。",

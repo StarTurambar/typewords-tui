@@ -40,9 +40,7 @@ pub fn strip_utf8_bom(text: &str) -> &str {
 /// 原子写：先写同目录的临时文件，`fsync` 后 `rename` 覆盖目标。
 ///
 /// 同目录保证 `rename` 在同一文件系统内（跨文件系统的 `rename` 可能失败）；
-/// `fsync` 保证内容真的落盘，断电时不会留下半个文件。Unix 上换名后还会
-/// fsync 父目录（`sync_parent_dir`），把目录项本身也刷下去——否则断电可能
-/// 退化成「完整旧档」，本次保存整个丢掉（不会半截）。Windows 无此语义。
+/// `fsync` 保证内容真的落盘，断电时不会留下半个文件。
 ///
 /// 临时文件名带进程号与进程内单调计数（`.<文件名>.tw-<pid>-<n>.tmp`）并以
 /// `create_new` 独占创建。固定名（曾经是 `.<文件名>.tmp`）在两个进程同时
@@ -163,32 +161,8 @@ fn write_atomic_with(path: &Path, bytes: &[u8], before_rename: impl FnOnce(&Path
         remove_temp(&tmp);
         return Err(err).with_context(|| format!("替换存档失败: {}", path.display()));
     }
-    // 上面 fsync 的是临时文件的内容；`rename` 改的是目录项，目录项本身还没
-    // 落盘。断电时它可能没刷下去：结果是完整的旧档（安全，不会半截），但
-    // 「本次保存」整个丢掉。Unix 上再 fsync 父目录把目录项也刷下去。
-    sync_parent_dir(path);
     Ok(())
 }
-
-/// 尽力 fsync 目标文件所在的目录（Unix）。
-///
-/// 目录 fsync 失败只表示「不保证目录项已落盘」，与临时文件 `sync_all` 的现有
-/// 策略一致：不阻断保存、也不打日志。此刻内容已完整写入并换名成功，报错只会
-/// 让用户以为没保存；`fs` 层也只依赖 `std`（见模块文档），不引入日志模块。
-///
-/// Windows 没有「fsync 目录」的语义（`File::open` 打不开目录句柄），该分支不编译。
-#[cfg(unix)]
-fn sync_parent_dir(path: &Path) {
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    if let Ok(dir) = File::open(parent) {
-        let _ = dir.sync_all();
-    }
-}
-
-#[cfg(not(unix))]
-fn sync_parent_dir(_path: &Path) {}
 
 /// 建一个本次写入独占的临时文件，返回路径与句柄。
 ///

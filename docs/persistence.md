@@ -86,8 +86,6 @@
 
 `src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
 
-`rename` 换的是目录项，临时文件的 fsync 只保证内容落盘：断电时目录项可能还没刷下去，本次保存会整个丢掉。Unix 上因此在换名后再 fsync 一次父目录（`src/fs.rs` 的 `sync_parent_dir`，失败同样不阻断；Windows 没有「fsync 目录」的语义，该分支不编译）。断电语义仍是「完整的旧档或完整的新档」，不会出现半个文件。
-
 `write_atomic_bytes` 是同一路径的字节版本，`copy_atomic` 在它之上做「整份读出 + 原子写入」，供备份与回滚这类「要么完整旧内容、要么原样不动」的场景使用（`std::fs::copy` 会先截断目标，中断就留半截文件）。
 
 因此进程中途被杀不会留下半截 JSON：正式文件要么旧内容、要么新内容。残留的 `.tmp` 不属于任何后续写入，不会被复用或删除，可直接清理；临时名唯一化后，同进程内并发写（存档与词库目录同时落盘）也不会互相截断。原子性只覆盖**单份文件**：`tw doctor` / `tw export-dict` / `tw export-web` 不取锁，读到的每份文件各自完整，但多份文件可能来自不同时刻，需要一致快照就先退出所有实例。
@@ -266,9 +264,9 @@
 | `id` | 词库身份，字符串或数字，读取时归一化成字符串；空 id 的项被跳过 |
 | `enName` | 上游路由名，可作 `--dict` 取值；也接受 `en_name` 别名 |
 | `name` / `description` | 展示名与简介 |
-| `url` | 词条文件名，拼成 `dicts/<language>/word/<url>`；必须是单段文件名（不含路径分隔符、不是 `.` / `..`、不带盘符），不合格的目录项装载时被跳过并告警 |
+| `url` | 词条文件名，拼成 `dicts/<language>/word/<url>` |
 | `length` | 登记（名义）词数；词表加载后以实际词条数为准（`Dict::effective_length`） |
-| `category` / `tags` / `language` / `translateLanguage` | 展示与语言元数据；`language` 为空按 `en`，非空时同样必须是单段目录名（不合格的目录项被跳过并告警） |
+| `category` / `tags` / `language` / `translateLanguage` | 展示与语言元数据；`language` 为空按 `en` |
 | `type` | 只处理 `"word"` 或缺省项，其它类型被过滤 |
 | `custom` | 用户自建 / 导入标记（从 `extra` 读取，`DictResource::is_custom`） |
 | `version` / `cover` / 其它 | 不参与 TUI 逻辑，未知字段忽略 |
@@ -284,7 +282,6 @@
 ### 8.3 目录合并与文件优先级
 
 - `Catalog::load` 按 `[assets, home]` 读两个 `list/word.json`：先内置后用户，**同一个 `id` 的用户项替换内置项**（位置保留在首次出现处）；合并后为空报 `词库目录为空`，用户目录解析失败报 `解析词库目录失败: <path>`。
-- 装载时校验每个目录项的 `url` 与 `language` 是否是**单段路径组件**（`src/domain/catalog.rs` 的 `is_single_path_segment`）：这两个字段是目录文件里原样读取的字符串，手写 `../../x.json`、`/etc/x.json` 或 `language = ".."` 会让词条的读写逃出 `<home>/dicts`。不合格的项被跳过（不进 `resources`，因此也不会被 `--dict` / 词库页 / `tw doctor` 看到），原因进 `Catalog::warnings`：启动时是 Warning Toast 与运行日志，`tw doctor` 与 `tw task` 输出里以 `!` / `提示:` 行打印。内置目录与用户目录走同一条装载路径，正常条目（单段 `url`、空或单段 `language`）不受影响；合并后为空且存在被跳过的项时，报错文案会点名它们。
 - 词条文件按相对路径先查 `<home>`、再查 `<assets>`：导入一个与内置文件**同名**的词库（如 `CET4_T.json`）会遮蔽内置文件；写入路径（`Catalog::dict_write_file`）永远落在 `<home>`，内置资源一个字节都不改。
 - 界面上的词数一律以词条为准；目录登记的 `length` 只对「词条文件还没读过」的词库生效。词条编辑 / 删除 / 排序后 `App::persist_words` 会调 `Catalog::sync_user_catalog_length` 把用户目录的 `length` 改成真实词条数。
 

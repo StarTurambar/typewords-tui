@@ -88,7 +88,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`）；三本内置词典用 `wordCollect` / `wordWrong` / `wordKnown` | 写入当前学习词库（与词库页 `Enter` 同效）；找不到词库时报错退出；`tw export-dict` 缺省也用它 |
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 另接受 `smart` 与中文别名；单词测试与自定义流程只能在界面里用 `m` 选；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
-| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；**实际使用的种子每次启动都会写进运行日志**（`随机种子: <n>（…复现请加 --seed <n>）`），随机行为报障时附上那一行即可，`tw task` 的输出也会打印它用的种子；清空删 `practice-word.json` 与 `practice-article.json`（损坏的直接删、不隔离），不动词典与设置，仅 TUI 生效；读不出来的缓存会保留并提示「未清空」 |
+| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`（损坏的直接删、不隔离），不动词典与设置，仅 TUI 生效；读不出来的缓存会保留并提示「未清空」 |
 | `--log FILE` | 运行日志文件 | 缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
 | `--no-log` | 关闭运行日志 | 崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
 | `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |
@@ -102,7 +102,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | 子命令 | 作用 | 输出要点 |
 | --- | --- | --- |
 | `tw doctor` | 打印解析到的路径与词库 / 存档 / 主题状态，不进入界面、不写存档 | 版本行、数据目录、资源目录、日志目录（`<home>/logs`，`--log` 可指定文件、`--no-log` 关闭）；每本词库的 id / enName / 名称 / 目录登记词数 / 实际可练习词数（空词条不计，与程序真正加载的词数一致）与词条文件路径（缺失显示 `<缺失>`，解析失败显示原因）；5 份存档的字节数或「不存在」；自定义主题数量、主题目录、全部主题 id 与名称、加载告警 |
-| `tw task` | 只预览今日任务，不进入界面 | 当前词库与每日词数、学习进度（`已学 N / M` 与百分比同源，分母是有效词数）、今日任务（新词 / 复习，到期数与随机补足数）与前 5 个新词、复习词；装载期的告警（存档损坏被隔离、FSRS 步进回退、词库目录项被跳过等）以 `提示:` 行打印；**有写副作用**：词表比存档登记的短、`lastLearnIndex` 越界时会按词表校准学习进度并删除失效的 `practice-word.json`，删除后打印「学习进度已按词表校准，失效的断点缓存已清除」；末行打印本次预览使用的随机种子（缺省固定 42，传 `--seed` 则用参数值）；需取数据目录锁 |
+| `tw task` | 只预览今日任务，不进入界面 | 当前词库与每日词数、学习进度（`已学 N / M` 与百分比同源，分母是有效词数）、今日任务（新词 / 复习，到期数与随机补足数）与前 5 个新词、复习词；需取数据目录锁 |
 | `tw import-dict FILE` | 把词条数组 JSON 复制到 `<home>/dicts/en/word/` 并登记到 `<home>/list/word.json` | 打印词库名、词数与 `使用 tw --dict <id> 切换到该词库`；id 取文件名去掉 `.json` |
 | `tw export-dict [DICT_ID] [--out FILE]` | 把词库词条导出成词条数组 JSON（`import-dict` 的逆操作），可直接再导入 | 缺省写到标准输出（只有 JSON，便于重定向）；`--out` 指定文件时打印词库名、词数与路径。`DICT_ID` 取 id 或 enName，缺省用 `--dict`，再缺省用当前学习词库；收藏 / 错词 / 已掌握的词条只在存档里，也能导出；只读，不取锁 |
 | `tw import-web FILE` | 导入网页版导出的备份 JSON（`BackupData` v5） | 逐项打印已导入 / 已跳过 / 已拒绝 / 已丢弃 / 已备份；导入后需重启程序 |
@@ -119,7 +119,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 ```bash
 tw --dict cet4                       # 直接进入 CET-4；内置词典用 wordWrong / wordCollect / wordKnown
 tw doctor --home D:\tmp\twhome       # 全局参数也可放在子命令之后
-tw task --seed 42                    # 预览今日任务，固定随机种子（参数在子命令前后都行；不带 --seed 时预览固定用 42）
+tw task --seed 42                    # 预览今日任务，固定随机种子（参数在子命令前后都行）
 tw import-dict .\my-words.json        # 导入自定义词库，再用 tw --dict my-words 切换
 tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict cet4 导出到标准输出
 ```
@@ -138,7 +138,7 @@ tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict
 | 换位置 / 关闭 | `--log FILE` 指定日志文件（目录不存在会创建），`--no-log` 关闭运行日志，两者互斥 |
 | 保留 | 启动时清理日志所在目录里的过期文件：日志保留 14 天、崩溃报告保留 30 天（按修改时间，只匹配 `tw-*.log` 与 `crash-*.txt`，其它文件不动） |
 
-记录内容：版本头、平台、进程号、命令行、数据目录 / 资源目录 / 日志文件、数据目录锁获取、执行的子命令、存档装载状态与词库 / 主题数量、当前学习词典、实际使用的随机种子（`随机种子: <n>`，复现随机行为时附上它）、界面 Toast 里的错误与警告（成功 / 提示类只有 `debug` 才记）、进入与退出 TUI、进程退出（正常 / 失败）与错误链。日志写失败（例如目录不可写）只在 stderr 打一条警告，程序照常运行；所有入口（包括只读的 `tw doctor` / `tw export-web`）都会追加日志，日志写入不取数据目录锁。
+记录内容：版本头、平台、进程号、命令行、数据目录 / 资源目录 / 日志文件、数据目录锁获取、执行的子命令、存档装载状态与词库 / 主题数量、当前学习词典、界面 Toast 里的错误与警告（成功 / 提示类只有 `debug` 才记）、进入与退出 TUI、进程退出（正常 / 失败）与错误链。日志写失败（例如目录不可写）只在 stderr 打一条警告，程序照常运行；所有入口（包括只读的 `tw doctor` / `tw export-web`）都会追加日志，日志写入不取数据目录锁。
 
 ### 崩溃报告
 
@@ -439,7 +439,7 @@ tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict
 
 ## 反馈与贡献
 
-- **提 issue** 建议附：`tw --version` 输出、`tw doctor` 输出、操作系统与终端（如 Windows Terminal）、复现步骤、是否使用 `--home` / `--assets` / `--seed`，以及相关 Toast 文案；涉及随机行为时附上日志里的「随机种子: <n>」那一行（或复现时加 `--seed <n>`）；程序崩溃或行为异常时附上 `<home>/logs/` 里最近的 `tw-*.log` 与 `crash-*.txt`（用过 `--log` 就附上该文件所在目录）。
+- **提 issue** 建议附：`tw --version` 输出、`tw doctor` 输出、操作系统与终端（如 Windows Terminal）、复现步骤、是否使用 `--home` / `--assets` / `--seed`，以及相关 Toast 文案；涉及随机行为时附上 `--seed` 值；程序崩溃或行为异常时附上 `<home>/logs/` 里最近的 `tw-*.log` 与 `crash-*.txt`（用过 `--log` 就附上该文件所在目录）。
 - **参与开发**：构建、测试、截图与发布流程见 [开发指南](development.md)；分层与模块职责见 [总体架构](architecture.md)；文档约定见 [文档索引](README.md)。许可证为 GPL-3.0，词库数据来自上游 TypeWords 仓库，遵循同一许可证。
 
 ## 相关文档
