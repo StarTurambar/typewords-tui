@@ -111,3 +111,39 @@ fn an_entry_without_language_still_defaults_to_en() {
     );
     assert!(catalog.warnings().is_empty(), "缺 language 不该告警");
 }
+
+/// Windows 保留设备名（`CON` / `NUL` / `COM1` …）与尾随点 / 空格不会越界，
+/// 但 Win32 会把它们解析成设备或静默规范化，写进去只会得到一个孤儿条目。
+#[cfg(windows)]
+#[test]
+fn windows_reserved_device_names_are_skipped_with_a_warning() {
+    let fixture = common::Fixture::new();
+    write_user_catalog(
+        &fixture,
+        serde_json::json!([
+            {
+                "id": "con", "enName": "con", "name": "保留名",
+                "url": "CON", "length": 1, "language": "en", "type": "word"
+            },
+            {
+                "id": "com1", "enName": "com1", "name": "串口",
+                "url": "com1.json", "length": 1, "language": "en", "type": "word"
+            },
+            {
+                "id": "trailing", "enName": "trailing", "name": "尾随点",
+                "url": "a.json.", "length": 1, "language": "en", "type": "word"
+            }
+        ]),
+    );
+
+    let catalog = Catalog::load(&fixture.paths()).expect("目录应能装载");
+    for id in ["con", "com1", "trailing"] {
+        assert!(catalog.find(id).is_none(), "{id} 应被跳过");
+    }
+    assert_eq!(
+        catalog.warnings().len(),
+        3,
+        "三个被跳过的条目各一条告警: {:?}",
+        catalog.warnings()
+    );
+}

@@ -359,7 +359,44 @@ fn dict_relative_path(resource: &DictResource) -> Option<PathBuf> {
 /// 里不会出现，允许它只会给路径解析留一个平台相关的缺口。文章书目的 `url`
 /// 与词库目录项同源（都是手工可编辑的 JSON），共用这一处判定。
 pub(crate) fn is_safe_component(value: &str) -> bool {
-    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\', '\0', ':'])
+    if value.is_empty() || value == "." || value == ".." {
+        return false;
+    }
+    if value.contains(['/', '\\', '\0', ':']) {
+        return false;
+    }
+    #[cfg(windows)]
+    if is_reserved_windows_name(value) {
+        return false;
+    }
+    true
+}
+
+/// Windows 保留设备名与尾随点 / 空格。
+///
+/// `CON` / `NUL` / `COM1` 等即使带扩展名（`CON.json`）也会被 Win32 解析成
+/// 设备；尾随点 / 空格会被静默规范化（`a.json.` → `a.json`），可能指向另一个
+/// 文件。它们都不构成越界，但会让 `import-dict` 写失败或写歪，目录项则变成
+/// 「导入成功却永远看不到」的孤儿条目。
+#[cfg(windows)]
+fn is_reserved_windows_name(value: &str) -> bool {
+    if value.ends_with(' ') || value.ends_with('.') {
+        return true;
+    }
+    let stem = value.split('.').next().unwrap_or(value).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || is_numbered_windows_device(&upper, "COM")
+        || is_numbered_windows_device(&upper, "LPT")
+}
+
+/// `COM1`..`COM9` / `LPT1`..`LPT9`（`COM0` 不是保留名）。
+#[cfg(windows)]
+fn is_numbered_windows_device(upper: &str, prefix: &str) -> bool {
+    upper.len() == prefix.len() + 1
+        && upper.starts_with(prefix)
+        && upper.as_bytes()[prefix.len()].is_ascii_digit()
+        && upper.as_bytes()[prefix.len()] != b'0'
 }
 
 /// 告警文案里的目录项标识：id 缺失时退回 enName / url，不留一个空的「目录项 」。
@@ -494,7 +531,9 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     // 与 `Catalog::load` 的目录项校验同源：`url` 必须是单段安全组件，否则
     // 这里报「已导入」、装载时却把条目整条跳过（与上面空 id 同一类孤儿）。
     if !is_safe_component(&file_name) {
-        return Err(anyhow!("词库文件名不能包含路径分隔符或冒号: {file_name}"));
+        return Err(anyhow!(
+            "词库文件名不是安全的单段文件名（不能含路径分隔符 / 冒号，Windows 上还不能是保留设备名或带尾随点 / 空格）: {file_name}"
+        ));
     }
 
     let target = catalog.user_dict_file(&file_name);
