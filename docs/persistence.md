@@ -84,7 +84,7 @@
 
 ### 2.2 原子写
 
-`src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
+`src/fs.rs` 的 `write_atomic` 是 `domain` 与 `store` 共用的唯一写原语：先确保父目录存在，再在同目录以 `create_new` 建**本次独占**的临时文件 `.<文件名>.tw-<pid>-<n>.tmp`（`<n>` 为进程内单调计数，撞名就换下一个序号、最多 16 次），`write_all` 后 `sync_all`（fsync 失败只表示不保证落盘，不阻断保存），最后 `rename` 覆盖正式文件——同目录保证 rename 在同一文件系统内完成；Unix 上 `rename` 之后还会 `fsync` 父目录（`sync_parent_dir`），让「新名字已经生效」这件事本身也落盘——只同步临时文件时，断电后可能出现「旧文件还在、新文件没了」：内容仍是完整的（不会半截），但本次保存整份丢失。Windows 没有目录 fsync 的语义，这一步按平台编译掉；两次 fsync 失败都只表示「不保证已落盘」，不阻断保存。写入或 rename 失败时删除刚建的临时文件，正式文件保持原内容。
 
 `write_atomic_bytes` 是同一路径的字节版本，`copy_atomic` 在它之上做「整份读出 + 原子写入」，供备份与回滚这类「要么完整旧内容、要么原样不动」的场景使用（`std::fs::copy` 会先截断目标，中断就留半截文件）。
 
@@ -166,6 +166,8 @@
 | `statistics` | 结算记录数组：`startDate`（毫秒）、`spend`（毫秒）、`total`、`new`、`review`、`wrong`，可选 `title`、`segments`（`[起, 止]` 毫秒片段）、`sessionRole` |
 | `custom`/`system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏 `wordCollect`、错词 `wordWrong`、已掌握 `wordKnown` 与文章收藏 `articleCollect` |
 | `sourceId`、`cover` 与其它未知字段 | 资源副本原始 id（默认空串）、可选封面色（不渲染）；未知字段经 `#[serde(flatten)] extra` 原样保留 |
+
+`startDate` 与 `segments` 里的时间戳按本地自然日归并。超范围时间戳（`chrono` 可表示范围约 ±262000 年之外，只可能来自手改存档）在聚合（`daily_totals` / `daily_totals_for_dict`）与写入（`flush_stat_to_store`）两侧**统一跳过**：既不记到「今天」，也不留一条永远显示不出来的记录；跨天片段的 `sessionRole` 仍按实际拆出的自然日给 start / middle / end。
 
 命名规则：结构体默认 `rename_all = "camelCase"`；例外是 `_ignoreWatch`、统计的 `new`（显式 rename）与 `Card`（保持 ts-fsrs 的 snake_case）。**`Word` 没有 `extra` 透传**：资源里的 `inflections`、`e2e`、`examsSrc`、`langType` 等未建模字段读取时被忽略，写回系统词典词条时也不保留。
 

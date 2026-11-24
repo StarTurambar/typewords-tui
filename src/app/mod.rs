@@ -928,6 +928,10 @@ impl App {
             boot.settings.theme = theme.to_string();
         }
         let seed = cli.seed.unwrap_or_else(rng::random_seed);
+        // 随机种子决定洗牌、选择题与随机复习的顺序，而 TUI 缺省随机、不显示
+        // 在界面上：不落日志的话，帮助页「随机行为请附 --seed 值」根本没法
+        // 执行（用户拿不到那个值）。显式 --seed 也照写一行，便于对照。
+        logging::info(format!("随机种子: {seed}（复现时用 --seed {seed}）"));
         let store = boot.store.clone();
         let notices = std::mem::take(&mut boot.notices);
         let now = timer::now_ms();
@@ -1298,7 +1302,7 @@ impl App {
             cleared = false;
         } else {
             match self.store.remove_practice() {
-                Ok(()) => self.saved_practice_resumable = false,
+                Ok(_) => self.saved_practice_resumable = false,
                 // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
                 // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
                 Err(err) => {
@@ -1715,7 +1719,7 @@ impl App {
             self.saved_practice_resumable = false;
         } else {
             match self.store.remove_practice() {
-                Ok(()) => self.saved_practice_resumable = false,
+                Ok(_) => self.saved_practice_resumable = false,
                 // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
                 // 而不是谎称「没有上次任务」。
                 Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),
@@ -3347,7 +3351,12 @@ impl App {
             self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
             return;
         };
-        let path = self.boot.catalog.dict_write_file(&resource);
+        let Some(path) = self.boot.catalog.dict_write_file(&resource) else {
+            // 目录项的 url / language 被手改成了越界路径；`Catalog::load`
+            // 已经丢掉这类条目，这里是「调用方自己构造了资源对象」的兜底。
+            self.toast(NoticeLevel::Warning, "词库目录项的路径不安全，改动没有保存");
+            return;
+        };
         let word_count = dict.words.len();
         let text = match serde_json::to_string_pretty(&dict.words) {
             Ok(text) => text,

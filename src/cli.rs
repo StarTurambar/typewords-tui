@@ -11,6 +11,7 @@ use crate::domain::catalog::{Catalog, DictResource, import_dict as do_import_dic
 use crate::domain::rng;
 use crate::domain::study_task::create_study_task;
 use crate::domain::types::{Dict, Word, WordPracticeMode};
+use crate::logging;
 use crate::paths::Paths;
 
 #[derive(Parser, Debug, Clone)]
@@ -156,6 +157,11 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
                 .unwrap_or_else(|| "<缺失>".to_string())
         )?;
     }
+    // 被跳过的目录项（url / language 越界）同样是排障信息：词库「不见了」
+    // 时，这里要能看出是目录项被拒，而不是文件丢了。
+    for warning in catalog.warnings() {
+        writeln!(out, "  ! {warning}")?;
+    }
 
     let store = crate::store::FileStore::new(&paths.home)?;
     writeln!(out, "\n存档：")?;
@@ -179,29 +185,61 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
 }
 
 pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut sink = stdout.lock();
+    task_preview_to(&mut sink, paths, cli)
+}
+
+/// [`task_preview`] 的实现。
+///
+/// 单独拆出来是为了让测试能断言实际打印的内容（`println!` 在测试进程里抓不到），
+/// 与 [`doctor_to`] 同一个理由。
+///
+/// 预览走的是完整的启动装载，因此也可能产生写副作用：词表比存档进度短时，
+/// `bootstrap::load` 会按校正后的进度丢弃单词断点（`Bootstrapped::practice_discarded`）。
+/// 这条删除必须在输出里披露——用户只是来「看一眼今日任务」，不该悄悄丢掉上次
+/// 练到一半的断点。
+pub fn task_preview_to(sink: &mut impl Write, paths: &Paths, cli: &Cli) -> Result<()> {
     let mut boot = bootstrap::load(paths, cli.dict.as_deref())?;
     boot.ensure_study_dict()?;
-    let mut rng = rng::seeded(cli.seed.unwrap_or(42));
+    // 预览的种子固定 42：不传 --seed 时顺序可复现。真实会话（TUI）缺省随机，
+    // 所以实际用到的种子要进运行日志，排障时才知道两边为什么顺序不同。
+    let seed = cli.seed.unwrap_or(42);
+    logging::info(format!("随机种子: {seed}（tw task 预览，--seed 可覆盖）"));
+    let mut rng = rng::seeded(seed);
     let result = create_study_task(&boot.base, &boot.settings, &mut rng);
 
     let dict = boot
         .study_dict()
         .ok_or_else(|| anyhow!("没有当前学习词典"))?;
     let (dict_line, progress_line) = dict_progress_lines(dict);
-    println!("{dict_line}");
-    println!("{progress_line}");
-    println!(
+    writeln!(sink, "{dict_line}")?;
+    writeln!(sink, "{progress_line}")?;
+    if boot.practice_discarded {
+        writeln!(
+            sink,
+            "提示: 词表比存档进度短，已按校正后的进度丢弃上次的单词断点（{}）；学习进度与统计不受影响。",
+            crate::store::PRACTICE_FILE_NAME
+        )?;
+    }
+    writeln!(
+        sink,
         "今日任务: 新词 {} / 复习 {}（到期 {}，随机补 {}）",
         result.task_words.new.len(),
         result.task_words.review.len(),
         result.due_review_count,
         result.random_review_count
-    );
+    )?;
     for word in result.task_words.new.iter().take(5) {
-        println!("  new: {}  {}", word.word, word.trans_joined());
+        writeln!(sink, "  new: {}  {}", word.word, word.trans_joined())?;
     }
     for word in result.task_words.review.iter().take(5) {
-        println!("  review: {}  {}", word.word, word.trans_joined());
+        writeln!(sink, "  review: {}  {}", word.word, word.trans_joined())?;
+    }
+    // 被跳过的目录项（url / language 越界）在这里也要说一声：当前词典可能
+    // 正是因为被跳过才回退到了别的词库。
+    for warning in boot.catalog.warnings() {
+        writeln!(sink, "! {warning}")?;
     }
     Ok(())
 }

@@ -155,3 +155,57 @@ fn doctor_reports_the_log_directory() {
         "doctor 应打印日志目录: {text}"
     );
 }
+/// `tw task` 的预览顺序固定 42，这个种子也要进日志：否则「预览与会话
+/// 顺序不同」没法从日志里解释，`--seed` 也没有可对照的值。
+#[test]
+fn task_preview_logs_the_fixed_seed() {
+    let _guard = serial();
+    let fixture = common::Fixture::new();
+    let mut cli = fixture.cli();
+    cli.command = Some(Command::Task);
+    cli.seed = None;
+    typewords_tui::run(cli).expect("task 应执行成功");
+
+    let text = only_log_text(&fixture.home());
+    assert!(
+        text.contains("随机种子: 42"),
+        "tw task 不传 --seed 时实际用的是 42，日志里应写出来: {text}"
+    );
+}
+
+/// TUI 缺省随机种子：不落日志的话，帮助页「随机行为请附 --seed 值」
+/// 根本没法执行——用户拿不到那个值。日志里的数字必须就是实际用的种子。
+#[test]
+fn tui_logs_the_random_seed_so_a_run_can_be_replayed() {
+    let _guard = serial();
+    let fixture = common::Fixture::new();
+    let log = fixture.root.path().join("logs").join("seed.log");
+    typewords_tui::logging::init(
+        &fixture.home(),
+        typewords_tui::logging::Options {
+            file: Some(&log),
+            level: Level::Info,
+            disabled: false,
+        },
+    )
+    .expect("日志应能初始化");
+    let mut cli = fixture.cli();
+    cli.seed = None;
+    let app = typewords_tui::app::build_for_test(fixture.paths(), cli).expect("应能创建应用");
+    typewords_tui::logging::disable();
+
+    let text = fs::read_to_string(&log).expect("日志文件应存在");
+    let line = text
+        .lines()
+        .find(|line| line.contains("随机种子: "))
+        .unwrap_or_else(|| panic!("日志里应有随机种子: {text}"));
+    let seed: u64 = line
+        .split("随机种子: ")
+        .nth(1)
+        .and_then(|rest| rest.split('（').next())
+        .expect("种子行应带数值")
+        .trim()
+        .parse()
+        .expect("种子应是数字");
+    assert_eq!(app.seed, seed, "日志里的种子必须就是本次运行实际用的种子");
+}

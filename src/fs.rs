@@ -161,8 +161,37 @@ fn write_atomic_with(path: &Path, bytes: &[u8], before_rename: impl FnOnce(&Path
         remove_temp(&tmp);
         return Err(err).with_context(|| format!("替换存档失败: {}", path.display()));
     }
+    // rename 本身只是目录项的一次改动：不同步父目录时，断电后可能出现
+    // 「旧文件还在、新文件没了」——内容仍是完整的（不会半截），但本次保存
+    // 整份丢失。与上面的文件 fsync 同一口径：失败只说明不保证落盘，不阻断。
+    sync_parent_dir(path);
     Ok(())
 }
+
+/// 在 rename 之后同步父目录，让「新名字已经生效」这件事也落盘。
+///
+/// 只对 Unix 有意义：Windows 没有目录 fsync 的语义（对目录句柄调
+/// FlushFileBuffers 不受支持），对应分支直接编译掉。目录打不开（权限、
+/// 路径已被删）时静默跳过，理由同文件 fsync。
+#[cfg(unix)]
+fn sync_parent_dir(path: &Path) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    // 相对路径的 parent 是空路径，代表当前目录。
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    if let Ok(dir) = File::open(parent) {
+        let _ = dir.sync_all();
+    }
+}
+
+/// Windows 没有目录 fsync 的概念，保持原样。
+#[cfg(not(unix))]
+fn sync_parent_dir(_path: &Path) {}
 
 /// 建一个本次写入独占的临时文件，返回路径与句柄。
 ///
@@ -281,6 +310,17 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().to_string())
             .filter(|name| name.ends_with(".tmp"))
             .collect()
+    }
+
+    /// Unix 分支的编译与边界覆盖：相对文件名的 parent 是空路径，必须按
+    /// 当前目录处理而不是 panic。断电语义无法在测试里模拟，由代码审阅与
+    /// Unix CI 的编译覆盖把关。
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_dir_handles_a_relative_file_name() {
+        sync_parent_dir(Path::new("dict.json"));
+        let dir = tempfile::tempdir().unwrap();
+        sync_parent_dir(&dir.path().join("dict.json"));
     }
 
     #[test]

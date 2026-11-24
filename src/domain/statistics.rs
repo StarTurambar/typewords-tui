@@ -21,11 +21,7 @@ pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
     let mut map: BTreeMap<NaiveDate, DayTotals> = BTreeMap::new();
     for dict in &base.word.book_list {
         for item in &dict.statistics {
-            let Some(day) = Local
-                .timestamp_millis_opt(item.start_date)
-                .single()
-                .map(|value| value.date_naive())
-            else {
+            let Some(day) = local_date(item.start_date) else {
                 continue;
             };
             let entry = map.entry(day).or_default();
@@ -51,11 +47,7 @@ pub fn daily_totals(base: &BaseState) -> BTreeMap<NaiveDate, DayTotals> {
 pub fn daily_totals_for_dict(dict: &Dict) -> BTreeMap<NaiveDate, DayTotals> {
     let mut map: BTreeMap<NaiveDate, DayTotals> = BTreeMap::new();
     for item in &dict.statistics {
-        let Some(day) = Local
-            .timestamp_millis_opt(item.start_date)
-            .single()
-            .map(|value| value.date_naive())
-        else {
+        let Some(day) = local_date(item.start_date) else {
             continue;
         };
         let entry = map.entry(day).or_default();
@@ -70,13 +62,21 @@ pub fn daily_totals_for_dict(dict: &Dict) -> BTreeMap<NaiveDate, DayTotals> {
     map
 }
 
-fn day_key(ms: i64) -> String {
+/// 时间戳 → 本地自然日。
+///
+/// 超范围时间戳（`chrono` 可表示范围约 ±262000 年之外，只可能来自手改存档）
+/// 返回 `None`：聚合与写入都跳过它们，不再一处跳过、一处记到「今天」——
+/// 两处口径不一致时，同一条坏记录会在统计页上凭空出现在当天。
+fn local_date(ms: i64) -> Option<NaiveDate> {
     Local
         .timestamp_millis_opt(ms)
         .single()
-        .unwrap_or_else(Local::now)
-        .format("%Y-%m-%d")
-        .to_string()
+        .map(|value| value.date_naive())
+}
+
+/// 自然日的键（`YYYY-MM-DD`）；超范围时间戳返回 `None`。
+fn day_key(ms: i64) -> Option<String> {
+    local_date(ms).map(|day| day.format("%Y-%m-%d").to_string())
 }
 
 /// 把进行中的练习统计落库到 dict.statistics。
@@ -100,7 +100,18 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
         let mut day_map: HashMap<String, DayGroup> = HashMap::new();
         let mut day_order: Vec<String> = Vec::new();
         for segment in &stat.segments {
-            let key = day_key(segment[0]);
+            let Some(key) = day_key(segment[0]) else {
+                // 超范围时间戳与 `daily_totals` 同一策略：跳过。早期实现里
+                // 这里会回退到「今天」，于是同一条坏记录在聚合时被跳过、在
+                // 写入时却被记到当天，两处口径互相打架。
+                continue;
+            };
+            if local_date(segment[1]).is_none() {
+                // 终点不可表示时整段都无法归日：只查起点的话，`[now, i64::MAX]`
+                // 会通过校验，把 `i64::MAX - now` 记进当天（两个这样的段还会
+                // 让 `total_spend` 溢出）。与 timer 的两端过滤同源。
+                continue;
+            }
             let entry = day_map.entry(key.clone()).or_insert_with(|| {
                 day_order.push(key.clone());
                 DayGroup {
@@ -111,6 +122,12 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
             });
             entry.total_spend += segment[1] - segment[0];
             entry.segments.push(*segment);
+        }
+
+        // 片段全部超范围时没有可写的自然日，直接收手（下面按下标取首尾日，
+        // 空表会算出 `len() - 1` 的下溢）。
+        if day_order.is_empty() {
+            return;
         }
 
         if day_order.len() == 1 {
@@ -152,6 +169,11 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
             }
         }
     } else {
+        // 起点超出可表示范围时整条记录都不写：`daily_totals` 读不到它，写进
+        // 去只会在存档里留一条永远不会显示的记录。
+        if day_key(stat.start_date).is_none() {
+            return;
+        }
         dict.statistics.push(Statistics {
             total: base_total,
             wrong: base_wrong,
@@ -169,7 +191,7 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::Dict;
+    use crate::domain::types::{Dict, PracticeState};
     use chrono::TimeZone;
 
     fn local_noon(year: i32, month: u32, day: u32) -> i64 {
@@ -252,5 +274,99 @@ mod tests {
         let totals = daily_totals(&base);
         assert_eq!(totals.values().map(|day| day.total).sum::<usize>(), 20);
         assert_eq!(totals.values().map(|day| day.new_words).sum::<usize>(), 12);
+    }
+
+    /// 超范围时间戳（手改存档，约 ±262000 年之外）在两处聚合里都跳过，
+    /// 不因为「无法归日」而回退到今天。
+    #[test]
+    fn out_of_range_timestamps_are_skipped_by_both_aggregations() {
+        let day = local_noon(2026, 3, 1);
+        let records = vec![
+            record(i64::MAX, 10_000, Some("single")),
+            record(i64::MIN, 20_000, Some("single")),
+            record(day, 30_000, Some("single")),
+        ];
+
+        let base = base_with(records.clone());
+        let totals = daily_totals(&base);
+        assert_eq!(totals.len(), 1, "超范围时间戳不能凭空造出一天: {totals:?}");
+        let only = totals
+            .values()
+            .next()
+            .copied()
+            .expect("有效记录应聚合出一天");
+        assert_eq!(only.spend, 30_000);
+        assert_eq!(only.total, 10);
+
+        let dict = Dict {
+            statistics: records,
+            ..Dict::default()
+        };
+        let per_dict = daily_totals_for_dict(&dict);
+        assert_eq!(
+            per_dict.len(),
+            1,
+            "单本词典的聚合口径必须一致: {per_dict:?}"
+        );
+        assert_eq!(per_dict.values().next().map(|day| day.spend), Some(30_000));
+    }
+
+    /// 写入侧与聚合侧同一策略：不可表示的起点既不写「今天」，也不留一条
+    /// 永远显示不出来的记录；片段全坏时不能因为空日表而下溢 panic。
+    #[test]
+    fn flushing_skips_out_of_range_timestamps_instead_of_recording_today() {
+        let now = Local::now().timestamp_millis();
+        let mut dict = Dict::default();
+        let stat = PracticeState {
+            start_date: i64::MAX,
+            spend: 1_000,
+            segments: vec![[i64::MIN, i64::MIN + 1_000], [now - 2_000, now]],
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut dict, &stat);
+        assert_eq!(dict.statistics.len(), 1, "只有可表示的那一段被写入");
+        assert_eq!(dict.statistics[0].start_date, now - 2_000);
+        assert_eq!(dict.statistics[0].spend, 2_000);
+
+        let mut all_bad = Dict::default();
+        let stat = PracticeState {
+            spend: 5_000,
+            segments: vec![[i64::MIN, i64::MIN + 5_000]],
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut all_bad, &stat);
+        assert!(all_bad.statistics.is_empty(), "片段全坏时不应写入任何记录");
+
+        let mut no_segments = Dict::default();
+        let stat = PracticeState {
+            start_date: i64::MIN,
+            spend: 1_000,
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut no_segments, &stat);
+        assert!(
+            no_segments.statistics.is_empty(),
+            "起点不可表示的记录写进去也永远不会显示，不该留垃圾"
+        );
+    }
+
+    /// 终点不可表示的片段与起点同样跳过：只查起点时 `[now, i64::MAX]` 会
+    /// 通过校验，把 `i64::MAX - now` 记进当天。
+    #[test]
+    fn flushing_skips_a_segment_whose_end_is_not_representable() {
+        let now = Local::now().timestamp_millis();
+        let mut dict = Dict::default();
+        let stat = PracticeState {
+            start_date: now,
+            spend: 1_000,
+            segments: vec![[now - 1_000, i64::MAX]],
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut dict, &stat);
+        assert!(
+            dict.statistics.is_empty(),
+            "终点不可表示的片段不能写入: {:?}",
+            dict.statistics
+        );
     }
 }

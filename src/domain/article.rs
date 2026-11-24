@@ -672,13 +672,33 @@ pub struct ArticleBook {
 }
 
 /// 文章文件路径（`<assets>/dicts/en/article/<url>`）。
-fn article_file(paths: &Paths, book: &ArticleBook) -> std::path::PathBuf {
-    paths
-        .assets
-        .join("dicts")
-        .join("en")
-        .join("article")
-        .join(&book.url)
+///
+/// `url` 来自手工可编辑的 `<assets>/list/article.json`，与词库目录项同一类
+/// 输入：`../..` 能把读取带出 `<assets>`。越界时返回 `None`，读取方据此
+/// 拒绝，而不是先 join 出一个目录外的路径。
+fn article_file(paths: &Paths, book: &ArticleBook) -> Option<std::path::PathBuf> {
+    if !crate::domain::catalog::is_safe_component(&book.url) {
+        return None;
+    }
+    Some(
+        paths
+            .assets
+            .join("dicts")
+            .join("en")
+            .join("article")
+            .join(&book.url),
+    )
+}
+
+/// 告警 / 报错里的书目标识：名称缺失时退回 enName / url。
+fn book_label(book: &ArticleBook) -> &str {
+    if !book.name.is_empty() {
+        &book.name
+    } else if !book.en_name.is_empty() {
+        &book.en_name
+    } else {
+        &book.url
+    }
 }
 
 /// 数一数文章文件里实际有几篇；文件缺失或解析失败时返回 `None`。
@@ -687,7 +707,7 @@ fn article_file(paths: &Paths, book: &ArticleBook) -> std::path::PathBuf {
 /// `serde_json::Value` 只数顶层数组的元素个数，不构造 `Article`、也不断句——
 /// 代价仅是进文章页时每本书多读一次文件。
 fn count_articles(paths: &Paths, book: &ArticleBook) -> Option<usize> {
-    let file = article_file(paths, book);
+    let file = article_file(paths, book)?;
     let text = std::fs::read_to_string(&file).ok()?;
     // 与存档 / 词库同一口径：读取容忍开头的 UTF-8 BOM（外部编辑常见）。
     let articles: Vec<serde_json::Value> =
@@ -719,7 +739,13 @@ pub fn load_books(paths: &Paths) -> Result<Vec<ArticleBook>> {
 
 /// 读取一本文章书里的所有文章，并生成段落与句子。
 pub fn load_articles(paths: &Paths, book: &ArticleBook) -> Result<Vec<Article>> {
-    let file = article_file(paths, book);
+    let file = article_file(paths, book).ok_or_else(|| {
+        anyhow::anyhow!(
+            "文章目录项 {} 的 url 不是安全的单段路径组件（url={:?}）",
+            book_label(book),
+            book.url
+        )
+    })?;
     let text = std::fs::read_to_string(&file)
         .with_context(|| format!("读取文章失败: {}", file.display()))?;
     let mut articles: Vec<Article> = serde_json::from_str(crate::fs::strip_utf8_bom(&text))
@@ -970,5 +996,30 @@ mod resource_tests {
         let (_root, paths) = assets_with(72, "not json");
         let books = load_books(&paths).expect("书目仍应加载成功");
         assert_eq!(books[0].length, None);
+    }
+
+    /// 书目 `url` 越界时不再能读出 `<assets>` 之外的文件：篇数记为未知，
+    /// 选中这本书时报错指向目录项，而不是 join 出一个目录外的路径。
+    #[test]
+    fn a_book_with_a_traversal_url_is_rejected_instead_of_reading_outside_assets() {
+        let (_root, paths) = assets_with(1, TWO_ARTICLES);
+        fs::write(
+            paths.assets.join("list").join("article.json"),
+            r#"[{"enName": "escape", "name": "越界", "url": "../../secret.json"}]"#,
+        )
+        .unwrap();
+        // 越界目标：若校验缺失，`assets/dicts/en/article/../../secret.json`
+        // 会解析到 assets 之外，把这份文件读成文章。
+        fs::write(paths.assets.join("secret.json"), TWO_ARTICLES).unwrap();
+
+        let books = load_books(&paths).expect("书目仍应加载成功");
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].length, None, "越界 url 不能读出 assets 之外的文件");
+
+        let err = load_articles(&paths, &books[0]).expect_err("读取越界书目应报错");
+        assert!(
+            err.to_string().contains("不是安全的单段路径组件"),
+            "错误应指向目录项: {err}"
+        );
     }
 }
