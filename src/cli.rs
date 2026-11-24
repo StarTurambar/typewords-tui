@@ -11,6 +11,7 @@ use crate::domain::catalog::{Catalog, DictResource, import_dict as do_import_dic
 use crate::domain::rng;
 use crate::domain::study_task::create_study_task;
 use crate::domain::types::{Dict, Word, WordPracticeMode};
+use crate::logging;
 use crate::paths::Paths;
 
 #[derive(Parser, Debug, Clone)]
@@ -201,8 +202,10 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
 pub fn task_preview_to(sink: &mut impl Write, paths: &Paths, cli: &Cli) -> Result<()> {
     let mut boot = bootstrap::load(paths, cli.dict.as_deref())?;
     boot.ensure_study_dict()?;
-    // 预览的种子固定 42：不传 --seed 时顺序可复现。
+    // 预览的种子固定 42：不传 --seed 时顺序可复现。真实会话（TUI）缺省随机，
+    // 所以实际用到的种子要进运行日志，排障时才知道两边为什么顺序不同。
     let seed = cli.seed.unwrap_or(42);
+    logging::info(format!("随机种子: {seed}（tw task 预览，--seed 可覆盖）"));
     let mut rng = rng::seeded(seed);
     let result = create_study_task(&boot.base, &boot.settings, &mut rng);
 

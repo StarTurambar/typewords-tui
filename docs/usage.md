@@ -88,7 +88,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | `--dict ID` | 启动时切到指定词库（id 或 enName，如 `cet4`）；三本内置词典用 `wordCollect` / `wordWrong` / `wordKnown` | 写入当前学习词库（与词库页 `Enter` 同效）；找不到词库时报错退出；`tw export-dict` 缺省也用它 |
 | `--mode MODE` | 覆盖练习模式：`system/free/review/shuffle/identify/dictation/listen` | 另接受 `smart` 与中文别名；单词测试与自定义流程只能在界面里用 `m` 选；退出时随设置保存 |
 | `--theme NAME` | 覆盖主题：`dark` / `light` / `high-contrast` / `midnight` / `paper` / `ikb` / `auto` 或自定义文件名 | 未知名字回退深色并 Toast；退出时随设置保存 |
-| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；清空删 `practice-word.json` 与 `practice-article.json`（损坏的直接删、不隔离），不动词典与设置，仅 TUI 生效；读不出来的缓存会保留并提示「未清空」 |
+| `--seed N` / `--reset-practice` | 固定随机种子 / 启动前清空练习缓存 | 种子影响洗牌、选择题与随机复习（TUI 缺省随机，`tw task` 缺省 42）；**实际用到的种子会写进运行日志**，TUI 的随机种子也能从日志里找回；清空删 `practice-word.json` 与 `practice-article.json`（损坏的直接删、不隔离），不动词典与设置，仅 TUI 生效；读不出来的缓存会保留并提示「未清空」 |
 | `--log FILE` | 运行日志文件 | 缺省 `<home>/logs/tw-<日期>.log`（目录不存在会创建）；与 `--no-log` 冲突；崩溃报告写到该文件所在目录 |
 | `--no-log` | 关闭运行日志 | 崩溃报告仍写入 `<home>/logs/`；与 `--log` 冲突 |
 | `--log-level LEVEL` | 日志级别：`error` / `warn` / `info` / `debug` | 缺省 `info`（`warning` 视同 `warn`，大小写不敏感）；排障时用 `debug` 能看到更多记录 |
@@ -138,7 +138,7 @@ tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict
 | 换位置 / 关闭 | `--log FILE` 指定日志文件（目录不存在会创建），`--no-log` 关闭运行日志，两者互斥 |
 | 保留 | 启动时清理日志所在目录里的过期文件：日志保留 14 天、崩溃报告保留 30 天（按修改时间，只匹配 `tw-*.log` 与 `crash-*.txt`，其它文件不动） |
 
-记录内容：版本头、平台、进程号、命令行、数据目录 / 资源目录 / 日志文件、数据目录锁获取、执行的子命令、存档装载状态与词库 / 主题数量、当前学习词典、界面 Toast 里的错误与警告（成功 / 提示类只有 `debug` 才记）、进入与退出 TUI、进程退出（正常 / 失败）与错误链。日志写失败（例如目录不可写）只在 stderr 打一条警告，程序照常运行；所有入口（包括只读的 `tw doctor` / `tw export-web`）都会追加日志，日志写入不取数据目录锁。
+记录内容：版本头、平台、进程号、命令行、数据目录 / 资源目录 / 日志文件、数据目录锁获取、执行的子命令、**本次实际使用的随机种子**（TUI 缺省随机、`tw task` 固定 42，都能据此复现）、存档装载状态与词库 / 主题数量、当前学习词典、界面 Toast 里的错误与警告（成功 / 提示类只有 `debug` 才记）、进入与退出 TUI、进程退出（正常 / 失败）与错误链。日志写失败（例如目录不可写）只在 stderr 打一条警告，程序照常运行；所有入口（包括只读的 `tw doctor` / `tw export-web`）都会追加日志，日志写入不取数据目录锁。
 
 ### 崩溃报告
 

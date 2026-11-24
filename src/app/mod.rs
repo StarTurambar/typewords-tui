@@ -928,6 +928,10 @@ impl App {
             boot.settings.theme = theme.to_string();
         }
         let seed = cli.seed.unwrap_or_else(rng::random_seed);
+        // 随机种子决定洗牌、选择题与随机复习的顺序，而 TUI 缺省随机、不显示
+        // 在界面上：不落日志的话，帮助页「随机行为请附 --seed 值」根本没法
+        // 执行（用户拿不到那个值）。显式 --seed 也照写一行，便于对照。
+        logging::info(format!("随机种子: {seed}（复现时用 --seed {seed}）"));
         let store = boot.store.clone();
         let notices = std::mem::take(&mut boot.notices);
         let now = timer::now_ms();

@@ -104,7 +104,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
 | `tests/cli_task.rs` | `tw task` 的写副作用披露：词表比存档进度短时装载会丢弃单词断点，输出必须说明；进度正常时不提「丢弃」 |
 | `tests/catalog_safety.rs` | 词库目录项的 `url` / `language` 单段校验：越界条目被跳过并告警、读写路径留在 `<home>` 内、手工构造的资源对象同样被拒、缺 `language` 仍按 `en` 兜底 |
-| `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录；日志是进程级全局状态，用例串行 |
+| `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录、实际随机种子入日志（TUI 随机、`tw task` 固定 42）；日志是进程级全局状态，用例串行 |
 | `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
 | `tests/layering.rs` | 分层守卫：`src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，`src/theme/` 不依赖 `app` / `ui`；用 `syn` 解析源码，并自测守卫能识别禁止的 `use`、生命周期 / 字符字面量之后的代码、分组导入与宏体 |
 | `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
@@ -132,7 +132,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | 练习页可视化 | `cargo run --locked --example dump -- <mode> [typed] [宽] [高] [big 或 plain]`，`mode` 取 `system` / `free` / `review` / `shuffle` / `identify` / `dictation` / `listen` |
 | 任意页面快照 | `cargo run --locked --example shot -- <screen> [宽] [高] [theme] [--plain]`；screen 取第 6 节表内名称，另有 `edit` / `confirm` 两个弹层快照 |
 | panic 定位 | panic 会自动写 `<日志目录>/crash-<时间戳>.txt`：panic 消息与位置、完整回溯、最近 40 行日志，**不需要** `RUST_BACKTRACE`；TUI 里的 panic 由 `src/app/mod.rs` 的 `install_panic_hook` 先恢复终端与鼠标捕获再转交 `crash` 钩子 |
-| 日志 | 默认开启，`<home>/logs/tw-<日期>.log`；`--log FILE` 换路径、`--no-log` 关闭、`--log-level debug` 连 Toast 的成功 / 提示类与清理记录一起记；日志与崩溃报告同目录（用过 `--log` 就取它所在的目录），保留 14 / 30 天。写失败只警告一次，不阻断启动 |
+| 日志 | 默认开启，`<home>/logs/tw-<日期>.log`；`--log FILE` 换路径、`--no-log` 关闭、`--log-level debug` 连 Toast 的成功 / 提示类与清理记录一起记；本次实际使用的随机种子也在里面（TUI 随机、`tw task` 固定 42），复现随机行为时从这里取 `--seed`；日志与崩溃报告同目录（用过 `--log` 就取它所在的目录），保留 14 / 30 天。写失败只警告一次，不阻断启动 |
 | 手工检查存档 | 5 份存档都是可读 JSON，字段含义与版本策略见 [persistence.md](persistence.md) |
 
 ## 6. 截图与视觉检查
