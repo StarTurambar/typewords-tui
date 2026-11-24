@@ -100,6 +100,7 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 ## 约定
 
 - 提交信息用 conventional 前缀（`feat(tui):`、`fix(paths):`、`refactor(...):`、`docs:`、`chore:`），一个提交聚焦一件事，说明动机与影响面。
+- **分支与提交粒度：一个修复 = 一个提交，同一批相关问题 = 同一个分支**。开工前先 `git switch -c fix/<主题>`（纯文档用 `docs/<主题>`、杂务用 `chore/<主题>`），不要直接提交到 `main`；一个 issue 或一组同源缺陷（例如同一 issue 下的多条待办）放在同一个分支，按问题分别提交，不把不相关的修复塞进同一个提交；完成后推送分支走 PR，由用户合并。
 - 错误处理：跨层边界用 `anyhow::Result`；启动期不可恢复错误在进入终端前 `bail!`，运行期可恢复错误转 Toast；不用 panic 作控制流。
 - clippy 全目标 `-D warnings`，不要用 `#[allow(...)]` 掩盖可修问题。
 - 保持 TUI 轻量：新增依赖前先确认必要性（不引入 HTTP 客户端或音频库；TTS / 播放器走系统命令），并一并更新 `Cargo.lock`。
