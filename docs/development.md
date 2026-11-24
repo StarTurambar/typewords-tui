@@ -103,7 +103,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/import_dict.rs` | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝；`export-dict` 与 `import-dict` 往返、缺省输出与当前学习词库、内置词典从存档导出、空词库与未知 id 的报错 |
 | `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
 | `tests/cli_task.rs` | `tw task` 的写副作用披露：词表比存档进度短时装载会丢弃单词断点，输出必须说明；进度正常时不提「丢弃」 |
-| `tests/catalog_safety.rs` | 词库目录项的 `url` / `language` 单段校验：越界条目被跳过并告警、读写路径留在 `<home>` 内、手工构造的资源对象同样被拒、缺 `language` 仍按 `en` 兜底 |
+| `tests/catalog_safety.rs` | 词库目录项的 `url` / `language` 单段校验：越界条目被跳过并告警、读写路径留在 `<home>` 内、手工构造的资源对象同样被拒、缺 `language` 仍按 `en` 兜底；Windows 上还拒绝保留设备名与尾随点 / 空格（`#[cfg(windows)]` 用例） |
 | `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录、实际随机种子入日志（TUI 随机、`tw task` 固定 42）；日志是进程级全局状态，用例串行 |
 | `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
 | `tests/layering.rs` | 分层守卫：`src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，`src/theme/` 不依赖 `app` / `ui`；用 `syn` 解析源码，并自测守卫能识别禁止的 `use`、生命周期 / 字符字面量之后的代码、分组导入与宏体 |
