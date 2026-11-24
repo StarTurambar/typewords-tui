@@ -3347,7 +3347,12 @@ impl App {
             self.toast(NoticeLevel::Warning, "找不到词库文件，改动没有保存");
             return;
         };
-        let path = self.boot.catalog.dict_write_file(&resource);
+        let Some(path) = self.boot.catalog.dict_write_file(&resource) else {
+            // 目录项的 url / language 被手改成了越界路径；`Catalog::load`
+            // 已经丢掉这类条目，这里是「调用方自己构造了资源对象」的兜底。
+            self.toast(NoticeLevel::Warning, "词库目录项的路径不安全，改动没有保存");
+            return;
+        };
         let word_count = dict.words.len();
         let text = match serde_json::to_string_pretty(&dict.words) {
             Ok(text) => text,

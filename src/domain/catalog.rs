@@ -75,6 +75,22 @@ impl DictResource {
             .unwrap_or(false)
     }
 
+    /// 目录项里的路径组件是否安全（`url` 必填，`language` 空值按 `en` 兜底）。
+    ///
+    /// 词条路径由 `dicts/<language>/word/<url>` 直接 join 得到，组件里出现
+    /// 分隔符或 `..` 都会把读写带出 `<home>/dicts`。`language` 为空时沿用
+    /// [`Self::language_or_default`] 的 `en` 默认值：它不构成越界，而且上游
+    /// 目录项允许省略该字段（省略后反序列化成空串）。
+    pub fn path_component_error(&self) -> Option<&'static str> {
+        if !is_safe_component(&self.url) {
+            return Some("url");
+        }
+        if !self.language.is_empty() && !is_safe_component(&self.language) {
+            return Some("language");
+        }
+        None
+    }
+
     /// 转为可持久化的 Dict（词表由调用方补）。
     pub fn to_dict(&self, words: Vec<Word>) -> Dict {
         Dict {
@@ -116,12 +132,15 @@ pub struct Catalog {
     assets: PathBuf,
     home: PathBuf,
     resources: Vec<DictResource>,
+    /// 装载时被跳过的目录项（见 [`DictResource::path_component_error`]）。
+    warnings: Vec<String>,
 }
 
 impl Catalog {
     pub fn load(paths: &Paths) -> Result<Self> {
         let mut resources: Vec<DictResource> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
+        let mut warnings: Vec<String> = Vec::new();
 
         for root in [&paths.assets, &paths.home] {
             let file = root.join("list").join("word.json");
@@ -134,6 +153,19 @@ impl Catalog {
                 .with_context(|| format!("解析词库目录失败: {}", file.display()))?;
             for resource in parsed {
                 if !resource.is_word_dict() {
+                    continue;
+                }
+                // 词条路径是 dicts/<language>/word/<url> 直接 join 出来的，
+                // 目录项又是手工可编辑的：url = "../../x.json" 或
+                // language = ".." 会让词条的读写落到 <home> 之外。
+                // 这里把不安全的条目整条丢掉并告警，而不是带着坏路径继续用。
+                if let Some(field) = resource.path_component_error() {
+                    warnings.push(format!(
+                        "词库目录项 {} 的 {field} 不是安全的单段路径组件（url={:?}，language={:?}），已跳过该条目",
+                        display_id(&resource),
+                        resource.url,
+                        resource.language
+                    ));
                     continue;
                 }
                 let key = resource.id_string();
@@ -161,11 +193,20 @@ impl Catalog {
             assets: paths.assets.clone(),
             home: paths.home.clone(),
             resources,
+            warnings,
         })
     }
 
     pub fn resources(&self) -> &[DictResource] {
         &self.resources
+    }
+
+    /// 装载时被跳过的目录项（不安全路径组件）的告警文案。
+    ///
+    /// 领域层只负责收集：`bootstrap` 把它们推进启动提示（Toast + 运行日志），
+    /// `tw doctor` / `tw task` 直接打印，其余入口忽略即可。
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     pub fn find(&self, id: &str) -> Option<&DictResource> {
@@ -175,11 +216,11 @@ impl Catalog {
     }
 
     /// 词条文件路径：数据目录优先，其次资源目录。
+    ///
+    /// 目录项的路径组件不安全时返回 `None`：`Catalog::load` 已经丢掉这类
+    /// 条目，这里再挡一次，覆盖调用方自行构造的 [`DictResource`]。
     pub fn dict_file(&self, resource: &DictResource) -> Option<PathBuf> {
-        let relative = Path::new("dicts")
-            .join(resource.language_or_default())
-            .join("word")
-            .join(&resource.url);
+        let relative = dict_relative_path(resource)?;
         [self.home.join(&relative), self.assets.join(&relative)]
             .into_iter()
             .find(|path| path.is_file())
@@ -191,11 +232,21 @@ impl Catalog {
     /// 用户要往里加词——报错会让「新建词典」直接失败。
     pub fn load_words(&self, resource: &DictResource) -> Result<Vec<Word>> {
         let file = self.dict_file(resource).ok_or_else(|| {
-            anyhow!(
-                "找不到词库文件: {}（url={}）",
-                resource.id_string(),
-                resource.url
-            )
+            match resource.path_component_error() {
+                // 路径被拒与「文件不存在」是两回事：前者要指向目录项本身，
+                // 否则用户会去翻一个路径根本不成立的词条文件。
+                Some(field) => anyhow!(
+                    "词库目录项 {} 的 {field} 不是安全的单段路径组件（url={:?}，language={:?}）",
+                    display_id(resource),
+                    resource.url,
+                    resource.language
+                ),
+                None => anyhow!(
+                    "找不到词库文件: {}（url={}）",
+                    resource.id_string(),
+                    resource.url
+                ),
+            }
         })?;
         let text = std::fs::read_to_string(&file)
             .with_context(|| format!("读取词库文件失败: {}", file.display()))?;
@@ -220,12 +271,9 @@ impl Catalog {
     /// 内置词库——那些文件随发布包分发，用户改一个词就再也拿不回来，
     /// `tw import-dict` 也只能写数据目录。写入数据目录后，读取会优先命中
     /// 它，天然形成「用户覆盖内置」的语义。
-    pub fn dict_write_file(&self, resource: &DictResource) -> PathBuf {
-        let relative = Path::new("dicts")
-            .join(resource.language_or_default())
-            .join("word")
-            .join(&resource.url);
-        self.home.join(relative)
+    /// 目录项的路径组件不安全时返回 `None`（理由同 [`Self::dict_file`]）。
+    pub fn dict_write_file(&self, resource: &DictResource) -> Option<PathBuf> {
+        dict_relative_path(resource).map(|relative| self.home.join(relative))
     }
 
     fn user_catalog_file(&self) -> PathBuf {
@@ -288,6 +336,44 @@ impl Catalog {
         }
         Ok(changed)
     }
+}
+
+/// 词条文件的相对路径（`dicts/<language>/word/<url>`）。
+///
+/// 组件不安全时返回 `None`。读取与写入共用这一处，两边的校验口径不会漂移。
+fn dict_relative_path(resource: &DictResource) -> Option<PathBuf> {
+    if resource.path_component_error().is_some() {
+        return None;
+    }
+    Some(
+        Path::new("dicts")
+            .join(resource.language_or_default())
+            .join("word")
+            .join(&resource.url),
+    )
+}
+
+/// 单段路径组件是否安全：非空、不是 `.` / `..`、不含路径分隔符与 NUL。
+///
+/// 冒号一并拒绝：Windows 上它是盘符 / NTFS 备用流的分隔符，正常词条文件名
+/// 里不会出现，允许它只会给路径解析留一个平台相关的缺口。
+fn is_safe_component(value: &str) -> bool {
+    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\', '\0', ':'])
+}
+
+/// 告警文案里的目录项标识：id 缺失时退回 enName / url，不留一个空的「目录项 」。
+fn display_id(resource: &DictResource) -> String {
+    let id = resource.id_string();
+    if !id.is_empty() {
+        return id;
+    }
+    if !resource.en_name.is_empty() {
+        return resource.en_name.clone();
+    }
+    if !resource.url.is_empty() {
+        return resource.url.clone();
+    }
+    "<无 id>".to_string()
 }
 
 /// 在数据目录里新建一本自定义词典，返回登记好的目录项。
@@ -397,8 +483,6 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
     // 目录项 id 取文件名去掉 .json。文件名只有 `.json` 时 stem 为空，
     // `Catalog::load` 会跳过空 id 的条目：词条文件与目录项都写进去，词库页 /
     // `tw doctor` / `--dict` 却永远看不到它，CLI 还报「已导入」。
-    // 路径分隔符这条只是防御：`file_name()` 在 Windows 上不会含分隔符，Linux
-    // 上也只挡得住字面反斜杠——它不是目录穿越防护。
     let stem = file_name.trim_end_matches(".json");
     if stem.is_empty() {
         return Err(anyhow!(
@@ -406,8 +490,10 @@ pub fn import_dict(paths: &Paths, source: &Path) -> Result<DictResource> {
             source.display()
         ));
     }
-    if stem.contains(['/', '\\']) {
-        return Err(anyhow!("词库文件名不能包含路径分隔符: {file_name}"));
+    // 与 `Catalog::load` 的目录项校验同源：`url` 必须是单段安全组件，否则
+    // 这里报「已导入」、装载时却把条目整条跳过（与上面空 id 同一类孤儿）。
+    if !is_safe_component(&file_name) {
+        return Err(anyhow!("词库文件名不能包含路径分隔符或冒号: {file_name}"));
     }
 
     let target = catalog.user_dict_file(&file_name);

@@ -156,6 +156,11 @@ pub fn doctor_to(out: &mut impl Write, paths: &Paths) -> Result<()> {
                 .unwrap_or_else(|| "<缺失>".to_string())
         )?;
     }
+    // 被跳过的目录项（url / language 越界）同样是排障信息：词库「不见了」
+    // 时，这里要能看出是目录项被拒，而不是文件丢了。
+    for warning in catalog.warnings() {
+        writeln!(out, "  ! {warning}")?;
+    }
 
     let store = crate::store::FileStore::new(&paths.home)?;
     writeln!(out, "\n存档：")?;
@@ -202,6 +207,11 @@ pub fn task_preview(paths: &Paths, cli: &Cli) -> Result<()> {
     }
     for word in result.task_words.review.iter().take(5) {
         println!("  review: {}  {}", word.word, word.trans_joined());
+    }
+    // 被跳过的目录项（url / language 越界）在这里也要说一声：当前词典可能
+    // 正是因为被跳过才回退到了别的词库。
+    for warning in boot.catalog.warnings() {
+        println!("! {warning}");
     }
     Ok(())
 }

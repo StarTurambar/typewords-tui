@@ -175,6 +175,9 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
     }
 
     let catalog = Catalog::load(paths)?;
+    // 被跳过的目录项（url / language 越界）与存档告警同一出口：启动 Toast +
+    // 运行日志，`tw doctor` 与 `tw task` 另行打印。
+    notices.extend(catalog.warnings().iter().cloned());
     let readonly_dict = matches!(dict_loaded.status, LoadStatus::VersionTooNew { .. });
     let readonly_settings = matches!(setting_loaded.status, LoadStatus::VersionTooNew { .. });
     let themes = ThemeRegistry::load(&paths.themes_dir());
