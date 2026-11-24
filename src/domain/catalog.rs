@@ -356,8 +356,9 @@ fn dict_relative_path(resource: &DictResource) -> Option<PathBuf> {
 /// 单段路径组件是否安全：非空、不是 `.` / `..`、不含路径分隔符与 NUL。
 ///
 /// 冒号一并拒绝：Windows 上它是盘符 / NTFS 备用流的分隔符，正常词条文件名
-/// 里不会出现，允许它只会给路径解析留一个平台相关的缺口。
-fn is_safe_component(value: &str) -> bool {
+/// 里不会出现，允许它只会给路径解析留一个平台相关的缺口。文章书目的 `url`
+/// 与词库目录项同源（都是手工可编辑的 JSON），共用这一处判定。
+pub(crate) fn is_safe_component(value: &str) -> bool {
     !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\', '\0', ':'])
 }
 
