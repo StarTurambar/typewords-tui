@@ -40,8 +40,15 @@ fn local_datetime<Tz: TimeZone>(tz: &Tz, ms: i64) -> Option<chrono::DateTime<Tz>
 /// 根本不存在，改为向后找次日的第一个可表示时刻。早期实现在 `.single()`
 /// 失败时回退成片段终点，于是跨那个午夜的整段都记在开始日，`session_role`
 /// 的 start / middle / end 少一天。
+///
+/// 次日的日期用 `checked_add_days` 推进：`NaiveDate + Days` 在
+/// `NaiveDate::MAX` 上会 panic（chrono 内部是 `checked_add_days(..).expect(..)`），
+/// 而片段端点只要可表示就会走到这里——手改缓存写在最后一天时不能崩，
+/// 溢出退回 `None`，由调用方按既有兜底整段保留。
 fn next_day_start<Tz: TimeZone>(tz: &Tz, day: chrono::NaiveDate) -> Option<i64> {
-    let midnight = (day + chrono::Days::new(1)).and_hms_opt(0, 0, 0)?;
+    let midnight = day
+        .checked_add_days(chrono::Days::new(1))?
+        .and_hms_opt(0, 0, 0)?;
     if let Some(dt) = tz.from_local_datetime(&midnight).earliest() {
         return Some(dt.timestamp_millis());
     }
@@ -554,5 +561,36 @@ mod tests {
         let total: i64 = segments.iter().map(|segment| segment[1] - segment[0]).sum();
         assert_eq!(total, end - start, "拆天上限不能丢时长");
         assert_eq!(spend, end - start);
+    }
+
+    /// chrono 的日期上界：`day + Days::new(1)` 会 panic，必须走可失败版本并
+    /// 退回「整段保留」。
+    ///
+    /// 端点本身是可表示的（`timestamp_millis_opt` 返回 `Some`），所以两端过滤
+    /// 拦不住它、`MAX_SPLIT_DAYS` 也走不到——手改缓存把片段写在最后一天时，
+    /// 早期实现会在这里直接崩溃。
+    ///
+    /// 用固定偏移而不是 `Local`：溢出发生在任何时区都会走的 `next_day_start`
+    /// 里，与本地时区无关，固定偏移能让用例在 CI 的 UTC 与开发机的 +08 上
+    /// 结果一致。
+    #[test]
+    fn a_segment_on_the_last_representable_day_is_kept_whole() {
+        let tz = FixedOffset::east_opt(8 * 3600).expect("合法偏移");
+        let naive = NaiveDate::MAX.and_hms_opt(0, 30, 0).expect("合法时刻");
+        let start = tz
+            .from_local_datetime(&naive)
+            .single()
+            .expect("最后一天的 00:30 应可表示")
+            .timestamp_millis();
+        let end = start + 5_000;
+
+        let (segments, spend) = normalize_practice_timer_in(&tz, &[[start, end]], 5_000, end);
+
+        assert_eq!(
+            segments,
+            vec![[start, end]],
+            "日期上界不能 panic，也不能把片段丢掉"
+        );
+        assert_eq!(spend, 5_000);
     }
 }
