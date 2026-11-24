@@ -1302,7 +1302,7 @@ impl App {
             cleared = false;
         } else {
             match self.store.remove_practice() {
-                Ok(()) => self.saved_practice_resumable = false,
+                Ok(_) => self.saved_practice_resumable = false,
                 // 删除失败时文件还在，别把内存里的结论改成「没有断点」：
                 // 否则界面显示「今日任务」，重启后又冒出「上次任务」。
                 Err(err) => {
@@ -1719,7 +1719,7 @@ impl App {
             self.saved_practice_resumable = false;
         } else {
             match self.store.remove_practice() {
-                Ok(()) => self.saved_practice_resumable = false,
+                Ok(_) => self.saved_practice_resumable = false,
                 // 没删掉就说明磁盘上仍有本轮开始前的断点；让结论跟着磁盘走，
                 // 而不是谎称「没有上次任务」。
                 Err(err) => logging::error(format!("结算后清除练习缓存失败: {err}")),

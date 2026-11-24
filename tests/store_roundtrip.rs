@@ -156,8 +156,9 @@ fn practice_cache_remove_and_exists() {
     assert!(!store.practice_exists());
     store.save_practice(Some(&Default::default())).unwrap();
     assert!(store.practice_exists());
-    store.remove_practice().unwrap();
+    assert!(store.remove_practice().unwrap(), "存在时应真的删掉");
     assert!(!store.practice_exists());
+    assert!(!store.remove_practice().unwrap(), "文件不存在时返回 false");
 }
 
 #[test]

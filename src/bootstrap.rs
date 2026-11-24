@@ -83,9 +83,8 @@ impl Bootstrapped {
                 .store
                 .cache_discardable(crate::store::PRACTICE_FILE_NAME)
             {
-                let existed = self.store.practice_exists();
                 match self.store.remove_practice() {
-                    Ok(()) if existed => {
+                    Ok(true) => {
                         // 删除本身是设计行为（断点属于校正前的进度），但要留下
                         // 痕迹：`tw task` 会据此在 stdout 里披露，日志里也有一行。
                         self.practice_discarded = true;
@@ -94,7 +93,7 @@ impl Bootstrapped {
                             crate::store::PRACTICE_FILE_NAME
                         ));
                     }
-                    Ok(()) => {}
+                    Ok(false) => {}
                     Err(err) => logging::warn(format!("校正进度后删除练习缓存失败: {err:#}")),
                 }
             } else {

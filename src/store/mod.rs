@@ -439,7 +439,7 @@ impl FileStore {
             Some(value) => {
                 self.save_typed(PRACTICE_FILE_NAME, &Some(value), PRACTICE_CACHE_VERSION)
             }
-            None => self.remove_practice(),
+            None => self.remove_practice().map(|_| ()),
         }
     }
 
@@ -459,13 +459,17 @@ impl FileStore {
         self.cache_read_error(name).is_none()
     }
 
-    pub fn remove_practice(&self) -> Result<()> {
+    /// 删除练习缓存；返回是否真的删掉了文件（本来不存在时为 `false`）。
+    ///
+    /// 让删除本身回答「删没删」，调用方不必先 `practice_exists` 再删——
+    /// 两步之间文件被并发删掉时，前者会误报「删掉了」。
+    pub fn remove_practice(&self) -> Result<bool> {
         let path = self.file_path(PRACTICE_FILE_NAME);
-        if path.is_file() {
-            fs::remove_file(&path)
-                .with_context(|| format!("删除练习缓存失败: {}", path.display()))?;
+        if !path.is_file() {
+            return Ok(false);
         }
-        Ok(())
+        fs::remove_file(&path).with_context(|| format!("删除练习缓存失败: {}", path.display()))?;
+        Ok(true)
     }
 
     pub fn practice_exists(&self) -> bool {
