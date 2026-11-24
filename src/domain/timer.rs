@@ -145,6 +145,9 @@ fn normalize_practice_timer_in<Tz: TimeZone>(
         normalized.extend(split_segment_by_day(tz, segment[0], segment[1]));
     }
     if normalized.is_empty() {
+        // 全部片段都被判为不可表示：保留调用方给的 spend，不在这里清零。
+        // 这与「部分片段被跳过」不对称（后者返回过滤后的和），是既有语义：
+        // 没有任何可用片段时，宁可保留原始时长，也不要让结算凭空少一截。
         return (Vec::new(), safe_spend);
     }
     let normalized_spend: i64 = normalized
@@ -234,7 +237,7 @@ pub fn format_duration(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{FixedOffset, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
+    use chrono::{FixedOffset, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 
     /// 假时区：模拟 America/Santiago 2026-09-06 的春季拨快——本地 00:00 不存在
     /// （时钟从 00:00 直接跳到 01:00），UTC 偏移从 -04:00 变成 -03:00。
@@ -293,8 +296,8 @@ mod tests {
         }
     }
 
-    fn local_ms(
-        tz: &GapAtMidnight,
+    fn local_ms<Tz: TimeZone>(
+        tz: &Tz,
         year: i32,
         month: u32,
         day: u32,
@@ -449,13 +452,107 @@ mod tests {
     }
 
     /// 超范围时间戳（手改存档）与按天统计同一策略：跳过，不回退成「现在」。
+    ///
+    /// 端点必须是「可解析为正数、但超出 chrono 可表示范围」：`i64::MIN` 会先被
+    /// `segment[1] > 0` 过滤掉，根本走不到新增的 `local_datetime` 两端校验，
+    /// 用例名就名不副实了。
     #[test]
     fn out_of_range_segments_are_dropped_instead_of_being_attributed_to_today() {
-        let now = Local::now().timestamp_millis();
-        let valid = [now - 5_000, now];
-        let (segments, spend) =
-            normalize_practice_timer(&[[i64::MIN, i64::MIN + 5_000], valid], 10_000, now);
+        let start = Local
+            .with_ymd_and_hms(2026, 3, 1, 12, 0, 0)
+            .single()
+            .expect("合法时刻")
+            .timestamp_millis();
+        let valid = [start, start + 5_000];
+        let (segments, spend) = normalize_practice_timer(
+            &[[i64::MAX - 5_000, i64::MAX], valid],
+            10_000,
+            start + 5_000,
+        );
         assert_eq!(segments, vec![valid], "不可表示的片段应被跳过");
         assert_eq!(spend, 5_000, "跳过后 spend 只累计可表示的时长");
+    }
+
+    /// 假时区：本地午夜被跳过 4 小时（00:00 → 04:00），超过 3 小时的搜索窗口。
+    #[derive(Clone, Debug)]
+    struct GapTooLongAtMidnight;
+
+    impl TimeZone for GapTooLongAtMidnight {
+        type Offset = FixedOffset;
+
+        fn from_offset(_offset: &Self::Offset) -> Self {
+            Self
+        }
+
+        fn offset_from_local_date(&self, local: &NaiveDate) -> LocalResult<Self::Offset> {
+            self.offset_from_local_datetime(&local.and_hms_opt(0, 0, 0).expect("合法时刻"))
+        }
+
+        fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> LocalResult<Self::Offset> {
+            let gap = NaiveDate::from_ymd_opt(2026, 9, 6)
+                .expect("合法日期")
+                .and_hms_opt(0, 0, 0)
+                .expect("合法时刻");
+            if *local >= gap && *local < gap + chrono::TimeDelta::hours(4) {
+                LocalResult::None
+            } else if *local < gap {
+                LocalResult::Single(winter())
+            } else {
+                LocalResult::Single(FixedOffset::east_opt(0).expect("合法偏移"))
+            }
+        }
+
+        fn offset_from_utc_date(&self, utc: &NaiveDate) -> Self::Offset {
+            self.offset_from_utc_datetime(&utc.and_hms_opt(0, 0, 0).expect("合法时刻"))
+        }
+
+        fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> Self::Offset {
+            let transition = NaiveDate::from_ymd_opt(2026, 9, 6)
+                .expect("合法日期")
+                .and_hms_opt(4, 0, 0)
+                .expect("合法时刻");
+            if *utc < transition {
+                winter()
+            } else {
+                FixedOffset::east_opt(0).expect("合法偏移")
+            }
+        }
+    }
+
+    /// 找不到次日分界（gap 超过搜索窗口）时整段保留，绝不丢时长。
+    #[test]
+    fn a_gap_longer_than_the_search_window_keeps_the_whole_segment() {
+        let tz = GapTooLongAtMidnight;
+        let start = local_ms(&tz, 2026, 9, 5, 22, 0);
+        let end = local_ms(&tz, 2026, 9, 7, 12, 0);
+        let (segments, spend) = normalize_practice_timer_in(&tz, &[[start, end]], end - start, end);
+        assert_eq!(
+            segments,
+            vec![[start, end]],
+            "找不到次日分界时整段保留，不能把跨天片段丢掉"
+        );
+        assert_eq!(spend, end - start);
+    }
+
+    /// 手改缓存把终点写成几千年后：拆天上限只限制段数，不丢时长。
+    #[test]
+    fn a_segment_longer_than_the_split_cap_keeps_every_millisecond() {
+        let tz = FixedOffset::east_opt(8 * 3600).expect("合法偏移");
+        let start = tz
+            .with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+            .single()
+            .expect("合法时刻")
+            .timestamp_millis();
+        let end = start + 5_000 * 86_400_000 + 3_600_000;
+        let (segments, spend) = normalize_practice_timer_in(&tz, &[[start, end]], end - start, end);
+        assert_eq!(
+            segments.len(),
+            MAX_SPLIT_DAYS + 1,
+            "拆到上限后剩余部分整段记到当前日: {}",
+            segments.len()
+        );
+        let total: i64 = segments.iter().map(|segment| segment[1] - segment[0]).sum();
+        assert_eq!(total, end - start, "拆天上限不能丢时长");
+        assert_eq!(spend, end - start);
     }
 }
