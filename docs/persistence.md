@@ -167,6 +167,8 @@
 | `custom`/`system` | 是否自定义词典 / 是否系统虚拟词典；系统词典为收藏 `wordCollect`、错词 `wordWrong`、已掌握 `wordKnown` 与文章收藏 `articleCollect` |
 | `sourceId`、`cover` 与其它未知字段 | 资源副本原始 id（默认空串）、可选封面色（不渲染）；未知字段经 `#[serde(flatten)] extra` 原样保留 |
 
+`startDate` 与 `segments` 里的时间戳按本地自然日归并。超范围时间戳（`chrono` 可表示范围约 ±262000 年之外，只可能来自手改存档）在聚合（`daily_totals` / `daily_totals_for_dict`）与写入（`flush_stat_to_store`）两侧**统一跳过**：既不记到「今天」，也不留一条永远显示不出来的记录；跨天片段的 `sessionRole` 仍按实际拆出的自然日给 start / middle / end。
+
 命名规则：结构体默认 `rename_all = "camelCase"`；例外是 `_ignoreWatch`、统计的 `new`（显式 rename）与 `Card`（保持 ts-fsrs 的 snake_case）。**`Word` 没有 `extra` 透传**：资源里的 `inflections`、`e2e`、`examsSrc`、`langType` 等未建模字段读取时被忽略，写回系统词典词条时也不保留。
 
 ### 3.3 FSRS 卡片（`fsrsData`）
