@@ -106,6 +106,12 @@ pub fn flush_stat_to_store(dict: &mut Dict, stat: &PracticeState) {
                 // 写入时却被记到当天，两处口径互相打架。
                 continue;
             };
+            if local_date(segment[1]).is_none() {
+                // 终点不可表示时整段都无法归日：只查起点的话，`[now, i64::MAX]`
+                // 会通过校验，把 `i64::MAX - now` 记进当天（两个这样的段还会
+                // 让 `total_spend` 溢出）。与 timer 的两端过滤同源。
+                continue;
+            }
             let entry = day_map.entry(key.clone()).or_insert_with(|| {
                 day_order.push(key.clone());
                 DayGroup {
@@ -341,6 +347,26 @@ mod tests {
         assert!(
             no_segments.statistics.is_empty(),
             "起点不可表示的记录写进去也永远不会显示，不该留垃圾"
+        );
+    }
+
+    /// 终点不可表示的片段与起点同样跳过：只查起点时 `[now, i64::MAX]` 会
+    /// 通过校验，把 `i64::MAX - now` 记进当天。
+    #[test]
+    fn flushing_skips_a_segment_whose_end_is_not_representable() {
+        let now = Local::now().timestamp_millis();
+        let mut dict = Dict::default();
+        let stat = PracticeState {
+            start_date: now,
+            spend: 1_000,
+            segments: vec![[now - 1_000, i64::MAX]],
+            ..PracticeState::default()
+        };
+        flush_stat_to_store(&mut dict, &stat);
+        assert!(
+            dict.statistics.is_empty(),
+            "终点不可表示的片段不能写入: {:?}",
+            dict.statistics
         );
     }
 }
