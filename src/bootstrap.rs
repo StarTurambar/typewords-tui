@@ -20,6 +20,12 @@ pub struct Bootstrapped {
     pub readonly_dict: bool,
     /// 设置存档版本过高时为 true：本次运行不覆盖 setting.json。
     pub readonly_settings: bool,
+    /// 本次装载校正了词典进度，并因此丢弃了单词断点缓存。
+    ///
+    /// 校正的前提是「词表比存档里的进度短」（`Dict::normalize_progress`）：
+    /// 旧断点属于校正前的进度，续练会把夹回的进度再算回去。`tw task` 用它
+    /// 决定要不要在输出里披露这次删除——预览子命令不该静默删文件。
+    pub practice_discarded: bool,
 }
 
 impl Bootstrapped {
@@ -77,7 +83,20 @@ impl Bootstrapped {
                 .store
                 .cache_discardable(crate::store::PRACTICE_FILE_NAME)
             {
-                let _ = self.store.remove_practice();
+                let existed = self.store.practice_exists();
+                match self.store.remove_practice() {
+                    Ok(()) if existed => {
+                        // 删除本身是设计行为（断点属于校正前的进度），但要留下
+                        // 痕迹：`tw task` 会据此在 stdout 里披露，日志里也有一行。
+                        self.practice_discarded = true;
+                        logging::info(format!(
+                            "词表比存档进度短，已按校正后的进度丢弃单词断点（{}）",
+                            crate::store::PRACTICE_FILE_NAME
+                        ));
+                    }
+                    Ok(()) => {}
+                    Err(err) => logging::warn(format!("校正进度后删除练习缓存失败: {err:#}")),
+                }
             } else {
                 logging::warn(format!(
                     "练习缓存 {} 读不出来，校正进度时未删除；请关闭占用它的程序后重启",
@@ -206,6 +225,7 @@ pub fn load(paths: &Paths, dict_id: Option<&str>) -> Result<Bootstrapped> {
         notices,
         readonly_dict,
         readonly_settings,
+        practice_discarded: false,
     };
 
     if let Some(id) = dict_id {
