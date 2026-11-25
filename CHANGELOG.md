@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-25
+
+以「界面不再骗人、存档不再丢」为主的一版：修掉跳组弹层缺标题行与单词测试页不显示题干这两处界面缺陷，以及 Windows 上存档因只读属性 / 瞬时占用而保存失败、`tw task` 静默删除单词断点、词库目录项的 `url` / `language` 越界、按天统计与拆天在极端时间戳下崩溃等会丢数据或静默失效的问题。存档格式不变（`dict.json` v4、`setting.json` v23、`practice-word.json` v2、`practice-article.json` v1），与 0.4.1 互通。
+
 ### 修复
 
 - **跳组弹层补回标题行**：练习页 `Shift+→` 打开的跳组弹层，内区第一行本来是留给标题「跳到第几组（共 N 组）」的，但 `render_group_picker` 把标题压进一个局部 `lines` 之后再没读过它（`push` 已算「被使用」，`unused_variables` 不会报），于是弹层顶部永远空一行——用户看不到总共有几组，只能从列表里的 `●` 反推当前组。现在标题画在 `GroupPickerLayout::title` 上（与底部提示行对称），死变量已删。
@@ -231,7 +235,8 @@
 - **断点续练**：练习游标写入 `practice-word.json`，重启后恢复到同一词、同一阶段。
 - **命令行**：`tw doctor` / `tw task` / `tw import-dict`，以及 `--assets` / `--home` / `--dict` / `--mode` / `--theme` / `--seed` / `--reset-practice`。
 
-[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/StarTurambar/typewords-tui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/StarTurambar/typewords-tui/compare/v0.3.2...v0.3.3
