@@ -22,8 +22,14 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  # clippy 也跑 Windows：`#[cfg(windows)]` 的代码在 Linux 上根本不参与编译，
+  # 只在 Ubuntu 上跑 clippy 等于让 Windows 专属分支无门禁。
   clippy:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
