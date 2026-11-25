@@ -59,7 +59,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 - `tests/layering.rs` 用 `syn` 解析源码守分层，不靠运行期约定。
 - `tests/real_assets.rs` 依赖仓库内 `assets/`，必须从仓库根运行；`tests/fsrs_parity.rs` 对着 `tests/fixtures/fsrs_golden.json` 逐条比对。
 - `tests/crash_report.rs` 与 `tests/diagnostics.rs` 涉及进程级全局状态（panic 钩子、日志），各自独立成二进制或串行执行。
-- `tests/docs.rs` 守文档的形式一致性（链接、索引、版本、CHANGELOG 结构），不守语义——文档里的说法对不对仍要人看。
+- `tests/docs.rs` 守文档的形式一致性（相对链接、链接里的 `#锚点`、索引、版本、CHANGELOG 结构），不守语义——文档里的说法对不对仍要人看。
 
 ### 4.3 测试基础设施与写法
 
@@ -155,7 +155,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain                
 
 - 版本号只在 [docs/README.md](README.md) 写一次，其它文档不写「对应版本」，发版只改那一处（`CHANGELOG.md` 的版本标题是历史记录，不属于「对应版本」）。
 - 用户可见改动（按键、CLI、设置项、存档字段、主题格式、行为变化）除了改对应文档，还要在根目录 [CHANGELOG.md](../CHANGELOG.md) 的 `## [Unreleased]` 下补一条；发版时整段移到版本标题下，GitHub Release 正文由它生成。
-- `tests/docs.rs` 校验 README、`CHANGELOG.md` 与 `docs/` 下所有 Markdown 的相对链接指向真实文件，要求 `docs/README.md` 登记每个文档，并校验 `CHANGELOG.md` 的格式与发布说明单源；新增或重命名文档后先改索引。
+- `tests/docs.rs` 校验仓库根与 `docs/` 下所有 Markdown 的相对链接指向真实文件、链接里的 `#锚点` 命中目标文档的标题，要求 `docs/README.md` 登记每个文档，并校验 `CHANGELOG.md` 的格式与发布说明单源；新增、重命名文档或改标题后先改索引与链接。
 - 引用源码只写路径与符号名，不写行号；改界面后按第 6 节重新生成截图，不要手工截图或缩放。
 
 ## 11. 常见开发问题

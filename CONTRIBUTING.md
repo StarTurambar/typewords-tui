@@ -26,7 +26,7 @@
 
 ## 文档贡献
 
-- 文档以源码为准；发现文档与代码不一致，欢迎直接提 PR 修正（先改文档，若确认是代码缺陷再改代码）。新增文档后在 [docs/README.md](docs/README.md) 登记——`cargo test` 会校验相对链接、索引完整性、文档版本、源码路径与 [CHANGELOG.md](CHANGELOG.md) 的格式（见 `tests/docs.rs`）。
+- 文档以源码为准；发现文档与代码不一致，欢迎直接提 PR 修正（先改文档，若确认是代码缺陷再改代码）。新增文档后在 [docs/README.md](docs/README.md) 登记——`cargo test` 会校验相对链接、链接里的 `#锚点`、索引完整性、文档版本、源码路径与 [CHANGELOG.md](CHANGELOG.md) 的格式（见 `tests/docs.rs`）。改标题前先搜一下有没有链接指向它。
 - 修改界面后按 [开发指南 · 截图与视觉检查](docs/development.md#6-截图与视觉检查) 重新生成截图。
 
 ## 许可证

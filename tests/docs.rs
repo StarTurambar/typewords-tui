@@ -12,8 +12,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn markdown_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = vec![root.join("README.md"), root.join("CHANGELOG.md")];
+    // 仓库根的 Markdown 一起校验：逐个点名会漏掉新加的根文档
+    // （CONTRIBUTING.md 就曾因此完全不在检查范围内）。
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md") {
+                files.push(path);
+            }
+        }
+    }
     collect_markdown(&root.join("docs"), &mut files);
+    files.sort();
     files.into_iter().filter(|path| path.is_file()).collect()
 }
 
@@ -292,7 +303,8 @@ fn source_paths(content: &str) -> Vec<String> {
                 }
             }
             let candidate = &content[start..end];
-            if candidate.ends_with(".rs") {
+            // `src/...rs` 这类带省略号的写法是占位符（描述「引用源码」规则时用），不是真实路径。
+            if candidate.ends_with(".rs") && !candidate.contains("...") {
                 paths.push(candidate.to_string());
             }
             cursor = end;
