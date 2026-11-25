@@ -5,56 +5,12 @@ mod common;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::style::Color;
 use typewords_tui::app;
 use unicode_width::UnicodeWidthStr;
 
-fn render_text(app: &app::App, width: u16, height: u16) -> String {
-    render_rows(app, width, height)
-        .into_iter()
-        .map(|(text, _)| text + "\n")
-        .collect()
-}
-
-/// 渲染每一行：文本 + 该行字符格的前景色（用来断言某一行用了哪个主题色）。
-fn render_rows(app: &app::App, width: u16, height: u16) -> Vec<(String, Vec<Color>)> {
-    let backend = TestBackend::new(width, height);
-    let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal.draw(|frame| app.render(frame)).expect("draw");
-    let buffer = terminal.backend().buffer();
-    let mut rows = Vec::with_capacity(height as usize);
-    for y in 0..height {
-        let mut skip_cells = 0usize;
-        let mut text = String::new();
-        let mut colors = Vec::new();
-        for x in 0..width {
-            if skip_cells > 0 {
-                skip_cells -= 1;
-                continue;
-            }
-            if let Some(cell) = buffer.cell((x, y)) {
-                let symbol = cell.symbol();
-                text.push_str(symbol);
-                // 宽字符（CJK）占两个单元，跳过其续接单元
-                let display_width = UnicodeWidthStr::width(symbol);
-                if display_width > 1 {
-                    skip_cells = display_width - 1;
-                }
-                colors.push(cell.fg);
-            }
-        }
-        rows.push((text, colors));
-    }
-    rows
-}
-
-/// 取包含 `needle` 的那一行：文本 + 该行用到的前景色。
-fn rendered_row(app: &app::App, width: u16, height: u16, needle: &str) -> (String, Vec<Color>) {
-    render_rows(app, width, height)
-        .into_iter()
-        .find(|(text, _)| text.contains(needle))
-        .unwrap_or_else(|| panic!("没有任何一行包含 {needle:?}"))
-}
+// 渲染与取行的共用实现放在 tests/common/mod.rs：同一份缓冲有两种投影
+// （按字符的文本视图、按显示列的单元格视图），覆盖矩阵也要用。
+use common::{render_text, rendered_row};
 
 #[test]
 fn home_screen_renders() {
@@ -114,20 +70,33 @@ fn typed_letters_are_colored() {
     assert!(has_good, "正确输入的字母应使用主题 good 色");
 }
 
+/// 按键切页后，外壳与页面标题都还在。
+///
+/// 这条用例只覆盖「按键切了屏、外壳还在」：导航标签在**每个**页面都会画，
+/// 所以只断言标签的话，页面正文整个空白它照样绿（早先叫
+/// all_screens_render_without_panic，名不副实）。这里补一条正文文案，
+/// 真正的 13 屏 × 5 尺寸矩阵在 tests/ui_matrix.rs。
 #[test]
-fn all_screens_render_without_panic() {
+fn shell_screens_render_their_titles() {
     let fixture = common::Fixture::new();
     let mut app = app::build_for_test(fixture.paths(), fixture.cli()).unwrap();
-    for (code, expected) in [
-        (KeyCode::Char('t'), "统计"),
-        (KeyCode::Char('d'), "词库"),
-        (KeyCode::Char('s'), "设置"),
-        (KeyCode::Char('?'), "帮助"),
+    for (code, nav, body) in [
+        (KeyCode::Char('t'), "统计", "学习日历"),
+        (KeyCode::Char('d'), "词库", "全部词库"),
+        (KeyCode::Char('s'), "设置", "默认练习模式"),
+        (KeyCode::Char('?'), "帮助", "快捷键"),
     ] {
         app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
         for (width, height) in [(80u16, 24u16), (120, 40)] {
             let text = render_text(&app, width, height);
-            assert!(text.contains(expected), "屏幕 {expected} 渲染失败");
+            assert!(
+                text.contains(nav),
+                "{width}x{height}：导航标签 {nav} 渲染失败"
+            );
+            assert!(
+                text.contains(body),
+                "{width}x{height}：{nav} 页正文应出现「{body}」\n{text}"
+            );
         }
         app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     }
@@ -409,8 +378,13 @@ fn article_summary_renders_article_labels() {
     );
 }
 
+/// 主页两个代表性目标：命中行里必须写着按钮 / 入口的文案。
+///
+/// 这条只覆盖主页 100×30 的两个目标——「同一份布局同时服务绘制与命中」这条
+/// 不变量早先由它独力背书，覆盖面远小于文档承诺。通用矩阵（13 屏 × 5 尺寸 +
+/// 7 种弹层）见 tests/ui_matrix.rs。
 #[test]
-fn mouse_target_rects_match_rendered_text() {
+fn home_targets_match_their_rendered_labels() {
     use ratatui::layout::Rect;
     use typewords_tui::app::Action;
 

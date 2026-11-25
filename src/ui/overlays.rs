@@ -101,6 +101,8 @@ pub fn confirm_layout(area: Rect) -> ConfirmLayout {
 pub struct GroupPickerLayout {
     pub rect: Rect,
     pub inner: Rect,
+    /// 标题行：内区的第一行，与底部提示行对称。
+    pub title: Rect,
     /// (组号, 矩形)
     pub rows: Vec<(usize, Rect)>,
 }
@@ -226,7 +228,13 @@ pub fn group_picker_layout(total_groups: usize, cursor: usize, area: Rect) -> Gr
             )
         })
         .collect();
-    GroupPickerLayout { rect, inner, rows }
+    let title = Rect::new(inner.x, inner.y, inner.width, 1);
+    GroupPickerLayout {
+        rect,
+        inner,
+        title,
+        rows,
+    }
 }
 
 pub fn render_group_picker(
@@ -241,13 +249,21 @@ pub fn render_group_picker(
     clear_modal_backdrop(frame, area, layout.rect, theme);
     widgets::paint_rect(frame, layout.rect, theme.panel);
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!("跳到第几组（共 {total_groups} 组）"),
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
+    // 标题行必须真的画出来：`group_picker_layout` 把内区第一行留给它。早期实现把标题
+    // push 进一个 `lines` 之后再没读过（`push` 已算「被使用」，编译器不会报
+    // unused），于是打开弹层时顶部空一行，用户看不到总组数。
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            widgets::fit_text(
+                &format!("跳到第几组（共 {total_groups} 组）"),
+                layout.title.width as usize,
+            ),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        layout.title,
+    );
     for (index, rect) in layout.rows.iter() {
         let group = index + 1;
         let selected = group == cursor + 1;

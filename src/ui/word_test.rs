@@ -12,11 +12,13 @@ use ratatui::widgets::Paragraph;
 use crate::app::{App, WordTestState};
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
-use crate::ui::widgets::fit_text;
+use crate::ui::widgets::{display_width, fit_text};
 
 /// 单词测试页布局。
 pub struct WordTestLayout {
     pub header: Rect,
+    /// 题干：正在被测试的单词（一题四选一，问的是这个词的释义）。
+    pub prompt: Rect,
     pub body: Rect,
     pub footer: Rect,
     /// 每个选项一行，与 `question.candidates` 的顺序一致。
@@ -28,6 +30,8 @@ pub fn layout(area: Rect, options: usize) -> WordTestLayout {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
+            // 题干单词 + 一行留白：没有题干，四个中文释义就成了无源之水。
+            Constraint::Length(2),
             Constraint::Min(8),
             Constraint::Length(2),
         ])
@@ -40,11 +44,12 @@ pub fn layout(area: Rect, options: usize) -> WordTestLayout {
                 .map(|_| Constraint::Length(2))
                 .collect::<Vec<_>>(),
         )
-        .split(chunks[1]);
+        .split(chunks[2]);
     WordTestLayout {
         header: chunks[0],
-        body: chunks[1],
-        footer: chunks[2],
+        prompt: chunks[1],
+        body: chunks[2],
+        footer: chunks[3],
         option_rows: rows.to_vec(),
     }
 }
@@ -61,6 +66,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             .unwrap_or(0);
         let layout = layout(content, options);
         render_header(state, frame, layout.header, theme);
+        render_prompt(state, frame, layout.prompt, theme);
         render_options(state, frame, layout.body, &layout.option_rows, theme);
         render_footer(state, frame, layout.footer, theme);
     });
@@ -107,6 +113,48 @@ fn render_header(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &T
         Span::styled(state.wrong.to_string(), Style::default().fg(theme.bad)),
     ];
     frame.render_widget(Paragraph::new(Line::from(spans)), rect);
+}
+
+/// 题干：把正在被测试的单词画在选项之上。
+///
+/// 四个选项是中文释义，没有题面用户就不知道该选哪一个——早期实现只在答完
+/// 之后才把单词补在正确选项后面，答题前整页看不到这个单词。
+fn render_prompt(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &Theme) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let Some(question) = state.question.as_ref() else {
+        return;
+    };
+    let Some(candidate) = question.candidates.get(question.correct_index) else {
+        return;
+    };
+    // 提示语优先：单词再长也只截自己，不能把「选择正确的释义」挤到看不见的
+    // 第二行去（该 rect 只画 1 行）。窄到连提示都放不下时只画单词。
+    const HINT: &str = "   选择正确的释义";
+    let width = rect.width as usize;
+    let show_hint = width > display_width(HINT) + 1;
+    let word = if show_hint {
+        fit_text(
+            &format!(" {}", candidate.word.word),
+            width - display_width(HINT),
+        )
+    } else {
+        format!(" {}", candidate.word.word)
+    };
+    let mut spans = vec![Span::styled(
+        word,
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if show_hint {
+        spans.push(Span::styled(HINT, Style::default().fg(theme.dim)));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)),
+        Rect::new(rect.x, rect.y, rect.width, 1),
+    );
 }
 
 fn render_options(

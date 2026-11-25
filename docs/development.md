@@ -34,7 +34,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 - `src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，也不引入终端相关 crate；`src/theme/` 不依赖 `app` / `ui` 与终端 crate；`tests/layering.rs` 守着这两条。
 - 状态只在 app 层改：非练习键位与鼠标经 `Action` → `App::apply_action`，练习页键盘走 `App::on_practice_key`，启动与 `App::on_tick` 也直接改状态；`ui/` 只读 `App`。
-- 每个页面的 `layout()` 同时服务 `render()` 与命中检测 `targets()`；新增可点击区域必须注册进 `targets()`，`tests/ui_snapshots.rs` 校验两者不漂移。
+- 每个页面的 `layout()` 同时服务 `render()` 与命中检测 `targets()`；新增可点击区域必须注册进 `targets()`，`tests/ui_matrix.rs` 的表驱动矩阵校验两者不漂移。
 - 颜色只来自主题的 13 个 token；存档结构体普遍 `#[serde(default, rename_all = "camelCase")]`（`Card` 保持 ts-fsrs 的 snake_case），新增字段必须带 `default`。
 
 ## 4. 测试体系
@@ -77,7 +77,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 ### 4.2 集成测试（`tests/`）
 
-34 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`。
+35 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`（`cli_for` 提供与 fixture 同源的缺省 `Cli`）。
 
 | 文件 | 覆盖点 |
 | --- | --- |
@@ -85,7 +85,8 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `tests/focus_nav.rs` | 所有标签页键盘焦点：启动默认选中主按钮、内容区换带与带内左右、每页落地内容区、`Tab` / 方向键换栏、各页光标移动、弹层与搜索框让位、resize 后焦点失效不触发动作、底栏文案与高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
 | `tests/interaction_fixes.rs` | 已修交互缺陷的回归：三个弹层的鼠标命中、主页 `+` / `-` 的像素对齐、滚动条不被行 target 抢走、命中矩形与渲染一致 |
 | `tests/overlay_keys.rs` | 弹层按钮焦点：方向键 / `Tab` / `j` / `k` 移动选中、两端停住、`Enter` 执行选中按钮（焦点在「取消」时只关闭）、`y` / `n` / `Esc` / `r` / `q` 旧快捷键保留、选中项高亮 |
-| `tests/ui_snapshots.rs` | `TestBackend` 渲染：全部屏幕、终端过小、60×20 紧凑布局、CJK 宽度、正确输入着色、6 套内置主题、弹层、鼠标命中区域与渲染文本一致、设置页动作项文案与配色 |
+| `tests/ui_snapshots.rs` | `TestBackend` 渲染：主页 / 练习 / 大字、按键切页后外壳与页面标题加一句正文、终端过小、60×20 紧凑布局、CJK 宽度、正确输入着色、6 套内置主题、弹层、主页两个目标与帮助页分页 / 模式弹层的命中行含各自文案、设置页动作项文案与配色 |
+| `tests/ui_matrix.rs` | 绘制 / 命中覆盖矩阵：13 屏 × {60×20, 80×24, 100×30, 120×40, 160×50} 每屏断言一句正文、每个命中矩形都在画面内且压在画出来的内容上（逐显示列读缓冲区，CJK 续接列按空格）、页面级目标不得全部缺席；7 种弹层 × {60×20, 100×30, 120×40} 断言标题 / 行文本 / 底部提示与命中区；单词测试页题干 / 四个选项 / 选中态配色 / 底栏切换；4 处空态与 160 列宽屏；CET-4 真实资源下重跑几何检查 |
 | `tests/scrollbars.rs` | 滚动条与滚动边界：有滚动功能的页面溢出时画滚动条、内容一屏放得下时不画也不能滚、滚动上限按视口现算、点轨道滚一行；词条 / 快捷键 / 高级 FSRS / 流程 / 文章列表跟随光标滚动，行命中区与滚动偏移同源 |
 | `tests/articles.rs` | 书本 / 文章列表、断句与整篇跟打（空格可省略、错字落位、结算口径）、「N 篇」等于实际篇数、滚轮按指针所在栏分流、底栏提示与方向键语义一致 |
 | `tests/resume_cache.rs` | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮缓存、资源更新后旧断点按当前句数 clamp、0 句文章不显示断点 |

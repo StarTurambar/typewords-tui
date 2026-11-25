@@ -42,7 +42,7 @@
 | 练习 | 7 个内置流程 | `practice-flow-config.ts`（v6） | `src/domain/flow/mod.rs` 的 `builtin_flow` | 已对齐：节点、步骤、7 词小组、错词清空一致，`tests/flow_parity.rs` 覆盖 |
 | 练习 | 练习模式切换入口 | `words.vue` 的模式下拉 | `m` 打开 10 项模式选择弹层（主页「模式」标签也可点开） | 已对齐：写入 `wordPracticeMode`，`--mode` 仍可启动覆盖 |
 | 练习 | 自定义流程（PracticeFlowV2） | `practice-flow-runtime.ts`（存 localStorage） | 流程页：新建副本 / 编辑步骤 / 启用，存 `flows.json` | 部分：可调步骤顺序、乱序、组内巩固；不能增删节点、不能改节点词表来源 |
-| 练习 | 单词测试 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | `src/ui/word_test.rs`（`1`~`4` 选择、`Space` 下一题） | 已对齐：4 选 1、答错入错词本、结算 |
+| 练习 | 单词测试 | `(words)/words-test/[id].vue`、`core/utils/word-test.ts` | `src/ui/word_test.rs`（题面显示被测试单词、`1`~`4` 选择、`Space` 下一题） | 已对齐：题面 + 4 选 1、答错入错词本、结算 |
 | 练习 | 随机复习范围 | `ShufflePracticeSettingDialog.vue` | 固定：已学范围 + 每日词数 × 复习比例 | 行为不同：TUI 无「已学 10 词」门槛，进度为 0 时取整本词库 |
 | 练习 | 结算报告 | `components/word/Statistics.vue` | `src/ui/overlays.rs` | 已对齐：含错词 Top10 与本周记录；无分享入口 |
 | 练习 | 学完判定 / 总复习 | `words.vue` 的 `getCurrentStudyWord`、`updateCompletedDictProgress` | `domain/study_task.rs`、`domain/session.rs` | 行为不同：TUI 按词表实际词数判完、最后一个词仍作新词学完并置 `complete`；上游 `isEnd = length - 1` 会提前转复习 |
