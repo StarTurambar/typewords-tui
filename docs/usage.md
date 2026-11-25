@@ -412,6 +412,7 @@ tw export-dict --out .\backup.json   # 导出当前学习词库；tw export-dict
 | 启动报「找不到词库资源目录」 | `assets/` 不在可执行文件同级或当前目录，`--assets` 指向的目录没有 `list/word.json` | 把 `assets/` 放到可执行文件同级（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），或用 `--assets` 指向包含 `list/word.json` 的目录 |
 | 启动报「加载词库失败」 | 存档里的当前词库在资源目录中找不到，或词条文件缺失 | `tw doctor` 看每本词库的「文件」路径；用 `--dict` 指定存在的词库 |
 | 启动提示「另一个实例正在使用该数据目录」 | 同一个 `--home` 已经有 tw 在运行（TUI、`tw task` 或导入命令） | 退出那个进程；或换一个 `--home`（`tw doctor` / `tw export-dict` / `tw export-web` 只读，本来就允许同时运行） |
+| 启动提示「打开数据目录锁失败」 | `<home>/.tw.lock` 打不开：曾用管理员 / sudo 运行过（锁文件属于另一个账号）、数据目录只读、被 ACL 拒绝 | 删除该锁文件或修正属主后重试；数据目录本身不可写时用 `--home` 指定可写目录（存档本身仍可读，不会丢） |
 | 启动无反应 / 一直黑屏 | 终端小于 60 × 20 只显示提示；或进程还在装载大词库 | 放大窗口；等待首帧；`Ctrl+C` 退出后重试 |
 | 退出后终端显示错乱 | 进程被强制结束，未恢复备用屏幕 / 鼠标捕获 | 重开终端；Unix 可执行 `reset` |
 | 中文 / 边框错位、颜色发灰偏色 | 终端字体非等宽或不支持 CJK / 制表符、使用 conhost；终端不支持 24-bit 真彩色 | 换 Windows Terminal 并设置等宽且支持中文的字体；确认 `COLORTERM=truecolor`，或换「高对比」/ 自定义 ANSI 颜色主题 |

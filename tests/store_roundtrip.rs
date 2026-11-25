@@ -20,6 +20,34 @@ fn dict_roundtrip() {
     assert_eq!(loaded.value.word.study_index, 0);
 }
 
+/// 存档带只读属性（手工防误删、保留属性的备份还原、`robocopy /MIR`）时，
+/// 保存仍要真正落到磁盘：Windows 的 rename 拒绝覆盖只读目标，兜底在
+/// `fs::write_atomic` 里，这一层从 `FileStore` 入口验证接线。
+#[cfg(windows)]
+#[test]
+fn saving_a_readonly_dict_still_reaches_disk() {
+    let fixture = common::Fixture::new();
+    let store = FileStore::new(fixture.home()).unwrap();
+    let mut base = BaseState::default();
+    store.save_dict(&base).unwrap();
+
+    let path = store.file_path("dict.json");
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&path, permissions).unwrap();
+
+    base.word.study_index = 3;
+    store.save_dict(&base).expect("只读存档不应让保存失败");
+
+    let loaded = store.load_dict();
+    assert_eq!(loaded.status, LoadStatus::Loaded);
+    assert_eq!(loaded.value.word.study_index, 3);
+    assert!(
+        !std::fs::metadata(&path).unwrap().permissions().readonly(),
+        "保存后的存档不应仍带只读属性"
+    );
+}
+
 #[test]
 fn settings_roundtrip_preserves_unknown_fields() {
     let fixture = common::Fixture::new();
