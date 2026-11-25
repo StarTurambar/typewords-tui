@@ -43,78 +43,23 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 
 ### 4.1 单元测试（模块内 `#[cfg(test)]`）
 
-27 个源文件带单元测试：
+单元测试写在被测模块的 `#[cfg(test)]` 块里，跟着代码走；完整清单以 `cargo test --locked -- --list` 为准，这里只记几处不显然的设计：
 
-| 文件 | 覆盖点 |
-| --- | --- |
-| `src/domain/article.rs` | 断句（数字 / 货币 / 缩写 / 智能引号）、句子与译文对齐、跟打目标与可省略的词间空格、错字落位与退格、`load_books` 以文章文件实际篇数为准 |
-| `src/domain/fsrs.rs` | FSRS-6：新卡与学习步进、毕业、重学、Hard/Good/Easy 间隔排序、fuzz 确定性与默认关闭、参数夹取、高级 FSRS 页的权重区间与调度器夹取同源 |
-| `src/domain/typing.rs` | 五种练习类型的键入分支、大小写、全角标点、重复次数、自动下一词、错误计数 |
-| `src/domain/session.rs` | 除默写外每种模式换词自动朗读、结算按词表实际词数判完成、推进到最后一词时把词典置为完成 |
-| `src/domain/study_task.rs` | 取新词与学完判定按词表实际词数、最后一个词仍作为新词取、剩余词全被忽略时转向复习 |
-| `src/domain/shortcut.rs` | 键位往返、默认表覆盖全部动作、与上游默认表一致、冲突拒绝、一键反查多动作、方向键往返 |
-| `src/domain/scheduler.rs` | `enable_fuzz` 开关、最小间隔与 ±5% 抖动范围 |
-| `src/domain/statistics.rs` | 跨天会话计数去重、single / 旧记录兼容 |
-| `src/domain/types.rs` | 词典进度口径：有效词数是唯一分母、`last_learn_index` 夹取、`percent_of` 四舍五入与 0 分母、`normalize_progress` 装载校正 |
-| `src/domain/flow/mod.rs` | 7 个内置流程模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应、两种单词测试与自定义流程不在内置列表且兜底 `system` |
-| `src/app/mod.rs` | 30 秒周期保存只在时长真正推进时触发 |
-| `src/cli.rs` | `tw task` 的「N 词」与进度行都用有效词数（`dict_progress_lines`） |
-| `src/fs.rs` | 原子写与目录锁：临时名唯一且带 PID、不复用残留的旧固定名文件、rename 失败清理、并发写只留完整内容；Windows 上覆盖前清目标只读属性、对瞬时占用退避重试、最终失败时把属性恢复回去（`replace_file`），`copy_atomic` 不复制只读位；锁文件打不开时错误含可操作提示；`DirLock` 互斥到守卫释放并记录 PID |
-| `src/paths.rs` | 资源目录识别与优先级、`lock_home` 先创建数据目录再取锁 |
-| `src/logging.rs` | 默认落点 `<home>/logs/tw-<日期>.log`、`--log` 用其父目录做报告目录、行格式与级别过滤、保留窗口（未来时间戳不删）、只回看末尾 256 KB 的最近行、过期清理只删匹配 `tw-*.log` / `crash-*.txt` 的文件 |
-| `src/crash.rs` | 报告正文含时间 / 版本 / 数据目录 / 资源目录 / 日志文件 / panic 消息与位置 / 回溯 / 最近日志、路径缺失时的占位、同秒崩溃报告加序号、双击早退条件 `should_pause` 的各组合 |
-| `src/audio/tts.rs` | 系统 TTS：语速映射、逐行写 stdin、各平台命令构造、常驻进程复用与音色切换 |
-| `src/audio/player.rs` | 仅整词可发音、缺少播放程序时报错、脚本参数拼接 |
-| `src/theme/mod.rs` | 颜色解析（`#rgb` / `#rrggbb` / ANSI）、主题回退 |
-| `src/theme/load.rs` | base 继承、非法文件跳过、保留 id、未知 token 告警 |
-| `src/ui/bigtext.rs` | 字形行数、1×/2× 放大、遮罩空心占位、超长拆行、非 ASCII 回退 |
-| `src/ui/focus.rs` | 视觉分带（同行合并、整卡自成一带）、上下换带取水平中心最近者 |
-| `src/ui/insights.rs` | 累计总量与正确率、本周从周一开始、预计完成日期 |
-| `src/ui/overlays.rs` | 结算 / 确认弹层在最小终端内不越界、按钮行与方向键提示在 60×20 放得下 |
-| `src/ui/theme.rs` | 主题 token → ratatui `Color` 映射 |
-| `src/ui/typing_buttons.rs` | 按钮条不越界不重叠、60 列下提示行不被裁掉 |
-| `src/ui/widgets.rs` | 按显示宽度截断 / 折行、底栏提示不越界、滚动条几何（无溢出不出滑块、偏移夹取、滑块贴顶 / 贴底）与可点轨道 |
+- `src/domain/fsrs.rs` 的参数夹取与高级 FSRS 页的权重区间同源，改一侧要连带改另一侧。
+- `src/domain/shortcut.rs` 校验默认表覆盖全部动作、且与上游默认表逐条一致；加动作时这条会失败，属预期。
+- `src/fs.rs` 的原子写有 Windows 专属的只读属性与占用重试用例，跨平台改动别只看 Unix 分支。
+- `src/logging.rs` 的过期清理只删匹配 `tw-*.log` / `crash-*.txt` 的文件，未来时间戳不删。
 
 ### 4.2 集成测试（`tests/`）
 
-35 个测试文件，另有 `tests/common/mod.rs` 的 `Fixture`（`cli_for` 提供与 fixture 同源的缺省 `Cli`）。
+`tests/` 下每个文件按用途命名，文件名即覆盖范围；完整清单以 `cargo test --locked -- --list` 为准。不显然的几处：
 
-| 文件 | 覆盖点 |
-| --- | --- |
-| `tests/app_drive.rs` | 合成按键 / 鼠标驱动 `App`：开始练习与键入推进、`Tab` 跳过、断点恢复、设置保存、大字开关、错词收录、退出确认、自由练习不改设置、每日词数持久化、数字键切页、鼠标（主页开始 / 侧栏 / 滚轮 / 弹层 / 结算按钮）、自定义主题与 `--theme`、setting 版本过高只读、跨天统计去重 |
-| `tests/focus_nav.rs` | 所有标签页键盘焦点：启动默认选中主按钮、内容区换带与带内左右、每页落地内容区、`Tab` / 方向键换栏、各页光标移动、弹层与搜索框让位、resize 后焦点失效不触发动作、底栏文案与高亮矩形、最小终端忽略按键、鼠标点击同步焦点 |
-| `tests/interaction_fixes.rs` | 已修交互缺陷的回归：三个弹层的鼠标命中、主页 `+` / `-` 的像素对齐、滚动条不被行 target 抢走、命中矩形与渲染一致 |
-| `tests/overlay_keys.rs` | 弹层按钮焦点：方向键 / `Tab` / `j` / `k` 移动选中、两端停住、`Enter` 执行选中按钮（焦点在「取消」时只关闭）、`y` / `n` / `Esc` / `r` / `q` 旧快捷键保留、选中项高亮 |
-| `tests/ui_snapshots.rs` | `TestBackend` 渲染：主页 / 练习 / 大字、按键切页后外壳与页面标题加一句正文、终端过小、60×20 紧凑布局、CJK 宽度、正确输入着色、6 套内置主题、弹层、主页两个目标与帮助页分页 / 模式弹层的命中行含各自文案、设置页动作项文案与配色 |
-| `tests/ui_matrix.rs` | 绘制 / 命中覆盖矩阵：13 屏 × {60×20, 80×24, 100×30, 120×40, 160×50} 每屏断言一句正文、每个命中矩形都在画面内且压在画出来的内容上（逐显示列读缓冲区，CJK 续接列按空格）、页面级目标不得全部缺席；7 种弹层 × {60×20, 100×30, 120×40} 断言标题 / 行文本 / 底部提示与命中区；单词测试页题干 / 四个选项 / 选中态配色 / 底栏切换；4 处空态与 160 列宽屏；CET-4 真实资源下重跑几何检查 |
-| `tests/scrollbars.rs` | 滚动条与滚动边界：有滚动功能的页面溢出时画滚动条、内容一屏放得下时不画也不能滚、滚动上限按视口现算、点轨道滚一行；词条 / 快捷键 / 高级 FSRS / 流程 / 文章列表跟随光标滚动，行命中区与滚动偏移同源 |
-| `tests/articles.rs` | 书本 / 文章列表、断句与整篇跟打（空格可省略、错字落位、结算口径）、「N 篇」等于实际篇数、滚轮按指针所在栏分流、底栏提示与方向键语义一致 |
-| `tests/resume_cache.rs` | 启动固定停在主页、单词与文章断点续练、两份缓存不叠加、结算只清本轮缓存、资源更新后旧断点按当前句数 clamp、0 句文章不显示断点 |
-| `tests/words_manage.rs` | 词条管理页：搜索、编辑、批量标记与自定义词典 |
-| `tests/dict_word_counts.rs` | 词数只有一个来源：删除 / 编辑词条后词库页、主页磁贴与重启后同数；未打开过的词库用登记值；自建词库同步用户目录 `length`，内置资源目录不被改写 |
-| `tests/system_dicts.rs` | 内置词典（收藏 / 错词 / 已掌握）：词库页排最前、词数取实际词条、`w` 打开词条页、删词只改 `dict.json`、`Enter` 设为当前并落盘 `studyIndex`、重启保持、`--dict` 接受内置 id、已掌握不建会话 |
-| `tests/shell_nav.rs` | 宽屏侧栏与窄屏顶栏都列出文章、编号连续、当前页高亮、「+ / d 管理」卡与模式标签可点、帮助页列出文章与流程键 |
-| `tests/flows.rs` | 自定义流程：新建副本、编辑步骤（含步骤光标 `h` / `l`）、启用内置流程并持久化、底栏提示、`●` 只标「下一轮实际生效」的流程、两种单词测试模式没有任何 `●` |
-| `tests/store_roundtrip.rs` | 存档往返、未知字段保留、损坏隔离、版本过高不覆盖、缺省设置、练习缓存删除与版本不支持、`tw doctor` 列出全部存档 |
-| `tests/end_to_end.rs` | 完整会话到结算并写入统计与 FSRS 卡片；已掌握词下一轮被排除；错词巩固不会卡住；目录登记词数偏大时学完仍置 `complete`；旧存档进度越界装载校正；只剩最后一个词时仍学完 |
-| `tests/audio.rs` | 朗读触发：换词自动朗读、单词测试切题朗读与 `Ctrl+P` 重播（用 `audio::record_speech` 断言） |
-| `tests/backup_roundtrip.rs` | 网页版备份 `BackupData` v5 导入导出：版本与结构校验、拒绝损坏载荷、覆盖前 `.bak` 备份与失败回滚、文章断点分流 |
-| `tests/flow_parity.rs` | 7 个内置流程均可推进到结算、错词清空、相位与练习类型一致 |
-| `tests/home_resume.rs` | 主页断点呈现：「上次任务」标题与「继续学习」主按钮 |
-| `tests/import_dict.rs` | 词库导入登记、重复导入不追加目录项、非 `.json` 拒绝；`export-dict` 与 `import-dict` 往返、缺省输出与当前学习词库、内置词典从存档导出、空词库与未知 id 的报错 |
-| `tests/cli_doctor.rs` | `tw doctor` 的词数等于 `Catalog::load_words` 实际加载词数（空词条不计）；词库缺失或解析失败时逐本标注原因且不中断 |
-| `tests/cli_task.rs` | `tw task` 的写副作用披露：词表比存档进度短时装载会丢弃单词断点，输出必须说明；进度正常时不提「丢弃」 |
-| `tests/catalog_safety.rs` | 词库目录项的 `url` / `language` 单段校验：越界条目被跳过并告警、读写路径留在 `<home>` 内、手工构造的资源对象同样被拒、缺 `language` 仍按 `en` 兜底；Windows 上还拒绝保留设备名与尾随点 / 空格（`#[cfg(windows)]` 用例） |
-| `tests/diagnostics.rs` | 运行日志端到端：默认落点与启动上下文（版本 / 数据目录 / 执行的子命令 / 取锁 / 进程退出）、`--log` 改写落点且不再创建默认目录、`--no-log` 完全不写、`--log-level error` 过滤、持锁失败等启动错误仍进日志、`tw doctor` 打印日志目录、实际随机种子入日志（TUI 随机、`tw task` 固定 42）；日志是进程级全局状态，用例串行 |
-| `tests/crash_report.rs` | 崩溃报告端到端：装钩子后真 panic 写出唯一一份 `crash-<时间戳>.txt`，含版本 / 时间 / 数据目录 / 资源目录 / panic 消息与位置 / 回溯 / 最近日志，日志同时记下崩溃与报告路径（独立测试二进制，并关掉回车等待） |
-| `tests/layering.rs` | 分层守卫：`src/domain/` 不依赖 `app` / `ui` / `store` / `theme`，`src/theme/` 不依赖 `app` / `ui`；用 `syn` 解析源码，并自测守卫能识别禁止的 `use`、生命周期 / 字符字面量之后的代码、分组导入与宏体 |
-| `tests/real_assets.rs` | 用仓库内置 CET-4（2607 词）装载、建任务、保存重载；内置文章书目 `length` 与文章文件篇数一致 |
-| `tests/typing_keys.rs` | 两个键入练习页的键位统一：朗读 / 翻译 / 主题共用键位表，暂停、保存离开与帮助是两页共用 TUI 键位，键位表不抢跟打输入 |
-| `tests/fsrs_parity.rs` | 与上游 ts-fsrs 黄金样本（`tests/fixtures/fsrs_golden.json`）逐条比对 |
-| `tests/adv_fsrs.rs` | 高级 FSRS 子屏：设置页入口与 `Esc` 返回、数字 / 权重输入的解析与夹取、开关与恢复默认、修改后重新装载 `setting.json` 仍生效、鼠标选中-激活与滚轮、底栏「选中 X」、120×40 与 60×20 渲染不越界 |
-| `tests/data_dir_lock.rs` | 数据目录互斥：同进程与跨进程（`CARGO_BIN_EXE_tw` 真实子进程）第二个写入口被拒且 stderr 给出提示、只读的 `tw doctor` / `tw export-dict` / `tw export-web` 不受影响、启动创建 `<home>/.tw.lock` 退出释放 |
-| `tests/progress_consistency.rs` | 进度口径：百分比与「N / M 词」同源（主页 / 词库页 / 结算 / 单词测试结算 / 学完判定），元数据 `length` 偏大时不漂移；「继续」不二次推进；每日 1 词也能学完 |
-| `tests/docs.rs` | 文档一致性：README、`CHANGELOG.md` 与 `docs/` 的相对链接必须指向存在的文件；`docs/README.md` 必须登记 `docs/` 下全部 Markdown；`CHANGELOG.md` 遵循 Keep a Changelog（分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早版本 0.1.0 不缺失）；发布说明只从 `CHANGELOG.md` 提取，`release.yml` 不得再引用 `.github/release-notes/` 或 `--generate-notes` |
+- `tests/common/mod.rs` 的 `Fixture` 生成临时 home 与最小词库，`cli_for` 给出与 fixture 同源的缺省 `Cli`（详见 4.3）。
+- `tests/ui_matrix.rs` 是绘制 / 命中覆盖矩阵：每屏 × 多种终端尺寸（60×20 到 160×50）断言正文与命中矩形，各弹层同样按尺寸断言。
+- `tests/layering.rs` 用 `syn` 解析源码守分层，不靠运行期约定。
+- `tests/real_assets.rs` 依赖仓库内 `assets/`，必须从仓库根运行；`tests/fsrs_parity.rs` 对着 `tests/fixtures/fsrs_golden.json` 逐条比对。
+- `tests/crash_report.rs` 与 `tests/diagnostics.rs` 涉及进程级全局状态（panic 钩子、日志），各自独立成二进制或串行执行。
+- `tests/docs.rs` 守文档的形式一致性（链接、索引、版本、CHANGELOG 结构），不守语义——文档里的说法对不对仍要人看。
 
 ### 4.3 测试基础设施与写法
 
@@ -192,7 +137,7 @@ cargo run --quiet --example shot -- practice 120 40 dark --plain                
 ## 8. CI 与发布
 
 - **持续集成**（`.github/workflows/ci.yml`）：push 到 `main` 与任意 pull request 触发，旧任务自动取消；`fmt`（`cargo fmt --all --check`）、`clippy`（`--all-targets --locked -- -D warnings`，Ubuntu + Windows 矩阵——`#[cfg(windows)]` 代码在 Linux 上不参与编译，只在 Linux 跑 clippy 等于让它无门禁）、`test`（Ubuntu + Windows 矩阵，`cargo test --locked`）三个任务，依赖用 `Swatinem/rust-cache` 缓存。提交前本机至少跑这三条。
-- **发布**（`.github/workflows/release.yml`）：推送 `v*` tag 触发，但**推 tag 不等于直接发版**：先 `guard`（tag 必须等于 `Cargo.toml` 的 `version`，且 `CHANGELOG.md` 里要有该版本的条目、`[Unreleased]` 已清空，不一致立刻失败，不浪费后面的测试与构建），再 `verify`（`cargo fmt --all --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`，矩阵 Ubuntu + Windows，命令与 `ci.yml` 逐条相同），两关全绿才进入 `package`；`package` 用 `needs: [verify-lint, verify-test]` 显式依赖测试作业，`release` 依赖 `package`，任何一项红灯都不会产出归档、更不会发布（`tests/docs.rs` 的 `release_runs_the_ci_suite_before_packaging` 守着这条依赖）。之所以在发布 workflow 里对 tag 提交重跑一遍、而不是等 `main` 上的 CI：tag 可以指向任意提交，只有对 tag 提交本身跑过测试才作数，也避免跨 workflow 的竞态。`package` 任务用 matrix 覆盖 5 个目标——`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`x86_64-unknown-linux-musl`、`aarch64-apple-darwin`、`x86_64-apple-darwin`，每个目标在自己的 `runs-on` 上构建（Windows、Ubuntu、macOS；gnu 目标在 Ubuntu 22.04 上构建，构建基线即 glibc 2.35，更老的发行版建议改用 musl 静态包）。musl 目标直接用 rustc 自带的 self-contained musl 工具链（不要覆盖 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER`，否则会用系统 `musl-gcc` 混链，产出运行即崩的二进制），产物因此是静态链接、不依赖系统 glibc；构建后统一用 `tar -czf` 打成 `typewords-tui-vX.Y.Z-<target>.tar.gz`（内含可执行文件 + `assets/` + `docs/` + `README.md` + `LICENSE`），并为每个归档生成 `<归档名>.sha256`；随后把归档解压出来跑一次 `tw --version` 与 `tw doctor` 冒烟（顺带验证 `assets/` 与可执行文件同级；`x86_64-apple-darwin` 在 arm64 runner 上运行需要 Rosetta，跳过）。各个构建任务只 `upload-artifact`；独立的 `release` 任务下载全部 artifact 后断言「归档数 = matrix 条目数」并逐个核对 `.sha256`，再生成聚合 `SHA256SUMS`（`sha256sum -c` 自检），最后用 `gh release create` 一次发布。**不能每个构建任务各自 create release**：多个任务会并发竞争同一个 release（重复创建或互相覆盖上传），而聚合 `SHA256SUMS` 只有在全部归档到齐后才能生成，只能由汇总任务统一产出。发布说明只有一个来源：[CHANGELOG.md](../CHANGELOG.md)——`guard` 先用 `bash scripts/changelog.sh <version>` 确认该版本小节存在且有条目，并确认 `[Unreleased]` 已清空（否则说明这些改动没被写进任何版本），`release` 作业再用同一个脚本把正文交给 `gh release create --notes-file`，并把 `CHANGELOG.md` 底部该版本链接定义里的比对地址附成「完整变更」。`.github/release-notes/` 里 0.2.0–0.3.3 的原始公告已冻结为历史归档，新说明只写 `CHANGELOG.md`；脚本本地也能用（`bash scripts/changelog.sh 0.3.3`、`bash scripts/changelog.sh unreleased`）。workflow 顶层只给 `permissions: contents: read`，只有 `release` 作业提权到 `contents: write`。本地打一份同名同结构的包用于冒烟：`pwsh -File scripts/package.ps1 -Target <target>`（Windows）或 `bash scripts/package.sh --target <target>`（Linux / macOS），产物在 `dist/`（另支持 `-SkipBuild` / `--skip-build` 复用已编译产物）；tar 会记录 mtime，本地 sha256 与 CI 产物不同，只用于核对命名与包内布局。
+- **发布**（`.github/workflows/release.yml`）：推送 `v*` tag 触发，但**推 tag 不等于直接发版**：先 `guard`（tag 必须等于 `Cargo.toml` 的 `version`，且 `CHANGELOG.md` 里要有该版本的条目、`[Unreleased]` 已清空，不一致立刻失败，不浪费后面的测试与构建），再 `verify`（`cargo fmt --all --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`，矩阵 Ubuntu + Windows，命令与 `ci.yml` 逐条相同），两关全绿才进入 `package`；`package` 用 `needs: [verify-lint, verify-test]` 显式依赖测试作业，`release` 依赖 `package`，任何一项红灯都不会产出归档、更不会发布（`tests/docs.rs` 的 `release_runs_the_ci_suite_before_packaging` 守着这条依赖）。之所以在发布 workflow 里对 tag 提交重跑一遍、而不是等 `main` 上的 CI：tag 可以指向任意提交，只有对 tag 提交本身跑过测试才作数，也避免跨 workflow 的竞态。`package` 任务用 matrix 覆盖 5 个目标——`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`x86_64-unknown-linux-musl`、`aarch64-apple-darwin`、`x86_64-apple-darwin`，每个目标在自己的 `runs-on` 上构建（Windows、Ubuntu、macOS；gnu 目标在 Ubuntu 22.04 上构建，构建基线即 glibc 2.35，更老的发行版建议改用 musl 静态包）。musl 目标直接用 rustc 自带的 self-contained musl 工具链（不要覆盖 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER`，否则会用系统 `musl-gcc` 混链，产出运行即崩的二进制），产物因此是静态链接、不依赖系统 glibc；构建后统一用 `tar -czf` 打成 `typewords-tui-vX.Y.Z-<target>.tar.gz`（内含可执行文件 + `assets/` + `docs/` + `README.md` + `LICENSE`），并为每个归档生成 `<归档名>.sha256`；随后把归档解压出来跑一次 `tw --version` 与 `tw doctor` 冒烟（顺带验证 `assets/` 与可执行文件同级；`x86_64-apple-darwin` 在 arm64 runner 上运行需要 Rosetta，跳过）。各个构建任务只 `upload-artifact`；独立的 `release` 任务下载全部 artifact 后断言「归档数 = matrix 条目数」并逐个核对 `.sha256`，再生成聚合 `SHA256SUMS`（`sha256sum -c` 自检），最后用 `gh release create` 一次发布。**不能每个构建任务各自 create release**：多个任务会并发竞争同一个 release（重复创建或互相覆盖上传），而聚合 `SHA256SUMS` 只有在全部归档到齐后才能生成，只能由汇总任务统一产出。发布说明只有一个来源：[CHANGELOG.md](../CHANGELOG.md)——`guard` 先用 `bash scripts/changelog.sh <version>` 确认该版本小节存在且有条目，并确认 `[Unreleased]` 已清空（否则说明这些改动没被写进任何版本），`release` 作业再用同一个脚本把正文交给 `gh release create --notes-file`，并把 `CHANGELOG.md` 底部该版本链接定义里的比对地址附成「完整变更」。`.github/release-notes/` 里 0.2.0–0.3.3 的原始公告已冻结为历史归档，新说明只写 `CHANGELOG.md`；脚本本地也能用（`bash scripts/changelog.sh 0.3.3`、`bash scripts/changelog.sh unreleased`）。workflow 顶层只给 `permis... (line truncated to 2000 chars)
 - **发版清单**：① 改 `Cargo.toml` 的 `version`（包名与 `tw --version` 都取这里）、同步 [docs/README.md](README.md) 唯一的那行「对应版本」，并把 [CHANGELOG.md](../CHANGELOG.md) 的 `[Unreleased]` 整段移到新的 `## [x.y.z] - 日期` 小节（日期用该版本 tag 的提交日期，底部补一行 `compare` 链接定义、最新版本的比对终点是 `vX.Y.Z`；`[Unreleased]` 必须清空，否则 `guard` 拒绝发版）；② 重新生成 `docs/screenshots/`（侧栏与底栏显示版本号，见第 6 节）；③ fmt / clippy / test 全绿、`tests/docs.rs` 通过（发布 workflow 会在 tag 提交上重跑这三条，红灯直接拦在打包前）；④ 解压产物到空目录（Windows 为 `tw.exe`，Linux / macOS 为 `tw`），跑 `doctor` 与一次「开始练习 → 退出」冒烟，确认 `tw --version`、tar.gz 名与 sha256、`SHA256SUMS` 一致；本机可用 `pwsh -File scripts/package.ps1` 或 `bash scripts/package.sh` 打同名同结构的包核对命名与布局（`dist/` 下 `<归档名>.tar.gz` 与同名 `.sha256`；tar 会记录 mtime，本地 sha256 与 CI 不同）。
 
 ## 9. 代码风格与约定

@@ -86,22 +86,22 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 
 ## 4. 代码地图
 
-src/ 共 67 个 Rust 文件，按目录分组：
+src/ 按目录分组（只记职责，不记文件数）：
 
 | 目录 | 文件与职责 |
 | --- | --- |
-| src/（9） | main.rs 入口（第一件事装 panic 钩子）；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 6 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出；logging.rs 运行日志；crash.rs 崩溃报告与早退保护 |
-| src/app/（7） | mod.rs App、事件循环、on_tick、会话集成、SETTING_ROWS；action.rs Action 与 apply_action；buttons.rs 两个键入页的动作按钮；dicts.rs 词库页条目与词数唯一口径；focus.rs 焦点状态机；keymap.rs 非练习键位 → Action；mouse.rs 鼠标 → Action |
-| src/audio/（4） | mod.rs 音频分发；bell.rs 终端响铃；tts.rs 系统 TTS（Windows 常驻 PowerShell）；player.rs 有道发音下载与外部播放器 |
-| src/domain/（17） | mod.rs；types.rs 存档模型与整数枚举；constants.rs；catalog.rs 词库目录 / 词条加载 / import_dict（导出的读取与写回在 cli.rs，因为要读存档里的内置词典）；study_task.rs 今日任务；fsrs.rs FSRS-6 移植；scheduler.rs 评级与到期；typing.rs 键入状态机；question.rs 自测题；session.rs 练习会话；article.rs 文章模型 / 断句 / 跟打；shortcut.rs 42 动作键位表；wordbook.rs 词条管理；statistics.rs 统计落盘与聚合；timer.rs 计时；i18n.rs 中文文案；rng.rs 可注入随机源 |
-| src/domain/flow/（3） | mod.rs 内置流程 / 游标 / 相位 / 展示；navigator.rs 推进器与快照恢复；store.rs 自建流程数据结构 |
-| src/store/（1） | mod.rs 5 份存档的读写、信封、版本、隔离、原子写 |
-| src/theme/（3） | mod.rs 主题模型与注册表；builtin.rs 6 套内置主题；load.rs 用户主题加载与校验 |
-| src/ui/（23） | mod.rs 渲染入口与弹层顺序；theme.rs token → Color；shell.rs 响应式外壳；home.rs；practice.rs；word_test.rs；words.rs；articles.rs；flows.rs；dict_picker.rs；stats.rs；settings.rs；shortcuts.rs；adv_fsrs.rs 高级 FSRS 编辑页；help.rs；bigtext.rs 5x7 点阵；typing_buttons.rs；overlays.rs；widgets.rs；focus.rs 焦点几何 / 分带；insights.rs 统计聚合；target.rs Target / FocusId / ContentId；hit.rs 命中检测 |
+| src/ | main.rs 入口（第一件事装 panic 钩子）；lib.rs 模块声明、run()、版本行；cli.rs 参数 / 6 个子命令；paths.rs 数据目录与资源目录解析；bootstrap.rs 启动装载；fs.rs 原子写与目录锁；backup.rs 网页版 BackupData v5 导入导出；logging.rs 运行日志；crash.rs 崩溃报告与早退保护 |
+| src/app/ | mod.rs App、事件循环、on_tick、会话集成、SETTING_ROWS；action.rs Action 与 apply_action；buttons.rs 两个键入页的动作按钮；dicts.rs 词库页条目与词数唯一口径；focus.rs 焦点状态机；keymap.rs 非练习键位 → Action；mouse.rs 鼠标 → Action |
+| src/audio/ | mod.rs 音频分发；bell.rs 终端响铃；tts.rs 系统 TTS（Windows 常驻 PowerShell）；player.rs 有道发音下载与外部播放器 |
+| src/domain/ | mod.rs；types.rs 存档模型与整数枚举；constants.rs；catalog.rs 词库目录 / 词条加载 / import_dict（导出的读取与写回在 cli.rs，因为要读存档里的内置词典）；study_task.rs 今日任务；fsrs.rs FSRS-6 移植；scheduler.rs 评级与到期；typing.rs 键入状态机；question.rs 自测题；session.rs 练习会话；article.rs 文章模型 / 断句 / 跟打；shortcut.rs 42 动作键位表；wordbook.rs 词条管理；statistics.rs 统计落盘与聚合；timer.rs 计时；i18n.rs 中文文案；rng.rs 可注入随机源 |
+| src/domain/flow/ | mod.rs 内置流程 / 游标 / 相位 / 展示；navigator.rs 推进器与快照恢复；store.rs 自建流程数据结构 |
+| src/store/ | mod.rs 5 份存档的读写、信封、版本、隔离、原子写 |
+| src/theme/ | mod.rs 主题模型与注册表；builtin.rs 6 套内置主题；load.rs 用户主题加载与校验 |
+| src/ui/ | mod.rs 渲染入口与弹层顺序；theme.rs token → Color；shell.rs 响应式外壳；home.rs；practice.rs；word_test.rs；words.rs；articles.rs；flows.rs；dict_picker.rs；stats.rs；settings.rs；shortcuts.rs；adv_fsrs.rs 高级 FSRS 编辑页；help.rs；bigtext.rs 5x7 点阵；typing_buttons.rs；overlays.rs；widgets.rs；focus.rs 焦点几何 / 分带；insights.rs 统计聚合；target.rs Target / FocusId / ContentId；hit.rs 命中检测 |
 
 测试与辅助：
 
-- tests/：35 个集成测试文件 + common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
+- tests/：集成测试与 common/mod.rs（Fixture：临时 home + 12 词 toy 词库，默认 --seed 42）。
 - examples/：dump.rs（练习页转纯文本，覆盖 7 个内置流程模式）；shot.rs（任意页面渲染成 JSON 快照）。
 - tools/render-snapshot.py（JSON → PNG，需 Pillow，仅维护者用）。
 - scripts/sync-assets.mjs（同步上游词库 / 文章）、scripts/package.ps1 与 scripts/package.sh（本地打包，分别用于 Windows 与 Linux / macOS）、scripts/changelog.sh（从根目录 `CHANGELOG.md` 取某版本的发布说明，发布 workflow 与本地预览共用）。
@@ -174,7 +174,7 @@ panic 钩子的组合顺序不能变：crash 的钩子在 main 里最先安装�
 
 App 是唯一的状态持有者。输入分两条路径：
 
-- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行；Action 目前有 103 个变体。
+- 非练习页 / 弹层 / 鼠标 / 集成测试：keymap.rs 与 ui/hit.rs 产出 Action，统一由 App::apply_action 执行（变体定义在 src/app/action.rs）。
 - 练习页键盘（以及文章跟打页键盘）：App::on_practice_key / on_article_practice_key 直接调用键入状态机与会话方法，不经过 Action。这里是输入频率最高、状态迁移最复杂的路径。
 
 此外 App::bootstrap 与 App::on_tick 也直接更新状态。因此更准确的约束是：domain 提供受控迁移函数，app 是唯一修改状态的地方，ui 只读。
