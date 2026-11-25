@@ -89,6 +89,15 @@ fn assert_targets_land_on_drawn_content(app: &App, label: &str, width: u16, heig
         !targets.is_empty(),
         "{label} {width}x{height}：页面应有可点目标"
     );
+    // 外壳的导航区对每个页面都会返回，所以「非空」这一条挡不住「页面自己的
+    // targets 整个消失」——页面级目标必须另有至少一个，否则那条不变量
+    // （新增可点击区域必须在 targets() 注册）就只剩外壳在背书。
+    assert!(
+        targets
+            .iter()
+            .any(|target| !matches!(target.action, Action::Navigate(_) | Action::QuitRequest)),
+        "{label} {width}x{height}：页面级命中区不应全部缺席（只剩外壳导航区兜底）"
+    );
     for target in &targets {
         let rect = target.rect;
         let what = format!("{label} {width}x{height} {:?}", target.action);
@@ -142,18 +151,10 @@ fn real_assets_screens_keep_targets_on_drawn_content() {
             home: home.path().to_path_buf(),
             assets: assets.clone(),
         };
+        // 只关掉日志（临时 home 里不必留日志），其余缺省值与 fixture 同源。
         let cli = Cli {
-            assets: Some(paths.assets.clone()),
-            home: Some(paths.home.clone()),
-            dict: None,
-            mode: None,
-            theme: None,
-            seed: Some(42),
-            reset_practice: false,
-            log: None,
             no_log: true,
-            log_level: typewords_tui::logging::Level::Info,
-            command: None,
+            ..common::cli_for(paths.clone())
         };
         let mut app = app::build_for_test(paths, cli).expect("app");
         prepare_screen(&mut app, screen);
@@ -310,7 +311,14 @@ fn every_overlay_draws_its_title_rows_and_hint() {
             // 弹层自己的命中区同样要压在画出来的行上。
             let cells = common::render_cells(&app, width, height);
             let area = Rect::new(0, 0, width, height);
+            // 输入框弹层（Edit）是纯键盘的、没有可点区域，所以这里不要求非空。
             for target in typewords_tui::ui::hit::targets(&app, area) {
+                assert!(
+                    target.rect.right() <= width && target.rect.bottom() <= height,
+                    "{} {width}x{height}：命中区 {:?} 越出画面（终端 {width}x{height}）",
+                    overlay.label(),
+                    target.rect
+                );
                 assert!(
                     !cells.rect_is_blank(target.rect),
                     "{} {width}x{height}：命中区 {:?} 落在空白上（{:?}）",
@@ -436,6 +444,56 @@ fn word_test_screen_shows_prompt_options_and_footer() {
         assert!(
             footer.contains("空格 下一题"),
             "{width}x{height}：答完后底栏应提示「空格 下一题」，实际 {footer:?}"
+        );
+    }
+}
+
+/// 超长题干单词不能把「选择正确的释义」挤掉。
+///
+/// 题干行只画 1 行：单词把整行占满时提示语会被直接裁掉（不是换行），
+/// 所以单词必须自己截断。第二行是布局留白，提示折行到这里同样是缺陷。
+#[test]
+fn long_prompt_word_keeps_its_hint() {
+    const LONG: &str = "pneumonoultramicroscopicsilicovolcanoconiosis";
+    let (_fixture, mut app) = build(Screen::WordTest);
+    {
+        let state = app.word_test.as_mut().expect("应有单词测试状态");
+        let question = state.question.as_mut().expect("应生成题目");
+        let index = question.correct_index;
+        question.candidates[index].word.word = LONG.to_string();
+    }
+    let options = app
+        .word_test
+        .as_ref()
+        .and_then(|state| state.question.as_ref())
+        .map(|question| question.candidates.len())
+        .expect("应生成题目");
+
+    // (宽, 高, 这个尺寸下题干必须截断)：60 列放不下 45 个字母 + 提示语。
+    for (width, height, truncated) in [(60u16, 20u16, true), (100, 30, false)] {
+        let area = Rect::new(0, 0, width, height);
+        let content = shell::layout(area, Nav::Home).content;
+        let layout = word_test::layout(content, options);
+        let rows = common::render_rows(&app, width, height);
+        let prompt = rows
+            .get(layout.prompt.y as usize)
+            .map(|(text, _)| text.clone())
+            .unwrap_or_default();
+        assert!(
+            prompt.contains("选择正确的释义"),
+            "{width}x{height}：题干行应保留提示语，实际 {prompt:?}"
+        );
+        assert_eq!(
+            prompt.contains(LONG),
+            !truncated,
+            "{width}x{height}：题干单词该截断时截断、放得下时整词显示，实际 {prompt:?}"
+        );
+        // 题干区的第二行是留白：提示折行到这里就说明没截断。
+        let cells = common::render_cells(&app, width, height);
+        assert!(
+            cells.rect_is_blank(Rect::new(content.x, layout.prompt.y + 1, content.width, 1)),
+            "{width}x{height}：题干第二行应留白，实际 {:?}",
+            cells.rect_text(Rect::new(content.x, layout.prompt.y + 1, content.width, 1))
         );
     }
 }

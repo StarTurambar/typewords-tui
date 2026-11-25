@@ -141,19 +141,7 @@ impl Fixture {
     }
 
     pub fn cli(&self) -> Cli {
-        Cli {
-            assets: Some(self.assets()),
-            home: Some(self.home()),
-            dict: None,
-            mode: None,
-            theme: None,
-            seed: Some(42),
-            reset_practice: false,
-            log: None,
-            no_log: false,
-            log_level: typewords_tui::logging::Level::Info,
-            command: None,
-        }
+        cli_for(self.paths())
     }
 
     pub fn words(&self) -> Vec<Word> {
@@ -178,6 +166,26 @@ impl Fixture {
 
     pub fn settings() -> SettingState {
         SettingState::default()
+    }
+}
+
+/// 与 [`Fixture::cli`] 同一份缺省值，但指向调用方给定的数据目录 / 资源目录。
+///
+/// 真实资源用例不经过 `Fixture`（它自己建临时 home），共用这一份可以避免
+/// `Cli` 字面量在两处各写一遍、加字段时漏改其中一处。
+pub fn cli_for(paths: Paths) -> Cli {
+    Cli {
+        assets: Some(paths.assets),
+        home: Some(paths.home),
+        dict: None,
+        mode: None,
+        theme: None,
+        seed: Some(42),
+        reset_practice: false,
+        log: None,
+        no_log: false,
+        log_level: typewords_tui::logging::Level::Info,
+        command: None,
     }
 }
 
