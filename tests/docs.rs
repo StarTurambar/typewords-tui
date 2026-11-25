@@ -1,5 +1,5 @@
 //! 文档一致性检查：README、CHANGELOG.md 与 docs/ 中的相对链接必须指向真实存在的文件，
-//! docs/README.md 必须登记 docs/ 下的全部 Markdown 文档，CHANGELOG.md 必须遵循
+//! 链接里的 `#锚点` 必须命中目标文档的标题，docs/README.md 必须登记 docs/ 下的全部 Markdown 文档，CHANGELOG.md 必须遵循
 //! Keep a Changelog 且是发布说明的唯一来源。
 //!
 //! 检查只依赖本地文件系统，随 `cargo test` 在所有平台运行，防止文档重构后留下死链。
@@ -12,8 +12,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn markdown_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = vec![root.join("README.md"), root.join("CHANGELOG.md")];
+    // 仓库根的 Markdown 一起校验：逐个点名会漏掉新加的根文档
+    // （CONTRIBUTING.md 就曾因此完全不在检查范围内）。
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md") {
+                files.push(path);
+            }
+        }
+    }
     collect_markdown(&root.join("docs"), &mut files);
+    files.sort();
     files.into_iter().filter(|path| path.is_file()).collect()
 }
 
@@ -97,6 +108,53 @@ fn resolve_link(root: &Path, document: &Path, target: &str) -> Option<PathBuf> {
     Some(base.join(path))
 }
 
+/// 把标题文本转成 GitHub 风格的锚点：小写、去掉 Markdown 标记与标点、空格转连字符。
+fn slugify(heading: &str) -> String {
+    let mut out = String::new();
+    for ch in heading.to_lowercase().chars() {
+        if matches!(ch, '`' | '*' | '[' | ']' | '(' | ')') {
+            continue;
+        }
+        if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('-');
+        }
+    }
+    out
+}
+
+/// 收集文档内全部标题锚点；重名标题按 GitHub 的规则追加 `-1`、`-2`。
+fn heading_slugs(content: &str) -> Vec<String> {
+    let mut slugs: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    for line in content.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let Some(rest) = line.trim_start().strip_prefix('#') else {
+            continue;
+        };
+        let extra = rest.chars().take_while(|ch| *ch == '#').count();
+        let Some(text) = rest[extra..].strip_prefix(' ') else {
+            continue;
+        };
+        let base = slugify(text.trim());
+        let mut candidate = base.clone();
+        let mut suffix = 1;
+        while slugs.contains(&candidate) {
+            candidate = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        slugs.push(candidate);
+    }
+    slugs
+}
+
 #[test]
 fn markdown_relative_links_point_to_existing_files() {
     let root = repo_root();
@@ -116,6 +174,54 @@ fn markdown_relative_links_point_to_existing_files() {
     assert!(
         broken.is_empty(),
         "以下文档链接指向不存在的文件（共 {} 条）：\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}
+
+#[test]
+fn markdown_anchors_point_to_existing_headings() {
+    let root = repo_root();
+    let mut broken = Vec::new();
+    for document in markdown_files(&root) {
+        let content = fs::read_to_string(&document).unwrap_or_default();
+        for target in markdown_link_targets(&content) {
+            let Some((path, fragment)) = target.split_once('#') else {
+                continue;
+            };
+            if is_external(path) {
+                continue;
+            }
+            let fragment = fragment.split('?').next().unwrap_or(fragment);
+            if fragment.is_empty() {
+                continue;
+            }
+            let resolved = if path.is_empty() {
+                document.clone()
+            } else {
+                match resolve_link(&root, &document, path) {
+                    Some(resolved) if resolved.extension().is_some_and(|ext| ext == "md") => {
+                        resolved
+                    }
+                    _ => continue,
+                }
+            };
+            // 文件缺失由链接测试负责报错，这里只判锚点。
+            let Ok(target_content) = fs::read_to_string(&resolved) else {
+                continue;
+            };
+            if !heading_slugs(&target_content)
+                .iter()
+                .any(|slug| slug == fragment)
+            {
+                let from = document.strip_prefix(&root).unwrap_or(document.as_path());
+                broken.push(format!("{}: {target}", from.display()));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "以下文档锚点指向不存在的标题（共 {} 条）：\n{}",
         broken.len(),
         broken.join("\n")
     );
@@ -197,7 +303,8 @@ fn source_paths(content: &str) -> Vec<String> {
                 }
             }
             let candidate = &content[start..end];
-            if candidate.ends_with(".rs") {
+            // `src/...rs` 这类带省略号的写法是占位符（描述「引用源码」规则时用），不是真实路径。
+            if candidate.ends_with(".rs") && !candidate.contains("...") {
                 paths.push(candidate.to_string());
             }
             cursor = end;
@@ -728,5 +835,42 @@ fn release_notes_come_from_the_changelog() {
             readme.contains("CHANGELOG.md"),
             ".github/release-notes/README.md 应指向 CHANGELOG.md"
         );
+    }
+}
+
+/// 锚点计算的单元测试。
+///
+/// slugify / heading_slugs 是守卫自己的逻辑：它们错了，锚点校验会安静地放过坏链接。
+/// 只靠仓库里现有的真实链接间接覆盖不够——改坏重名编号或围栏判断后，
+/// 只要那几条链接仍能命中，测试照样全绿。这里直接钉住规则本身。
+#[cfg(test)]
+mod anchor_unit_tests {
+    use super::{heading_slugs, slugify};
+
+    #[test]
+    fn slugify_drops_punctuation_and_keeps_cjk() {
+        assert_eq!(slugify("10. 文档维护"), "10-文档维护");
+        // 全角括号不在 GitHub 的锚点里，必须整段去掉而不是保留。
+        assert_eq!(slugify("测试（括号）"), "测试括号");
+    }
+
+    #[test]
+    fn headings_inside_code_fences_are_not_anchors() {
+        let content = "## 真标题\n\n```text\n# 假标题\n```\n\n### 另一个\n";
+        let slugs = heading_slugs(content);
+        assert!(
+            slugs.contains(&"真标题".to_string()),
+            "围栏外的标题应算锚点：{slugs:?}"
+        );
+        assert!(
+            !slugs.contains(&"假标题".to_string()),
+            "围栏内的 # 是示例代码，不是标题：{slugs:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_headings_get_numeric_suffixes() {
+        let slugs = heading_slugs("## x\n## x\n## x\n");
+        assert_eq!(slugs, vec!["x", "x-1", "x-2"]);
     }
 }

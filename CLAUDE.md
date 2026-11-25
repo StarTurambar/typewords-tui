@@ -42,7 +42,7 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 | domain | `src/domain/` | **不能**依赖 `app`/`ui`/`store`/`theme`，也不引入终端相关 crate（因此可被单测与 `tw task` 直接复用）；`tests/layering.rs` 守着这条 |
 | store | `src/store/` | 依赖 domain 与 fs；5 份 JSON 存档的原子写 + 版本校验 + 损坏隔离 |
 | theme | `src/theme/` | 不依赖 ratatui，也不依赖 ui |
-| fs | `src/fs.rs` | 只依赖 std 的原子写原语（唯一临时名）与数据目录锁（`<home>/.tw.lock`）；domain 与 store 都用它，避免两层成环 |
+| fs | `src/fs.rs` | 原子写原语（唯一临时名）与数据目录锁（`<home>/.tw.lock`）；不依赖 domain / store，两层都用它，避免成环 |
 | app | `src/app/` | 唯一的状态修改者，渲染入口调用 ui |
 | ui | `src/ui/` | 只读 `App`，**不得**修改状态 |
 | audio | `src/audio/` | 终端响铃、系统 TTS、有道下载 + 外部播放器；子进程不阻塞事件循环 |
@@ -86,7 +86,7 @@ serde 约定：结构体普遍 `#[serde(default, rename_all = "camelCase")]`；`
 ## 文档维护
 
 - 代码区域 → 权威文档：整体分层/生命周期/状态与输入/子系统契约/扩展 → `docs/architecture.md`；用户操作与 CLI → `docs/usage.md`；设置 → `docs/settings.md`；键位 → `docs/shortcuts.md`；主题 → `docs/themes.md`；存档与资源 → `docs/persistence.md`；构建/测试/CI/发布 → `docs/development.md`；上游差异 → `docs/upstream-parity.md`。
-- `cargo test` 会跑 `tests/docs.rs`：README、`CHANGELOG.md` 与 `docs/` 下所有 Markdown 的相对链接必须指向真实文件，`docs/README.md` 必须登记 `docs/` 下每一个 Markdown，文档版本必须与 `Cargo.toml` 一致，文档里引用的 `src/...rs` 路径必须存在；`CHANGELOG.md` 必须遵循 Keep a Changelog（六分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早的 0.1.0 不缺失），且发布说明只从它提取。新增文档后忘记登记索引会直接测试失败。
+- `cargo test` 会跑 `tests/docs.rs`：仓库根与 `docs/` 下所有 Markdown 的相对链接必须指向真实文件，链接里的 `#锚点` 必须命中目标文档的标题，`docs/README.md` 必须登记 `docs/` 下每一个 Markdown，文档版本必须与 `Cargo.toml` 一致，文档里引用的 `src/...rs` 路径必须存在；`CHANGELOG.md` 必须遵循 Keep a Changelog（六分类、日期、版本倒序、链接定义、最新版本与 `Cargo.toml` 一致、最早的 0.1.0 不缺失），且发布说明只从它提取。新增文档后忘记登记索引会直接测试失败。
 - 用户可见行为（按键、CLI、设置项、存档字段、主题格式）改动时，同步更新 `docs/usage.md`、`docs/settings.md`、`docs/shortcuts.md`、`docs/persistence.md`、`docs/themes.md` 中受影响者；改界面后按 `docs/development.md` 重新生成 `docs/screenshots/`，不要手工截图或缩放。
 - 用户可见改动同时记进根目录 `CHANGELOG.md` 的 `## [Unreleased]`（Keep a Changelog 六分类：新增 / 变更 / 弃用 / 移除 / 修复 / 安全）；发版时移到版本标题下，发布说明由它生成。
 - 文档引用源码只写路径与符号名，不写行号（避免重构后失效）。
