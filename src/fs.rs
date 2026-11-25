@@ -199,9 +199,13 @@ const RENAME_BACKOFF_MS: [u64; 3] = [10, 20, 40];
 /// 而 POSIX 的 `rename(2)` 只看目录写权限——同一份代码在 Unix 上能过、在
 /// Windows 上必失败。这里先清掉目标的只读属性，再对瞬时占用做几次小退避
 /// 重试；Unix 保持一次 `rename`，不改变原有语义。
+///
+/// 清掉的只读属性在最终失败时会被恢复：保存没成功，旧存档的内容和属性都该
+/// 原样不动。占用导致的失败是个例外——恢复本身也要打开同一个文件，会被同一
+/// 把占用挡住，此时尽力而为（见 [restore_readonly]）。
 #[cfg(windows)]
 fn replace_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
-    clear_readonly(path);
+    let cleared_readonly = clear_readonly(path);
     let mut attempt = 0;
     loop {
         match fs::rename(tmp, path) {
@@ -211,31 +215,57 @@ fn replace_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
                 std::thread::sleep(std::time::Duration::from_millis(backoff));
                 attempt += 1;
             }
-            Err(err) => return Err(err),
+            Err(err) => {
+                if cleared_readonly {
+                    restore_readonly(path);
+                }
+                return Err(err);
+            }
         }
     }
 }
 
-/// 目标存在且带只读属性时清掉它。
+/// 目标存在且带只读属性时清掉它，返回「是否真的清过」。
 ///
 /// Windows 的 rename 拒绝覆盖只读目标，不清就相当于「给存档加只读 = 每次
-/// 保存都失败」。清属性失败不在这里报错——rename 自己会给出带提示的错误。
+/// 保存都失败」。清属性失败不在这里报错——rename 自己会给出带提示的错误，
+/// 此时返回 `false`，失败分支也就没有需要恢复的东西。
 #[cfg(windows)]
-fn clear_readonly(path: &Path) {
+fn clear_readonly(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
-        return;
+        return false;
     };
     let mut permissions = metadata.permissions();
     if !permissions.readonly() {
-        return;
+        return false;
     }
     // 只读位是 Windows 上 `Permissions` 唯一表达的属性；这里的 `false` 是
     // 清除「拒绝覆盖」这个障碍，不是把 Unix 的权限位放宽。
     #[allow(clippy::permissions_set_readonly_false)]
     {
         permissions.set_readonly(false);
-        let _ = fs::set_permissions(path, permissions);
     }
+    fs::set_permissions(path, permissions).is_ok()
+}
+
+/// 保存最终失败时把刚清掉的只读属性恢复回去。
+///
+/// 只读属性是用户「别动这个文件」的显式意图，而保存失败时旧存档的内容原样
+/// 保留——属性也该如此，否则一次失败的保存会悄悄把防误删的保护撤掉。
+///
+/// 尽力而为：失败原因若是文件被别的进程独占，恢复所需的打开会被同一把占用
+/// 挡住，此时保持现状（用户拿到的是带「被占用」提示的错误）。
+#[cfg(windows)]
+fn restore_readonly(path: &Path) {
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    let mut permissions = metadata.permissions();
+    if permissions.readonly() {
+        return;
+    }
+    permissions.set_readonly(true);
+    let _ = fs::set_permissions(path, permissions);
 }
 
 /// 是否值得重试的 rename 错误：5（`ERROR_ACCESS_DENIED`，只读 / 被占用）与
@@ -634,6 +664,40 @@ mod tests {
         );
 
         drop(holder);
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "old",
+            "失败时正式文件应保持原内容"
+        );
+        assert!(temp_files(dir.path()).is_empty(), "失败要清掉本次临时文件");
+    }
+
+    /// 保存最终失败时，旧存档要原样不动——内容如此，用户加的只读属性也如此。
+    /// 覆盖前清属性是为了让 rename 能过；没换成新文件就该把属性还回去，否则
+    /// 一次失败会把「防误删」的保护悄悄撤掉。
+    ///
+    /// 用「本次临时文件被外部删掉」制造最终失败：这条路径不占着目标，恢复
+    /// 属性不会被占用挡住（被独占时恢复只能尽力而为，那是另一回事）。
+    #[cfg(windows)]
+    #[test]
+    fn write_atomic_restores_the_readonly_target_when_the_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dict.json");
+        write_atomic(&target, "old").unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&target, permissions).unwrap();
+
+        let err = write_atomic_with(&target, b"new", |tmp| {
+            fs::remove_file(tmp).expect("模拟外部删除本次的临时文件");
+        })
+        .expect_err("临时文件被删后 rename 必须失败");
+        assert!(err.to_string().contains("替换存档失败"), "{err}");
+
+        assert!(
+            fs::metadata(&target).unwrap().permissions().readonly(),
+            "保存失败后应把只读属性恢复回去"
+        );
         assert_eq!(
             fs::read_to_string(&target).unwrap(),
             "old",

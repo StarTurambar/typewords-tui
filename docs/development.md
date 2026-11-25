@@ -59,7 +59,7 @@ cargo build --release --locked     # target/release/tw（Windows 为 tw.exe）
 | `src/domain/flow/mod.rs` | 7 个内置流程模式（`BUILTIN_FLOW_MODES`）与 `builtin_flow` 一一对应、两种单词测试与自定义流程不在内置列表且兜底 `system` |
 | `src/app/mod.rs` | 30 秒周期保存只在时长真正推进时触发 |
 | `src/cli.rs` | `tw task` 的「N 词」与进度行都用有效词数（`dict_progress_lines`） |
-| `src/fs.rs` | 原子写与目录锁：临时名唯一且带 PID、不复用残留的旧固定名文件、rename 失败清理、并发写只留完整内容；Windows 上覆盖前清目标只读属性并对瞬时占用退避重试（`replace_file`），`copy_atomic` 不复制只读位；锁文件打不开时错误含可操作提示；`DirLock` 互斥到守卫释放并记录 PID |
+| `src/fs.rs` | 原子写与目录锁：临时名唯一且带 PID、不复用残留的旧固定名文件、rename 失败清理、并发写只留完整内容；Windows 上覆盖前清目标只读属性、对瞬时占用退避重试、最终失败时把属性恢复回去（`replace_file`），`copy_atomic` 不复制只读位；锁文件打不开时错误含可操作提示；`DirLock` 互斥到守卫释放并记录 PID |
 | `src/paths.rs` | 资源目录识别与优先级、`lock_home` 先创建数据目录再取锁 |
 | `src/logging.rs` | 默认落点 `<home>/logs/tw-<日期>.log`、`--log` 用其父目录做报告目录、行格式与级别过滤、保留窗口（未来时间戳不删）、只回看末尾 256 KB 的最近行、过期清理只删匹配 `tw-*.log` / `crash-*.txt` 的文件 |
 | `src/crash.rs` | 报告正文含时间 / 版本 / 数据目录 / 资源目录 / 日志文件 / panic 消息与位置 / 回溯 / 最近日志、路径缺失时的占位、同秒崩溃报告加序号、双击早退条件 `should_pause` 的各组合 |
