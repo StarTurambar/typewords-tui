@@ -12,7 +12,7 @@ use ratatui::widgets::Paragraph;
 use crate::app::{App, WordTestState};
 use crate::ui::shell::{self, Nav};
 use crate::ui::theme::Theme;
-use crate::ui::widgets::fit_text;
+use crate::ui::widgets::{display_width, fit_text};
 
 /// 单词测试页布局。
 pub struct WordTestLayout {
@@ -129,17 +129,30 @@ fn render_prompt(state: &WordTestState, frame: &mut Frame, rect: Rect, theme: &T
     let Some(candidate) = question.candidates.get(question.correct_index) else {
         return;
     };
-    let line = Line::from(vec![
-        Span::styled(
-            format!(" {}", candidate.word.word),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("   选择正确的释义", Style::default().fg(theme.dim)),
-    ]);
+    // 提示语优先：单词再长也只截自己，不能把「选择正确的释义」挤到看不见的
+    // 第二行去（该 rect 只画 1 行）。窄到连提示都放不下时只画单词。
+    const HINT: &str = "   选择正确的释义";
+    let width = rect.width as usize;
+    let show_hint = width > display_width(HINT) + 1;
+    let word = if show_hint {
+        fit_text(
+            &format!(" {}", candidate.word.word),
+            width - display_width(HINT),
+        )
+    } else {
+        format!(" {}", candidate.word.word)
+    };
+    let mut spans = vec![Span::styled(
+        word,
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if show_hint {
+        spans.push(Span::styled(HINT, Style::default().fg(theme.dim)));
+    }
     frame.render_widget(
-        Paragraph::new(line),
+        Paragraph::new(Line::from(spans)),
         Rect::new(rect.x, rect.y, rect.width, 1),
     );
 }
