@@ -1,5 +1,5 @@
 //! 文档一致性检查：README、CHANGELOG.md 与 docs/ 中的相对链接必须指向真实存在的文件，
-//! docs/README.md 必须登记 docs/ 下的全部 Markdown 文档，CHANGELOG.md 必须遵循
+//! 链接里的 `#锚点` 必须命中目标文档的标题，docs/README.md 必须登记 docs/ 下的全部 Markdown 文档，CHANGELOG.md 必须遵循
 //! Keep a Changelog 且是发布说明的唯一来源。
 //!
 //! 检查只依赖本地文件系统，随 `cargo test` 在所有平台运行，防止文档重构后留下死链。
@@ -97,6 +97,53 @@ fn resolve_link(root: &Path, document: &Path, target: &str) -> Option<PathBuf> {
     Some(base.join(path))
 }
 
+/// 把标题文本转成 GitHub 风格的锚点：小写、去掉 Markdown 标记与标点、空格转连字符。
+fn slugify(heading: &str) -> String {
+    let mut out = String::new();
+    for ch in heading.to_lowercase().chars() {
+        if matches!(ch, '`' | '*' | '[' | ']' | '(' | ')') {
+            continue;
+        }
+        if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('-');
+        }
+    }
+    out
+}
+
+/// 收集文档内全部标题锚点；重名标题按 GitHub 的规则追加 `-1`、`-2`。
+fn heading_slugs(content: &str) -> Vec<String> {
+    let mut slugs: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    for line in content.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let Some(rest) = line.trim_start().strip_prefix('#') else {
+            continue;
+        };
+        let extra = rest.chars().take_while(|ch| *ch == '#').count();
+        let Some(text) = rest[extra..].strip_prefix(' ') else {
+            continue;
+        };
+        let base = slugify(text.trim());
+        let mut candidate = base.clone();
+        let mut suffix = 1;
+        while slugs.contains(&candidate) {
+            candidate = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        slugs.push(candidate);
+    }
+    slugs
+}
+
 #[test]
 fn markdown_relative_links_point_to_existing_files() {
     let root = repo_root();
@@ -116,6 +163,54 @@ fn markdown_relative_links_point_to_existing_files() {
     assert!(
         broken.is_empty(),
         "以下文档链接指向不存在的文件（共 {} 条）：\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}
+
+#[test]
+fn markdown_anchors_point_to_existing_headings() {
+    let root = repo_root();
+    let mut broken = Vec::new();
+    for document in markdown_files(&root) {
+        let content = fs::read_to_string(&document).unwrap_or_default();
+        for target in markdown_link_targets(&content) {
+            let Some((path, fragment)) = target.split_once('#') else {
+                continue;
+            };
+            if is_external(path) {
+                continue;
+            }
+            let fragment = fragment.split('?').next().unwrap_or(fragment);
+            if fragment.is_empty() {
+                continue;
+            }
+            let resolved = if path.is_empty() {
+                document.clone()
+            } else {
+                match resolve_link(&root, &document, path) {
+                    Some(resolved) if resolved.extension().is_some_and(|ext| ext == "md") => {
+                        resolved
+                    }
+                    _ => continue,
+                }
+            };
+            // 文件缺失由链接测试负责报错，这里只判锚点。
+            let Ok(target_content) = fs::read_to_string(&resolved) else {
+                continue;
+            };
+            if !heading_slugs(&target_content)
+                .iter()
+                .any(|slug| slug == fragment)
+            {
+                let from = document.strip_prefix(&root).unwrap_or(document.as_path());
+                broken.push(format!("{}: {target}", from.display()));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "以下文档锚点指向不存在的标题（共 {} 条）：\n{}",
         broken.len(),
         broken.join("\n")
     );
