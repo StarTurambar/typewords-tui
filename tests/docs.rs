@@ -837,3 +837,40 @@ fn release_notes_come_from_the_changelog() {
         );
     }
 }
+
+/// 锚点计算的单元测试。
+///
+/// slugify / heading_slugs 是守卫自己的逻辑：它们错了，锚点校验会安静地放过坏链接。
+/// 只靠仓库里现有的真实链接间接覆盖不够——改坏重名编号或围栏判断后，
+/// 只要那几条链接仍能命中，测试照样全绿。这里直接钉住规则本身。
+#[cfg(test)]
+mod anchor_unit_tests {
+    use super::{heading_slugs, slugify};
+
+    #[test]
+    fn slugify_drops_punctuation_and_keeps_cjk() {
+        assert_eq!(slugify("10. 文档维护"), "10-文档维护");
+        // 全角括号不在 GitHub 的锚点里，必须整段去掉而不是保留。
+        assert_eq!(slugify("测试（括号）"), "测试括号");
+    }
+
+    #[test]
+    fn headings_inside_code_fences_are_not_anchors() {
+        let content = "## 真标题\n\n```text\n# 假标题\n```\n\n### 另一个\n";
+        let slugs = heading_slugs(content);
+        assert!(
+            slugs.contains(&"真标题".to_string()),
+            "围栏外的标题应算锚点：{slugs:?}"
+        );
+        assert!(
+            !slugs.contains(&"假标题".to_string()),
+            "围栏内的 # 是示例代码，不是标题：{slugs:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_headings_get_numeric_suffixes() {
+        let slugs = heading_slugs("## x\n## x\n## x\n");
+        assert_eq!(slugs, vec!["x", "x-1", "x-2"]);
+    }
+}
