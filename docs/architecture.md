@@ -385,7 +385,7 @@ FSRS（fsrs.rs + scheduler.rs）：
 ### 7.5 ui
 
 - 渲染入口 ui::render：终端过小检查 -> 铺背景 -> 按 Screen 分发 -> 弹层遮罩 -> 按固定顺序画弹层。
-- 每个页面都遵循同一模式：layout(area, ...) 计算 Rect，render() 与 targets() 共用同一份布局；滚动位置也来自 App 状态，因此绘制位置与可点击位置不会漂移。tests/ui_snapshots.rs 的 mouse_target_rects_match_rendered_text 守护这一点。
+- 每个页面都遵循同一模式：layout(area, ...) 计算 Rect，render() 与 targets() 共用同一份布局；滚动位置也来自 App 状态，因此绘制位置与可点击位置不会漂移。tests/ui_matrix.rs 的表驱动矩阵守护这一点：13 个页面 × {60×20, 80×24, 100×30, 120×40, 160×50} 与 7 种弹层 × {60×20, 100×30, 120×40}，逐条断言目标矩形在画面内、且矩形范围内确实画着文字（逐列读缓冲区，CJK 续接列按空格处理）。tests/ui_snapshots.rs 另有主页两个目标的语义断言（命中行含按钮文案）。
 - 外壳：宽屏侧栏、窄屏顶栏、底栏 Toast / 快捷键提示 / 版本号；布局函数与命中函数共用 ShellLayout。
 - 键盘焦点：FocusId 三态（Nav / Content / Page）；宽屏两栏（导航栏 ↔ 内容区），窄屏顶栏横向导航；主页内容区按视觉行带移动；高亮整块使用 accent 底。
 - 大字：5x7 点阵，每两个纵向像素合并进一个终端单元；空间足够时 2 倍放大；遮罩用空心方框；非 ASCII 回退普通文本。

@@ -52,7 +52,7 @@ typewords-tui 是从上游 [TypeWords](https://github.com/zyronon/TypeWords)（N
 必须保持的不变量：
 
 - **状态只在 app 层改**。非练习键位 / 鼠标 / 集成测试经 `Action` → `App::apply_action`；练习页键盘走 `App::on_practice_key` → `TypingEngine`/`PracticeSession`（最高频路径，不经过 Action）；启动与 `App::on_tick` 也直接改状态。新增非练习交互 = `action.rs` 加动作 + `keymap.rs`/`hit.rs` 映射 + `apply_action` 实现。
-- **同一份布局同时服务绘制与命中**。每个页面的 `layout()` 结果同时给 `render()` 和 `targets()`；新增可点击区域必须在 `targets()` 注册，`tests/ui_snapshots.rs` 的 `mouse_target_rects_match_rendered_text` 会校验二者不漂移。
+- **同一份布局同时服务绘制与命中**。每个页面的 `layout()` 结果同时给 `render()` 和 `targets()`；新增可点击区域必须在 `targets()` 注册，`tests/ui_matrix.rs` 的覆盖矩阵（13 屏 × 5 尺寸、7 种弹层 × 3 尺寸）会校验每个命中矩形都落在画出来的内容上。
 - **颜色只来自主题的 13 个 token**（`bg/panel/element/border/fg/muted/dim/accent/accent_alt/warn/good/bad/selection`），`ui/` 中不出现硬编码颜色。
 - **单线程 + 时间戳驱动**：无 async 运行时、无线程、无 `unsafe`；除音频子进程外不启动子进程，默认不联网（可选有道发音除外）。计时、Toast 过期、定时保存都在 `on_tick(now)` 中按时间戳推进——测试直接注入 `now`，**不要 sleep**。
 - 终端下限 60 × 20；`< 100` 列切窄屏顶栏，`>= 120` 列侧栏 26 列。CJK 宽度一律用 `unicode-width` 计算，折行 / 截断 / 命中区域共用同一套宽度。
