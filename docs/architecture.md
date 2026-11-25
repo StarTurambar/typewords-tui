@@ -71,7 +71,7 @@ typewords-tui 是上游 [TypeWords](https://github.com/zyronon/TypeWords)（Nuxt
 | domain | src/domain/ | 与终端无关的类型、词库、今日任务、FSRS、流程、键入、会话、文章、统计 | 不依赖 app / ui / store / theme，也不引入终端相关 crate；tests/layering.rs 守护 |
 | store | src/store/ | 5 份 JSON 存档的读写、版本校验、损坏隔离 | 依赖 domain 与 fs |
 | theme | src/theme/ | 主题模型、6 套内置主题、用户主题加载与校验 | 不依赖 app / ui，也不引入终端相关 crate；tests/layering.rs 守护 |
-| fs | src/fs.rs | 原子写（唯一临时名 + fsync + rename）与数据目录锁 | 只依赖 std；domain 与 store 共用，避免两层成环 |
+| fs | src/fs.rs | 原子写（唯一临时名 + fsync + rename）与数据目录锁 | 不依赖 domain / store，避免两层成环；两层共用它 |
 | app | src/app/ | App 状态机、Action、键鼠映射、焦点、事件循环、保存时机 | 依赖 domain / store / bootstrap / cli / paths；渲染入口调用 ui |
 | ui | src/ui/ | ratatui 布局与绘制、token → Color、鼠标命中 | 只读 App 与 domain 数据，不修改状态 |
 | audio | src/audio/ | 终端响铃、系统 TTS、有道下载与外部播放器 | 只依赖 domain 的设置与 logging；子进程不阻塞事件循环 |
@@ -278,7 +278,7 @@ App 是唯一的状态持有者。输入分两条路径：
 | PracticeFlowCursor | camelCase | loop_range 序列化为 loop |
 | PracticeCacheCompact | camelCase | 词表以单词字符串保存 |
 
-常量（constants.rs）：GROUP_SIZE = 7、CURRENT_FLOW_VERSION = 6、三本系统词典 id（wordCollect / wordWrong / wordKnown）、SIMPLE_WORDS（42 个）、DEFAULT_FSRS_W（21 个）、DICT_STATE_VERSION = 4、SETTING_VERSION = 23、PRACTICE_CACHE_VERSION = 2。
+常量在 constants.rs：流程的 GROUP_SIZE 与 CURRENT_FLOW_VERSION、三本系统词典 id、SIMPLE_WORDS、DEFAULT_FSRS_W，以及各存档的版本号——数值以文件为准；改版本号前先看 persistence.md 的兼容策略。
 
 词库目录（catalog.rs）：
 

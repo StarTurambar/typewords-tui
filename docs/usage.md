@@ -72,7 +72,7 @@ bash scripts/package.sh               # Linux / macOS 本地打同结构的 tar.
 | Linux | `$XDG_DATA_HOME/typewords-tui`，缺省 `~/.local/share/typewords-tui` |
 | macOS | `~/Library/Application Support/typewords-tui` |
 
-首次运行自动创建目录并写入 5 份存档：`dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）、`setting.json`（设置）、`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）、`flows.json`（自建流程），另有 `themes/`、`dicts/`、`list/`，以及运行日志与崩溃报告的 `logs/`（不是存档，删了不影响学习进度）；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-dict` / `tw export-web` 只读，TUI 运行时也能用。
+首次运行自动创建目录；退出时写入 `dict.json`（词典、学习进度、FSRS 卡片、三本系统词典与统计）与 `setting.json`（设置），`practice-word.json`（单词断点缓存）、`practice-article.json`（文章跟打断点）与 `flows.json`（自建流程）在产生对应数据时才出现。另有 `themes/`、`dicts/`、`list/`，以及运行日志与崩溃报告的 `logs/`（不是存档，删了不影响学习进度）；字段与版本见 [存档与数据格式](persistence.md)。没有存档时使用默认设置并自动选择内置 CET-4，退出程序在主页按 `q` 并确认。写入口（TUI、`tw task`、`tw import-dict`、`tw import-web`）启动时对 `<home>/.tw.lock` 取排他锁：同一个数据目录同时只允许一个写实例，第二个实例直接报错退出，而不是两边互相覆盖存档；`tw doctor` / `tw export-dict` / `tw export-web` 只读，TUI 运行时也能用。
 
 ### 升级与版本兼容
 
